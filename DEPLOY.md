@@ -10,8 +10,8 @@
 ### 2.1. Dosyaları Sunucuya Yükleyin
 ```bash
 # Zip dosyasını sunucuya yükleyin ve açın
-unzip reha_api_production.zip
-cd reha_api
+unzip vitality_api_production.zip
+cd vitality_api
 ```
 
 ### 2.2. Environment Dosyası Oluşturun
@@ -81,7 +81,7 @@ npm install -g pm2
 
 #### PM2 ile Başlatma
 ```bash
-pm2 start npm --name "reha-api" -- start
+pm2 start npm --name "vitality-api" -- start
 ```
 
 #### PM2 Komutları
@@ -90,13 +90,13 @@ pm2 start npm --name "reha-api" -- start
 pm2 status
 
 # Logları görüntüle
-pm2 logs reha-api
+pm2 logs vitality-api
 
 # Yeniden başlat
-pm2 restart reha-api
+pm2 restart vitality-api
 
 # Durdur
-pm2 stop reha-api
+pm2 stop vitality-api
 
 # Otomatik başlatma (sunucu yeniden başladığında)
 pm2 startup
@@ -105,7 +105,7 @@ pm2 save
 
 ### 3.3. Nginx Reverse Proxy (Opsiyonel)
 
-Eğer Nginx kullanıyorsanız, `/etc/nginx/sites-available/reha-api` dosyası oluşturun:
+Eğer Nginx kullanıyorsanız, `/etc/nginx/sites-available/vitality-api` dosyası oluşturun:
 
 ```nginx
 server {
@@ -127,7 +127,7 @@ server {
 
 Sonra:
 ```bash
-sudo ln -s /etc/nginx/sites-available/reha-api /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/vitality-api /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -158,7 +158,7 @@ netstat -tulpn | grep 8080
 ### Logları kontrol et
 ```bash
 # PM2 logları
-pm2 logs reha-api
+pm2 logs vitality-api
 
 # Veya direkt çalıştırıyorsanız terminal çıktısını kontrol edin
 ```
