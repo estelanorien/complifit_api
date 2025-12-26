@@ -29,37 +29,100 @@ export async function adminRoutes(app: FastifyInstance) {
     const body = assetGenSchema.parse(req.body || {});
     const { mode, prompt, key, status, movementId } = body;
 
-    const model = mode === 'video' ? 'models/gemini-2.5-flash' : 'models/gemini-2.5-flash-image';
-    const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
-
     let value: string | null = null;
     try {
-      const res = await fetch(genEndpoint, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-goog-api-key': env.geminiApiKey
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }]}]
-        })
-      });
-      if (!res.ok) {
-        const errorText = await res.text();
-        const isProduction = process.env.NODE_ENV === 'production';
-        throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
-      }
-      const data: any = await res.json();
-
       if (mode === 'image') {
+        // Gemini'de image generation için doğru model: gemini-2.0-flash-exp veya gemini-1.5-flash
+        // Image generation için generationConfig ile image generation özelliği aktif edilmeli
+        const model = 'models/gemini-2.0-flash-exp';
+        const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
+        
+        const res = await fetch(genEndpoint, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-goog-api-key': env.geminiApiKey
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }]}],
+            generationConfig: {
+              responseMimeType: 'image/png'
+            }
+          })
+        });
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          const isProduction = process.env.NODE_ENV === 'production';
+          req.log?.error({ error: errorText, status: res.status });
+          throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
+        }
+        
+        const data: any = await res.json();
         const parts = data?.candidates?.[0]?.content?.parts || [];
         const inline = parts.find((p: any) => p.inlineData?.data);
-        if (inline?.inlineData?.data) value = `data:image/png;base64,${inline.inlineData.data}`;
+        if (inline?.inlineData?.data) {
+          value = `data:image/png;base64,${inline.inlineData.data}`;
+        } else {
+          // Fallback: Eğer inline data yoksa, text response'dan base64 çıkarmayı dene
+          const textPart = parts.find((p: any) => p.text);
+          if (textPart?.text) {
+            // Base64 string olabilir
+            const base64Match = textPart.text.match(/data:image\/[^;]+;base64,([^\s]+)/);
+            if (base64Match) {
+              value = base64Match[0];
+            }
+          }
+        }
       } else if (mode === 'json') {
+        const model = 'models/gemini-2.0-flash-exp';
+        const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
+        
+        const res = await fetch(genEndpoint, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-goog-api-key': env.geminiApiKey
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }]}]
+          })
+        });
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          const isProduction = process.env.NODE_ENV === 'production';
+          req.log?.error({ error: errorText, status: res.status });
+          throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
+        }
+        
+        const data: any = await res.json();
         const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
         value = text;
       } else {
         // video placeholder: return raw text
+        const model = 'models/gemini-2.0-flash-exp';
+        const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
+        
+        const res = await fetch(genEndpoint, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-goog-api-key': env.geminiApiKey
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }]}]
+          })
+        });
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          const isProduction = process.env.NODE_ENV === 'production';
+          req.log?.error({ error: errorText, status: res.status });
+          throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
+        }
+        
+        const data: any = await res.json();
         const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
         value = text;
       }
@@ -118,7 +181,7 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // Get all movements (exercises and meals) from database
-  app.get('/admin/movements', { preHandler: adminGuard }, async () => {
+  app.get('/admin/movements', { preHandler: adminGuard }, async (req) => {
     try {
       // Helper function to normalize name to movement_id format (without prefix, frontend will add ex_ or meal_)
       // Matches frontend normalizeKey logic: sorts words for consistency
@@ -130,37 +193,89 @@ export async function adminRoutes(app: FastifyInstance) {
         return words.join('_');
       };
 
-      // Get unique exercise names from training_exercises table
-      const exerciseRows = await pool.query(
-        `SELECT DISTINCT name
-         FROM training_exercises
-         WHERE name IS NOT NULL AND name != ''
-         ORDER BY name`
-      );
+      const exerciseSet = new Set<string>();
+      const mealSet = new Set<string>();
 
-      // Get unique meal names from meals table
-      const mealRows = await pool.query(
-        `SELECT DISTINCT name
-         FROM meals
-         WHERE name IS NOT NULL AND name != ''
-         ORDER BY name`
-      );
+      // 1. Get unique exercise names from training_exercises table
+      try {
+        const exerciseRows = await pool.query(
+          `SELECT DISTINCT name
+           FROM training_exercises
+           WHERE name IS NOT NULL AND name != ''
+           ORDER BY name`
+        );
+        exerciseRows.rows.forEach((row: any) => {
+          if (row.name) exerciseSet.add(row.name);
+        });
+      } catch (e: any) {
+        req.log?.warn({ error: 'Failed to fetch from training_exercises', message: e.message });
+      }
 
-      const exercises = exerciseRows.rows.map((row: any) => {
-        const name = row.name;
+      // 2. Get unique meal names from meals table
+      try {
+        const mealRows = await pool.query(
+          `SELECT DISTINCT name
+           FROM meals
+           WHERE name IS NOT NULL AND name != ''
+           ORDER BY name`
+        );
+        mealRows.rows.forEach((row: any) => {
+          if (row.name) mealSet.add(row.name);
+        });
+      } catch (e: any) {
+        req.log?.warn({ error: 'Failed to fetch from meals', message: e.message });
+      }
+
+      // 3. Also extract from user_profiles (current plans) as fallback
+      try {
+        const profileRows = await pool.query(
+          `SELECT profile_data FROM user_profiles WHERE profile_data IS NOT NULL`
+        );
+        
+        for (const row of profileRows.rows) {
+          const profile = row.profile_data || {};
+          
+          // Extract exercises from currentTrainingProgram
+          if (profile.currentTrainingProgram?.schedule) {
+            for (const day of profile.currentTrainingProgram.schedule) {
+              if (Array.isArray(day.exercises)) {
+                for (const ex of day.exercises) {
+                  if (ex.name) exerciseSet.add(ex.name);
+                }
+              }
+            }
+          }
+          
+          // Extract meals from currentMealPlan
+          if (profile.currentMealPlan?.days) {
+            for (const day of profile.currentMealPlan.days) {
+              if (Array.isArray(day.meals)) {
+                for (const meal of day.meals) {
+                  const mealName = meal.recipe?.name || meal.name;
+                  if (mealName) mealSet.add(mealName);
+                }
+              }
+            }
+          }
+        }
+      } catch (e: any) {
+        req.log?.warn({ error: 'Failed to fetch from user_profiles', message: e.message });
+      }
+
+      // Convert sets to arrays and create response
+      const exercises = Array.from(exerciseSet).map((name) => {
         const movementId = normalizeToMovementId(name);
         return { id: movementId, name, movementId };
-      });
+      }).sort((a, b) => a.name.localeCompare(b.name));
 
-      const meals = mealRows.rows.map((row: any) => {
-        const name = row.name;
+      const meals = Array.from(mealSet).map((name) => {
         const movementId = normalizeToMovementId(name);
         return { id: movementId, name, movementId };
-      });
+      }).sort((a, b) => a.name.localeCompare(b.name));
 
       return { exercises, meals };
     } catch (e: any) {
-      console.error('admin movements fetch failed', e);
+      req.log?.error({ error: 'admin movements fetch failed', message: e.message, stack: e.stack });
       return { exercises: [], meals: [] };
     }
   });

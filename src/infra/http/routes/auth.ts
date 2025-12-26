@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AuthService } from '../../../application/services/authService';
 import { authGuard } from '../hooks/auth';
+import { ValidationError, ConflictError, AuthenticationError } from '../middleware/errors';
 
 const auth = new AuthService();
 
@@ -16,13 +17,23 @@ export async function authRoutes(app: FastifyInstance) {
       }).parse(req.body);
       
       const { user, token } = await auth.signUp(body.email, body.password, body.fullName, body.username);
+      
+      req.log.info({
+        type: 'user_signup',
+        requestId: (req as any).requestId,
+        userId: user.id,
+        email: user.email,
+      });
+      
       return reply.send({ user, token });
     } catch (e: any) {
       if (e instanceof z.ZodError) {
-        return reply.status(400).send({ error: 'Validation failed', details: e.errors });
+        throw new ValidationError('Validation failed', e);
       }
-      console.error('Signup error', e);
-      return reply.status(500).send({ error: e.message || 'Signup failed' });
+      if (e.message?.includes('already exists')) {
+        throw new ConflictError('Email or username already exists');
+      }
+      throw e; // Let error handler deal with it
     }
   });
 
@@ -35,17 +46,31 @@ export async function authRoutes(app: FastifyInstance) {
       }).parse(req.body);
       
       const { user, token } = await auth.signIn(body.email, body.password);
+      
+      req.log.info({
+        type: 'user_login',
+        requestId: (req as any).requestId,
+        userId: user.id,
+        email: user.email,
+        ip: req.ip,
+      });
+      
       return reply.send({ user, token });
     } catch (e: any) {
       if (e instanceof z.ZodError) {
-        return reply.status(400).send({ error: 'Validation failed', details: e.errors });
+        throw new ValidationError('Validation failed', e);
       }
       // Don't reveal if email/username exists
       if (e.message?.includes('Invalid credentials')) {
-        return reply.status(401).send({ error: 'Invalid credentials' });
+        req.log.warn({
+          type: 'login_failed',
+          requestId: (req as any).requestId,
+          email: (req.body as any)?.email,
+          ip: req.ip,
+        });
+        throw new AuthenticationError('Invalid credentials');
       }
-      console.error('Login error', e);
-      return reply.status(500).send({ error: 'Login failed' });
+      throw e; // Let error handler deal with it
     }
   });
 

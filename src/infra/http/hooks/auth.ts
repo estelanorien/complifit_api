@@ -29,14 +29,54 @@ export async function adminGuard(req: FastifyRequest, reply: FastifyReply) {
       return reply.status(403).send({ error: 'Forbidden' });
     }
 
-    // Check user role from database
-    const { rows } = await pool.query(
-      `SELECT role FROM users WHERE id = $1`,
-      [user.userId]
-    );
+    // Hardcoded admin email listesi (fallback)
+    const adminEmails = ['mehmetcandiri@gmail.com', 'rmkocatas@gmail.com'];
+    
+    // Check user email from database first
+    let userEmail: string | null = null;
+    let userRole = 'user';
+    
+    try {
+      const { rows } = await pool.query(
+        `SELECT email, role FROM users WHERE id = $1`,
+        [user.userId]
+      );
+      
+      if (rows.length > 0) {
+        userEmail = rows[0].email;
+        userRole = rows[0].role || 'user';
+      }
+    } catch (e: any) {
+      // If role column doesn't exist, check profile_data instead
+      if (e.code === '42703') { // PostgreSQL error code for undefined column
+        try {
+          const { rows } = await pool.query(
+            `SELECT email FROM users WHERE id = $1`,
+            [user.userId]
+          );
+          userEmail = rows[0]?.email || null;
+          
+          // Check profile_data for role
+          const profileRows = await pool.query(
+            `SELECT profile_data FROM user_profiles WHERE user_id = $1`,
+            [user.userId]
+          );
+          const profileData = profileRows.rows[0]?.profile_data || {};
+          userRole = profileData.role || 'user';
+        } catch (profileError) {
+          // If profile doesn't exist either, default to 'user'
+          userRole = 'user';
+        }
+      } else {
+        throw e;
+      }
+    }
 
-    const userRole = rows[0]?.role || 'user';
-    if (userRole !== 'admin' && userRole !== 'owner') {
+    // Check if user is in hardcoded admin list OR has admin/owner role
+    const isHardcodedAdmin = userEmail && adminEmails.includes(userEmail);
+    const hasAdminRole = userRole === 'admin' || userRole === 'owner';
+    
+    if (!isHardcodedAdmin && !hasAdminRole) {
       return reply.status(403).send({ error: 'Forbidden' });
     }
   } catch (e: any) {

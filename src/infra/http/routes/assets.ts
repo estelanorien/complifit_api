@@ -28,12 +28,21 @@ export async function assetsRoutes(app: FastifyInstance) {
 
   app.get('/assets/:key', { preHandler: authGuard }, async (req, reply) => {
     const { key } = req.params as any;
+    const decodedKey = decodeURIComponent(key);
     const { rows } = await pool.query(
-      `SELECT value FROM cached_assets WHERE key=$1 AND status IN ('active','auto') LIMIT 1`,
-      [key]
+      `SELECT value, asset_type FROM cached_assets WHERE key=$1 AND status IN ('active','auto') LIMIT 1`,
+      [decodedKey]
     );
-    if (rows.length === 0) return reply.send(null);
-    return rows[0].value;
+    if (rows.length === 0) {
+      return reply.status(404).send(null);
+    }
+    
+    const value = rows[0].value;
+    const assetType = rows[0].asset_type;
+    
+    // Return as JSON string to maintain compatibility with frontend
+    // Frontend expects string | null
+    return reply.send(value);
   });
 
   app.post('/assets', { preHandler: authGuard }, async (req, reply) => {

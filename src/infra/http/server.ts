@@ -7,7 +7,6 @@ import { socialRoutes } from './routes/social';
 import { restaurantRoutes } from './routes/restaurants';
 import { logsRoutes } from './routes/logs';
 import cors from '@fastify/cors';
-import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
 import { challengesRoutes } from './routes/challenges';
 import { messagesRoutes } from './routes/messages';
@@ -29,14 +28,40 @@ import { negotiationRoutes } from './routes/negotiations';
 import { lookupRoutes } from './routes/lookups';
 import { locationRoutes } from './routes/location';
 import { requestLogger, responseLogger, errorLogger } from './hooks/requestLogger';
+import { requestIdMiddleware } from './middleware/requestId';
+import { errorHandler } from './middleware/errors';
+import { 
+  registerGlobalRateLimit, 
+  registerAuthRateLimit, 
+  registerAiRateLimit, 
+  registerAdminRateLimit 
+} from './middleware/rateLimit';
 
 import { env } from '../../config/env';
 
 export function buildServer() {
   const app = Fastify({
-    logger: true,
+    logger: {
+      level: env.nodeEnv === 'production' ? 'info' : 'debug',
+      serializers: {
+        req: (req) => ({
+          method: req.method,
+          url: req.url,
+          headers: {
+            host: req.headers.host,
+            'user-agent': req.headers['user-agent'],
+          },
+        }),
+        res: (res) => ({
+          statusCode: res.statusCode,
+        }),
+      },
+    },
     bodyLimit: 10 * 1024 * 1024,
-    requestTimeout: 30000 // 30 second timeout
+    requestTimeout: 30000, // 30 second timeout
+    requestIdHeader: 'x-request-id', // Use custom header for request ID
+    requestIdLogLabel: 'requestId',
+    disableRequestLogging: false,
   });
 
   // CORS configuration - production-safe
@@ -47,7 +72,7 @@ export function buildServer() {
         credentials: true
       }
     : {
-        origin: true, // Allow all in development
+        origin: ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5174'],
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         credentials: true
       };
@@ -72,29 +97,42 @@ export function buildServer() {
 
   app.register(cors, corsOptions);
 
-  // Rate limiting - protect against abuse
-  app.register(rateLimit, {
-    max: env.nodeEnv === 'production' ? 100 : 1000, // requests per timeWindow
-    timeWindow: '1 minute',
-    errorResponseBuilder: (req, context) => {
-      return {
-        error: 'Too many requests',
-        message: `Rate limit exceeded. Max ${context.max} requests per ${context.timeWindow}.`,
-        retryAfter: Math.round(context.ttl / 1000),
-      };
-    },
-    // Skip rate limiting for health checks
-    skip: (req) => req.url?.startsWith('/api/health'),
-  });
+  // Request ID middleware - must be registered early
+  app.addHook('onRequest', requestIdMiddleware);
 
-  // Register request logger hooks
+  // Global rate limiting
+  registerGlobalRateLimit(app);
+
+  // Register request logger hooks (after request ID middleware)
   app.addHook('onRequest', requestLogger);
   app.addHook('onResponse', responseLogger);
   app.addHook('onError', errorLogger);
 
-  // Register routes
+  // Set error handler
+  app.setErrorHandler(errorHandler);
+
+  // Register routes with specific rate limiting
   app.register(healthRoutes, { prefix: '/api' });
-  app.register(authRoutes, { prefix: '/api' });
+  
+  // Auth routes with strict rate limiting
+  app.register(async function (app) {
+    registerAuthRateLimit(app);
+    app.register(authRoutes);
+  }, { prefix: '/api' });
+
+  // AI routes with cost-aware rate limiting
+  app.register(async function (app) {
+    registerAiRateLimit(app);
+    app.register(aiRoutes);
+  }, { prefix: '/api' });
+
+  // Admin routes with admin rate limiting
+  app.register(async function (app) {
+    registerAdminRateLimit(app);
+    app.register(adminRoutes);
+  }, { prefix: '/api' });
+
+  // Other routes (use global rate limiting)
   app.register(profileRoutes, { prefix: '/api' });
   app.register(socialRoutes, { prefix: '/api' });
   app.register(restaurantRoutes, { prefix: '/api' });
@@ -117,8 +155,6 @@ export function buildServer() {
   app.register(negotiationRoutes, { prefix: '/api' });
   app.register(lookupRoutes, { prefix: '/api' });
   app.register(locationRoutes, { prefix: '/api' });
-  app.register(aiRoutes, { prefix: '/api' });
-  app.register(adminRoutes, { prefix: '/api' });
 
   return app;
 }
