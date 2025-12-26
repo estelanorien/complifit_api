@@ -44,7 +44,7 @@ export async function plansRoutes(app: FastifyInstance) {
           `INSERT INTO training_days(id, training_program_id, day_index, focus)
            VALUES($1,$2,$3,$4)
            ON CONFLICT (training_program_id, day_index) DO NOTHING`,
-          [dayId, trainingId, i, day.focus || day.day || `Day ${i+1}`]
+          [dayId, trainingId, i, day.focus || day.day || `Day ${i + 1}`]
         );
         if (Array.isArray(day.exercises)) {
           for (const ex of day.exercises) {
@@ -320,6 +320,8 @@ export async function plansRoutes(app: FastifyInstance) {
       calorieLogic += ` DEBT NOTE: Prioritize filling, low-calorie density foods to help user adhere to deficit repayment.`;
     } else if (settings.debtStrategy === 'hybrid') {
       calorieLogic += ` DEBT NOTE: Hybrid repayment. Moderate deficit active. Ensure high protein to spare muscle.`;
+    } else if (settings.debtStrategy === 'ignore') {
+      calorieLogic += ` DEBT NOTE: AMNESTY DECLARED. Ignore any calculated caloric debt. Plan strictly for maintenance/target calories. Do NOT reduce intake for debt repayment.`;
     }
 
     let mealStructurePrompt = `STRUCTURE: ${mealStructure}.`;
@@ -336,6 +338,8 @@ export async function plansRoutes(app: FastifyInstance) {
       debtBurnerPrompt = `CRITICAL: Add a "Debt Burner" cardio finisher (15 mins low intensity) to EVERY workout session to repay caloric debt.`;
     } else if (settings.debtStrategy === 'hybrid') {
       debtBurnerPrompt = `CRITICAL: Add a "Debt Finisher" cardio block (10 mins) to EVERY workout session.`;
+    } else {
+      debtBurnerPrompt = `Standard workout structure. No debt repayment obligations.`;
     }
 
     const trainingPrompt = `
@@ -348,19 +352,24 @@ export async function plansRoutes(app: FastifyInstance) {
     ${safetyPrompt}
     ${debtBurnerPrompt}
     
+    IMPORTANT: Distribute the ${trainingFrequency} workout days evenly across the 7 days (e.g. Day 1: Workout, Day 2: Workout, Day 3: Rest). Do NOT schedule them all consecutively unless requested. Mark rest days clearly locally but in the output array only include workout days if you prefer, or include Rest days with empty exercises. Ideally, return exactly 7 items in the schedule array, marking Rest days clearly.
+    
     Return JSON with structure: { "name": "...", "analysis": "...", "schedule": [{"day": "Day 1", "focus": "...", "exercises": [{"name": "...", "sets": "3", "reps": "10", "notes": "", "drillContext": ""}]}] }
     Language: ${lang}
     `;
 
     const nutritionPrompt = `
-    PHASE B (NUTRITION - 7 DAY SEED).
+    PHASE B (NUTRITION - FULL 7 DAY PLAN).
     Goals: ${settings.nutritionGoal || detailedTrainingGoals}.
     Diet: ${dietType}. Cuisines: ${cuisines.join(', ') || "Global"}.
     ${chefStylePrompt}
     ${mealStructurePrompt}
     ${calorieLogic}
+    DEBT NOTE INSTRUCTION: If user is in debt, simply adjust the calories/macros. Do NOT add repetitive text like "Pledge: ..." or "Debt reduction..." to every meal description. Just modify the food itself.
     Excludes: ${excludes.join(', ') || "None"}.
     Language: ${lang}.
+    
+    IMPORTANT: You MUST generate a full UNIQUE meal plan for ALL 7 DAYS. Do not stop at Day 1. The 'days' array must have 7 items.
     
     OUTPUT JSON ONLY: { "name": "...", "overview": "...", "days": [{"day": "Day 1", "meals": [{"type": "breakfast", "recipe": {"name": "Name", "calories": 500, "time": "15 min", "ingredients": [], "instructions": []}}]}] }
     `;
@@ -368,11 +377,11 @@ export async function plansRoutes(app: FastifyInstance) {
     const callGemini = async (prompt: string) => {
       const res = await fetch(genEndpoint, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': apiKey
         },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }]}] })
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       });
       if (!res.ok) {
         const errorText = await res.text();
@@ -446,11 +455,11 @@ export async function plansRoutes(app: FastifyInstance) {
     const callGemini = async () => {
       const res = await fetch(genEndpoint, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': env.geminiApiKey
         },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }]}] })
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       });
       if (!res.ok) {
         const errorText = await res.text();
@@ -466,7 +475,7 @@ export async function plansRoutes(app: FastifyInstance) {
     try {
       await client.query('SET statement_timeout = 30000'); // 30 seconds timeout
       await client.query('BEGIN');
-      
+
       const text = await callGemini();
       const meal = JSON.parse(cleanGeminiJson(text) || '{}');
       if (!meal?.recipe?.name) {
@@ -500,7 +509,7 @@ export async function plansRoutes(app: FastifyInstance) {
       await client.query('COMMIT');
       return reply.send({ meal });
     } catch (e: any) {
-      await client.query('ROLLBACK').catch(() => {}); // Ignore if already rolled back
+      await client.query('ROLLBACK').catch(() => { }); // Ignore if already rolled back
       const isProduction = process.env.NODE_ENV === 'production';
       console.error("reroll meal failed", e);
       return reply.status(500).send({ error: isProduction ? 'Meal reroll service unavailable' : (e.message || 'Reroll meal failed') });
@@ -556,11 +565,11 @@ export async function plansRoutes(app: FastifyInstance) {
     const callGemini = async () => {
       const res = await fetch(genEndpoint, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': env.geminiApiKey
         },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }]}] })
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       });
       if (!res.ok) {
         const errorText = await res.text();
@@ -576,7 +585,7 @@ export async function plansRoutes(app: FastifyInstance) {
     try {
       await client.query('SET statement_timeout = 30000'); // 30 seconds timeout
       await client.query('BEGIN');
-      
+
       const text = await callGemini();
       const ex = JSON.parse(cleanGeminiJson(text) || '{}');
       if (!ex?.name) {
@@ -602,7 +611,7 @@ export async function plansRoutes(app: FastifyInstance) {
       await client.query('COMMIT');
       return reply.send({ exercise: ex });
     } catch (e: any) {
-      await client.query('ROLLBACK').catch(() => {}); // Ignore if already rolled back
+      await client.query('ROLLBACK').catch(() => { }); // Ignore if already rolled back
       const isProduction = process.env.NODE_ENV === 'production';
       console.error("reroll exercise failed", e);
       return reply.status(500).send({ error: isProduction ? 'Exercise reroll service unavailable' : (e.message || 'Reroll exercise failed') });

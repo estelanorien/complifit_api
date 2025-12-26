@@ -288,8 +288,9 @@ export async function guardianRoutes(app: FastifyInstance) {
       lang: z.string().default('en')
     }).parse(req.body);
 
-    const { surplus, profile, lang } = body;
+    const { surplus, profile, lang, nextMealName, nextMealCalories } = body;
     const prompt = `ACT AS GUARDIAN AI. User has ${surplus}kcal surplus. Goal: ${profile.primaryGoal}. 
+    Next Meal Context: ${nextMealName ? `${nextMealName} (~${nextMealCalories} cal)` : "Unknown"}.
     Generate 4 strategies (athlete, chef, hybrid, banker). Return JSON { strategies: { athlete: {...}, ... } }. Language: ${lang}.`;
 
     try {
