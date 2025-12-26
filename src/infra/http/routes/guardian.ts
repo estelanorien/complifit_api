@@ -14,6 +14,40 @@ const cleanGeminiJson = (text: string): string => {
   return cleaned.trim();
 };
 
+const GEMINI_MODEL = 'models/gemini-2.5-flash';
+const GEN_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/${GEMINI_MODEL}:generateContent`;
+
+// Helper to find meal ID in profile plan
+const findMealIdOrName = (profileData: any, dateStr: string, targetName: string): string | null => {
+  if (!profileData.currentMealPlan || !profileData.mealPlanStartDate) return null;
+
+  try {
+    const startDate = new Date(profileData.mealPlanStartDate);
+    const targetDate = new Date(dateStr);
+    const dayDiff = Math.floor((targetDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+
+    // Check if day index is valid (roughly) - assuming weekly rotation or linear
+    // For simple weekly plan:
+    const dayIndex = dayDiff >= 0 ? dayDiff % 7 : -1;
+
+    if (dayIndex >= 0 && profileData.currentMealPlan.days[dayIndex]) {
+      const dayMeals = profileData.currentMealPlan.days[dayIndex].meals;
+      // Search by type or name fuzzy match
+      const foundIdx = dayMeals.findIndex((m: any) =>
+        (m.type && m.type.toLowerCase() === targetName.toLowerCase()) ||
+        (m.name && m.name.toLowerCase().includes(targetName.toLowerCase()))
+      );
+
+      if (foundIdx >= 0) {
+        return `meal-${dayIndex}-${foundIdx}`; // ID format used in frontend
+      }
+    }
+  } catch (e) {
+    return null;
+  }
+  return null;
+};
+
 export async function guardianRoutes(app: FastifyInstance) {
   // Analyze deletion impact via Gemini
   app.post('/guardian/analyze-deletion', { preHandler: authGuard }, async (req, reply) => {
@@ -29,13 +63,13 @@ export async function guardianRoutes(app: FastifyInstance) {
       lang: z.string().default('en'),
       recentLogs: z.array(z.string()).default([]),
       tomorrowContext: z.string().default('Normal day'),
-      currentNetState: z.number().optional()
+      currentNetState: z.number().optional(),
+      availableMeals: z.array(z.string()).default([]) // New: Names of available meals today
     }).parse(req.body);
 
-    const { type, title, calories, profile, remainingItems, lang, recentLogs, tomorrowContext, currentNetState } = body;
+    const { type, title, calories, profile, remainingItems, lang, recentLogs, tomorrowContext, currentNetState, availableMeals } = body;
 
     const isDeficit = currentNetState && currentNetState < 0;
-    const isSurplus = currentNetState && currentNetState > 0;
 
     const prompt = `
     ACT AS GUARDIAN AI - A BIOLOGICAL SAFETY NET.
@@ -43,88 +77,60 @@ export async function guardianRoutes(app: FastifyInstance) {
     
     LIVE CONTEXT:
     - Primary Goal: ${profile.primaryGoal || 'maintain'}.
-    - Specific Goals: ${profile.specificGoals?.join(', ') || 'None'}.
-    - Conditions: ${profile.conditions?.join(', ') || 'None'}.
-    - Fitness Level: ${profile.fitnessLevel || 'intermediate'}.
     - Net State: ${currentNetState ? (isDeficit ? 'Deficit' : 'Surplus') + ' ' + Math.abs(currentNetState) + 'kcal' : 'Balanced'}.
     - Remaining items today: ${remainingItems}.
+    - Available Meals Later: ${availableMeals.join(', ') || 'None'}.
     - Recent Logs: ${recentLogs.join(', ') || "None"}.
     - Tomorrow: ${tomorrowContext}.
     
-    DECISION MATRIX - PROFILE-BASED REMEDY SELECTION:
+    DECISION MATRIX:
     
     1. IF DELETING MEAL:
-       A. Goal: "build_muscle" OR "muscle_gain" OR "recomposition":
-          - HIGH PRIORITY: "spread_today" - Distribute protein/carbs to remaining meals (targetMeal: "dinner", amount: ${Math.floor(calories * 0.7)})
-          - MEDIUM PRIORITY: "plug" - Replace with high-protein snack (replacement: "Protein Shake", calories: ${Math.floor(calories * 0.4)})
-          - MEDIUM PRIORITY: "bank_credit" - Save calories to Calorie Bank as credit for later use (amount: ${calories}, description: "Saved from ${title}")
-          - LOW PRIORITY: "reschedule" - Move meal to tomorrow if volume is critical
-          - Logic: Don't lose the protein/nutrients needed for hypertrophy.
+       A. Goal: "build_muscle" / "muscle_gain":
+          - PRIORITY: "spread_today" -> Distribute nutrient/cal load to another meal. Target one of: [${availableMeals.join(', ')}].
+          - PRIORITY: "bank_credit" -> Save as credit.
+          - ALERT: "reschedule" -> Move to tomorrow if protein intake is critical.
        
-       B. Goal: "lose_weight" OR "fat_loss":
-          - If already in deficit (${isDeficit ? 'YES' : 'NO'}): WARN HIGH IMPACT
-          - HIGH PRIORITY: "plug" - Small essential snack to prevent blood sugar crash (replacement: "Protein Bar", calories: ${Math.floor(calories * 0.3)})
-          - MEDIUM PRIORITY: "downshift" - Reduce next meal carbs to maintain deficit (reduction: ${Math.floor(calories * 0.4)}, targetMeal: "dinner")
-          - MEDIUM PRIORITY: "bank_credit" - Save calories to Calorie Bank as credit (amount: ${calories}, description: "Saved from ${title}")
-          - Logic: Prevent metabolic slowdown while maintaining deficit.
-       
-       C. Condition: "diabetes" OR "blood_sugar":
-          - CRITICAL: "plug" - Essential snack to stabilize (replacement: "Balanced Snack", calories: ${Math.floor(calories * 0.5)})
-          - Logic: Prevent blood sugar crash.
+       B. Goal: "lose_weight":
+          - PRIORITY: "plug" -> Suggest small snack if crash risk (e.g. low blood sugar).
+          - PRIORITY: "downshift" -> Reduce future meal (Target: [${availableMeals.join(', ')}]) to keep deficit steady.
+          - PRIORITY: "bank_credit" -> Save credit.
     
-    2. IF DELETING WORKOUT/TRAINING:
-       A. Goal: "build_muscle" OR "performance":
-          - HIGH PRIORITY: "reschedule" - Move to tomorrow or next available day (targetDate: calculate next workout day)
-          - MEDIUM PRIORITY: "bank_debt" - Track missed volume (volume: ${calories}, description: "Missed ${title}")
-          - Logic: Volume is critical for growth/performance.
-       
-       B. Goal: "lose_weight" OR "fat_loss":
-          - HIGH PRIORITY: "downshift" - Lower next meal carbs to match reduced burn (reduction: ${Math.floor(calories * 0.5)}, targetMeal: "dinner")
-          - MEDIUM PRIORITY: "bank_debt" - Track as caloric debt (volume: ${calories})
-          - Logic: Maintain caloric deficit.
-       
-       C. Fitness Level: "beginner":
-          - HIGH PRIORITY: "reschedule" - Move to tomorrow (easier to maintain consistency)
-          - Logic: Consistency over intensity for beginners.
+    2. IF DELETING WORKOUT:
+       - PRIORITY: "reschedule" -> Move to next day.
+       - PRIORITY: "bank_debt" -> Log as missed volume (pay back later).
     
-    3. ALWAYS AVAILABLE:
-       - "bank_credit" - Save to Calorie Bank as credit (for meals) or "bank_debt" (for workouts) - Store in Calorie Bank for later use
-       - "none" (Delete Anyway) - Nuclear option, accept negative impact. Mark as "Not Recommended" if impact is high.
-    
-    OUTPUT JSON (DeletionAnalysis Schema):
+    OUTPUT JSON (DeletionAnalysis):
     {
-      "isSafe": boolean (false if high impact and no good remedy),
+      "isSafe": boolean,
       "impactLevel": "low" | "medium" | "high",
-      "warning": "Clear warning message explaining biological impact in ${lang}",
+      "warning": "Explanation in ${lang}",
       "remedies": [
         {
           "id": "unique_id",
           "type": "spread_today" | "downshift" | "bank_debt" | "bank_credit" | "reschedule" | "plug" | "none",
-          "title": "User-friendly title in ${lang}",
-          "description": "Detailed explanation in ${lang}",
-          "actionLabel": "Button label in ${lang}",
+          "title": "Short title in ${lang}",
+          "description": "Explanation in ${lang}",
+          "actionLabel": "Button Label",
           "data": {
-            // For spread_today: { "targetMeal": "dinner", "amount": number }
-            // For downshift: { "reduction": number, "targetMeal": "dinner" }
-            // For bank_debt: { "volume": number, "description": "string" }
-            // For bank_credit: { "amount": number, "description": "string" }
-            // For reschedule: { "targetDate": "YYYY-MM-DD" }
-            // For plug: { "replacement": "string", "calories": number }
+            // targetMeal MUST be one of: [${availableMeals.join(', ')}] if possible.
+            // spread_today: { "targetMeal": "string", "amount": number }
+            // downshift: { "targetMeal": "string", "reduction": number }
+            // plug: { "replacement": "string", "calories": number }
+            // bank_credit: { "amount": number, "description": "string" }
+            // bank_debt: { "volume": number, "description": "string" }
           }
         }
       ]
     }
     
-    Return 2-4 remedies ordered by priority. Always include "none" as last option.
-    Language: ${lang}.
+    Return 2-4 remedies. Language: ${lang}.
     `;
 
-    const genEndpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent';
-
     try {
-      const res = await fetch(genEndpoint, {
+      const res = await fetch(GEN_ENDPOINT, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': env.geminiApiKey
         },
@@ -132,69 +138,41 @@ export async function guardianRoutes(app: FastifyInstance) {
       });
       if (!res.ok) {
         const errorText = await res.text();
-        const isProduction = process.env.NODE_ENV === 'production';
-        throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
+        throw new Error(`Gemini error ${res.status}: ${errorText}`);
       }
       const data: any = await res.json();
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
       const result = JSON.parse(cleanGeminiJson(text) || '{}');
 
-      // Ensure remedies is an array
-      if (!Array.isArray(result.remedies)) {
-        result.remedies = [];
-      }
-
-      // Fallback if no remedies
+      if (!Array.isArray(result.remedies)) result.remedies = [];
       if (result.remedies.length === 0) {
-        result.remedies = [{
-          id: 'fs_delete',
-          type: 'none',
-          title: 'Proceed',
-          description: 'Delete without changes.',
-          actionLabel: 'Delete'
-        }];
+        result.remedies = [{ id: 'fs_del', type: 'none', title: 'Proceed', description: 'Delete item.', actionLabel: 'Delete' }];
       }
-
-      // Ensure required fields
       if (!result.isSafe) result.isSafe = true;
       if (!result.impactLevel) result.impactLevel = 'low';
       if (!result.warning) result.warning = 'Confirm deletion?';
 
+      // Log action
       await pool.query(
-        `INSERT INTO guardian_actions(user_id, action_type, item_type, item_title, payload)
-         VALUES($1,$2,$3,$4,$5)`,
-        [
-          user.userId,
-          'analysis',
-          type,
-          title,
-          JSON.stringify({
-            calories,
-            result,
-            context: { remainingItems, currentNetState, tomorrowContext }
-          })
-        ]
-      ).catch((e: any) => console.error("Guardian analysis log failed", e));
+        `INSERT INTO guardian_actions(user_id, action_type, item_type, item_title, payload) VALUES($1,$2,$3,$4,$5)`,
+        [user.userId, 'analysis', type, title, JSON.stringify({ calories, result })]
+      ).catch(console.error);
 
       return reply.send(result);
     } catch (e: any) {
-      const isProduction = process.env.NODE_ENV === 'production';
-      console.error("Guardian analyze failed", e);
-      // Return safe fallback
+      console.error("Guardian analysis failed", e);
       return reply.send({
         isSafe: true,
-        impactLevel: 'low' as const,
+        impactLevel: 'low',
         warning: "Confirm deletion?",
-        remedies: [{ id: 'err_del', type: 'none' as const, title: 'Delete', description: '', actionLabel: 'Delete' }]
+        remedies: [{ id: 'err_del', type: 'none', title: 'Delete', description: '', actionLabel: 'Delete' }]
       });
     }
   });
 
-  // Apply deletion remedy (update profile with skipped items and modifications)
+  // Apply deletion remedy
   app.post('/guardian/apply-remedy', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as any).user;
-
     const body = z.object({
       remedy: z.any(),
       item: z.any(),
@@ -203,164 +181,104 @@ export async function guardianRoutes(app: FastifyInstance) {
     }).parse(req.body);
 
     const { remedy, item, date, remainingMeals } = body;
-
     const client = await pool.connect();
+
     try {
-      await client.query('SET statement_timeout = 30000'); // 30 seconds timeout
       await client.query('BEGIN');
-      
-      // Get current profile with FOR UPDATE lock
+
       const { rows } = await client.query(
         `SELECT profile_data FROM user_profiles WHERE user_id = $1 FOR UPDATE`,
         [user.userId]
       );
-
-      if (rows.length === 0) {
-        await client.query('ROLLBACK');
-        return reply.status(404).send({ error: 'Profile not found' });
-      }
+      if (rows.length === 0) throw new Error('Profile not found');
 
       const profileData = rows[0].profile_data || {};
       const skippedItems = profileData.skippedItems || [];
-      const dailyMealModifications = profileData.dailyMealModifications || {};
+      const dailyMealModifications = profileData.dailyMealModifications || {}; // Expect Record<Date, Array<ModObject>>
 
       // 1. Mark item as skipped
       const newSkipped = [...skippedItems, { id: item.id, date }];
 
-      // 2. Apply Remedy Logic
-      let newMods = { ...dailyMealModifications };
-
-      if (remedy.type === 'spread_today') {
-        // Distribute calories to remaining meals
-        const targetMeal = remedy.data?.targetMeal || 'dinner';
-        const amount = remedy.data?.amount || 0;
-        const dateKey = date;
-        if (!newMods[dateKey]) newMods[dateKey] = {};
-        if (!newMods[dateKey][targetMeal]) newMods[dateKey][targetMeal] = { calories: 0 };
-        const previousCalories = newMods[dateKey][targetMeal].calories || 0;
-        newMods[dateKey][targetMeal].calories = previousCalories + amount;
-        console.log(`[Guardian] spread_today: Adding ${amount} cal to ${targetMeal} on ${dateKey}. Total: ${newMods[dateKey][targetMeal].calories}`);
-      } else if (remedy.type === 'plug') {
-        // Add a replacement snack
-        const replacement = remedy.data?.replacement || 'Snack';
-        const replacementCalories = remedy.data?.calories || 150;
-        const dateKey = date;
-        if (!newMods[dateKey]) newMods[dateKey] = {};
-        if (!newMods[dateKey].extraMeals) newMods[dateKey].extraMeals = [];
-        newMods[dateKey].extraMeals.push({
-          name: replacement,
-          calories: replacementCalories,
-          type: 'snack',
-          reason: 'guardian_plug'
-        });
-      } else if (remedy.type === 'downshift') {
-        // Lower next meal carbs
-        const reduction = remedy.data?.reduction || 0;
-        const targetMeal = remedy.data?.targetMeal || 'dinner';
-        const dateKey = date;
-        if (!newMods[dateKey]) newMods[dateKey] = {};
-        if (!newMods[dateKey][targetMeal]) newMods[dateKey][targetMeal] = { carbs: 0 };
-        newMods[dateKey][targetMeal].carbs = (newMods[dateKey][targetMeal].carbs || 0) - reduction;
-      } else if (remedy.type === 'reschedule') {
-        // Mark for rescheduling (stored in skippedItems with reschedule flag)
-        const rescheduleDate = remedy.data?.targetDate || date;
-        // Update skipped item with reschedule info
-        const skippedItem = newSkipped[newSkipped.length - 1];
-        if (skippedItem) {
-          skippedItem.rescheduleTo = rescheduleDate;
-          skippedItem.rescheduled = true;
-        }
-        console.log(`[Guardian] reschedule: Moving item to ${rescheduleDate}`);
-      } else if (remedy.type === 'bank_credit') {
-        // Save calories to Calorie Bank as credit (for deleted meals)
-        const creditAmount = remedy.data?.amount || item.data?.recipe?.calories || item.data?.estimatedCalories || 0;
-        const description = remedy.data?.description || `Saved from ${item.title || item.name}`;
-
-        // Add to calorie bank as credit
-        await client.query(
-          `INSERT INTO calorie_transactions(user_id, type, amount, description, impact)
-           VALUES($1, $2, $3, $4, $5)`,
-          [
-            user.userId,
-            'deposit',
-            creditAmount, // Positive for credit
-            description,
-            JSON.stringify({ source: 'guardian_bank_credit', itemId: item.id, date })
-          ]
-        );
-
-        console.log(`[Guardian] bank_credit: Saved ${creditAmount} as credit`);
-      } else if (remedy.type === 'bank_debt') {
-        // Track missed volume/calories as debt
-        const itemCalories = item.data?.recipe?.calories || item.data?.estimatedCalories || 0;
-        const missedVolume = remedy.data?.volume || itemCalories || 0;
-        const description = remedy.data?.description || `Missed ${item.title || item.name}`;
-
-        // Add to calorie bank as debt
-        await client.query(
-          `INSERT INTO calorie_transactions(user_id, type, amount, description, impact)
-           VALUES($1, $2, $3, $4, $5)`,
-          [
-            user.userId,
-            'withdrawal',
-            -missedVolume, // Negative for debt
-            description,
-            JSON.stringify({ source: 'guardian_bank_debt', itemId: item.id, date })
-          ]
-        );
-
-        // Also track in profile metadata
-        if (!profileData.debtTracking) profileData.debtTracking = {};
-        if (!profileData.debtTracking[date]) profileData.debtTracking[date] = { missedVolume: 0 };
-        profileData.debtTracking[date].missedVolume += missedVolume;
-        console.log(`[Guardian] bank_debt: Tracked ${missedVolume} as debt`);
+      // 2. Apply Remedy
+      const newMods = { ...dailyMealModifications };
+      if (!newMods[date]) newMods[date] = []; // Initialize as array, or ensure it is array if exists
+      if (!Array.isArray(newMods[date])) {
+        // Migration fix: If previously it was an object, wipe it or wrap it (wipe safer to avoid type errors)
+        newMods[date] = [];
       }
 
-      // Update profile - combine all updates in one query
-      const updatedProfileData = {
-        ...profileData,
-        skippedItems: newSkipped,
-        dailyMealModifications: newMods,
-        ...(profileData.debtTracking ? { debtTracking: profileData.debtTracking } : {})
-      };
+      if (remedy.type === 'spread_today' || remedy.type === 'downshift') {
+        const targetName = remedy.data?.targetMeal || 'Dinner';
+        const calories = remedy.type === 'spread_today' ? (remedy.data?.amount || 0) : -(remedy.data?.reduction || 0);
+
+        // Find actual Meal ID from Plan
+        const mealId = findMealIdOrName(profileData, date, targetName);
+
+        if (mealId) {
+          newMods[date].push({
+            mealId: mealId,
+            calories: calories,
+            note: `Guardian: ${remedy.title}`
+          });
+          console.log(`[Guardian] Applied ${remedy.type} to ${mealId}: ${calories} cal`);
+        } else {
+          console.warn(`[Guardian] Could not find meal ID for name '${targetName}'.`);
+        }
+
+      } else if (remedy.type === 'plug') {
+        const replacement = remedy.data?.replacement || 'Snack';
+        const cal = remedy.data?.calories || 100;
+
+        // Try to find a snack slot
+        const snackId = findMealIdOrName(profileData, date, 'snack');
+        if (snackId) {
+          newMods[date].push({
+            mealId: snackId,
+            calories: cal,
+            note: `Guardian Plug: ${replacement}`
+          });
+        }
+      } else if (remedy.type === 'reschedule') {
+        const targetDate = remedy.data?.targetDate || date;
+        const lastSkip = newSkipped[newSkipped.length - 1];
+        if (lastSkip) {
+          lastSkip.rescheduleTo = targetDate;
+          lastSkip.rescheduled = true;
+        }
+      } else if (remedy.type === 'bank_credit') {
+        const amount = remedy.data?.amount || item.data?.recipe?.calories || item.data?.estimatedCalories || 0;
+        await client.query(`INSERT INTO calorie_transactions(user_id, type, amount, description, impact) VALUES($1,$2,$3,$4,$5)`,
+          [user.userId, 'deposit', amount, remedy.data?.description || 'Saved calories', JSON.stringify({ source: 'guardian', itemId: item.id })]);
+      } else if (remedy.type === 'bank_debt') {
+        const volume = remedy.data?.volume || item.data?.recipe?.calories || item.data?.estimatedCalories || 0;
+        await client.query(`INSERT INTO calorie_transactions(user_id, type, amount, description, impact) VALUES($1,$2,$3,$4,$5)`,
+          [user.userId, 'withdrawal', -volume, remedy.data?.description || 'Missed workout', JSON.stringify({ source: 'guardian', itemId: item.id })]);
+      }
 
       await client.query(
-        `UPDATE user_profiles
-         SET profile_data = $1::jsonb,
-             updated_at = now()
-         WHERE user_id = $2`,
-        [JSON.stringify(updatedProfileData), user.userId]
+        `UPDATE user_profiles SET profile_data = $1::jsonb, updated_at = now() WHERE user_id = $2`,
+        [JSON.stringify({ ...profileData, skippedItems: newSkipped, dailyMealModifications: newMods }), user.userId]
       );
 
-      await client.query(
-        `INSERT INTO guardian_actions(user_id, action_type, item_type, item_title, payload)
-         VALUES($1,$2,$3,$4,$5)`,
-        [
-          user.userId,
-          'remedy',
-          item.type || item.data?.type || 'unknown',
-          item.title || item.name || 'Unknown Item',
-          JSON.stringify({ remedy, item, date, remainingMeals })
-        ]
-      );
+      await client.query(`INSERT INTO guardian_actions(user_id, action_type, item_type, item_title, payload) VALUES($1,$2,$3,$4,$5)`,
+        [user.userId, 'remedy', item.type || 'unknown', item.title || 'Item', JSON.stringify({ remedy, success: true })]);
 
       await client.query('COMMIT');
-      console.log(`[Guardian] Final modifications for ${date}:`, JSON.stringify(newMods, null, 2));
       return reply.send({ success: true, skippedItems: newSkipped, modifications: newMods });
+
     } catch (e: any) {
       await client.query('ROLLBACK');
-      const isProduction = process.env.NODE_ENV === 'production';
       console.error("Apply remedy failed", e);
-      return reply.status(500).send({ error: isProduction ? 'Remedy application service unavailable' : (e.message || 'Apply remedy failed') });
+      return reply.status(500).send({ error: e.message });
     } finally {
       client.release();
     }
   });
 
-  // Surplus Mitigation - Generate strategies for surplus calories
+  // Analyze surplus
   app.post('/guardian/analyze-surplus', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as any).user;
-    if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
+    if (!env.geminiApiKey) return reply.status(500).send({ error: 'API_KEY missing' });
 
     const body = z.object({
       surplus: z.number(),
@@ -370,78 +288,20 @@ export async function guardianRoutes(app: FastifyInstance) {
       lang: z.string().default('en')
     }).parse(req.body);
 
-    const { surplus, profile, nextMealName, nextMealCalories, lang } = body;
-
-    const prompt = `
-    ACT AS THE NEGOTIATOR AI - SURPLUS MITIGATION SPECIALIST.
-    User is ${surplus} kcal over their daily target.
-    
-    USER PROFILE:
-    - Primary Goal: ${profile.primaryGoal || 'maintain'}.
-    - Fitness Level: ${profile.fitnessLevel || 'intermediate'}.
-    - Stress Level: ${profile.stressLevel || 'medium'}.
-    - Next Meal: ${nextMealName || 'Not specified'} (${nextMealCalories || 0} kcal).
-    
-    GENERATE 4 MITIGATION STRATEGIES:
-    
-    1. THE ATHLETE STRATEGY (Burn):
-       - Logic: "Eat what you want, but work for it."
-       - Action: Generate an Ad-Hoc Workout worth exactly ${surplus} kcal.
-       - Best for: fitnessLevel='advanced' OR goal='performance'.
-       - Return: { "type": "active_burn", "title": "The Athlete", "description": "...", "explanation": "...", "data": { "workout": {...}, "estimatedBurn": ${surplus} } }
-    
-    2. THE CHEF STRATEGY (Diet):
-       - Logic: "Fix it in the kitchen."
-       - Action: Rewrite next meal to save ${surplus} kcal (downsize or ingredient swap).
-       - Best for: goal='lose_weight' AND prefers cooking over cardio.
-       - Return: { "type": "chef", "title": "The Chef", "description": "...", "explanation": "...", "data": { "targetMeal": "${nextMealName || 'Next Meal'}", "targetReduction": ${surplus} } }
-    
-    3. THE HYBRID STRATEGY (Balance):
-       - Logic: "Meet in the middle."
-       - Action: Small workout (${Math.floor(surplus * 0.4)} kcal) + reduce next meal (${Math.floor(surplus * 0.6)} kcal).
-       - Best for: fitnessLevel='beginner' OR goal='maintain' (most sustainable).
-       - Return: { "type": "hybrid", "title": "The Hybrid", "description": "...", "explanation": "...", "data": { "workout": {...}, "cutAmount": ${Math.floor(surplus * 0.6)} } }
-    
-    4. THE BANKER STRATEGY (Defer):
-       - Logic: "Borrow from tomorrow."
-       - Action: Add ${surplus} kcal as negative debt to Calorie Bank. Tomorrow's target reduced automatically.
-       - Best for: stressLevel='high' OR user wants to relax today.
-       - Return: { "type": "bank_debt", "title": "The Banker", "description": "...", "explanation": "...", "data": { "amount": ${surplus} } }
-    
-    OUTPUT JSON:
-    {
-      "strategies": {
-        "athlete": { "title": "...", "description": "...", "explanation": "...", "data": {...} },
-        "chef": { "title": "...", "description": "...", "explanation": "...", "data": {...} },
-        "hybrid": { "title": "...", "description": "...", "explanation": "...", "data": {...} },
-        "banker": { "title": "...", "description": "...", "explanation": "...", "data": {...} }
-      }
-    }
-    Language: ${lang}.
-    `;
-
-    const genEndpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent';
+    const { surplus, profile, lang } = body;
+    const prompt = `ACT AS GUARDIAN AI. User has ${surplus}kcal surplus. Goal: ${profile.primaryGoal}. 
+    Generate 4 strategies (athlete, chef, hybrid, banker). Return JSON { strategies: { athlete: {...}, ... } }. Language: ${lang}.`;
 
     try {
-      const res = await fetch(genEndpoint, {
+      const res = await fetch(GEN_ENDPOINT, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-goog-api-key': env.geminiApiKey
-        },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.geminiApiKey },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       });
-      if (!res.ok) {
-        const errorText = await res.text();
-        const isProduction = process.env.NODE_ENV === 'production';
-        throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
-      }
       const data: any = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+      const result = JSON.parse(cleanGeminiJson(text));
 
-      const result = JSON.parse(cleanGeminiJson(text) || '{}');
-
-      // Ensure strategies object exists
       if (!result.strategies) {
         result.strategies = {
           athlete: { title: 'The Athlete', description: 'Burn it off', explanation: 'Generate workout', data: {} },
@@ -450,28 +310,16 @@ export async function guardianRoutes(app: FastifyInstance) {
           banker: { title: 'The Banker', description: 'Defer to tomorrow', explanation: 'Add to calorie bank', data: {} }
         };
       }
-
       return reply.send(result);
-    } catch (e: any) {
-      const isProduction = process.env.NODE_ENV === 'production';
-      console.error("Surplus analysis failed", e);
-      // Return fallback
-      return reply.send({
-        strategies: {
-          athlete: { title: 'The Athlete', description: 'Burn it off', explanation: 'Generate workout', data: { estimatedBurn: surplus } },
-          chef: { title: 'The Chef', description: 'Adjust meal', explanation: 'Reduce next meal', data: { targetReduction: surplus } },
-          hybrid: { title: 'The Hybrid', description: 'Balance both', explanation: 'Small workout + meal reduction', data: { cutAmount: Math.floor(surplus * 0.6) } },
-          banker: { title: 'The Banker', description: 'Defer to tomorrow', explanation: 'Add to calorie bank', data: { amount: surplus } }
-        }
-      });
+    } catch (e) {
+      return reply.send({ strategies: { athlete: { title: 'Athlete', description: 'Burn it', data: { estimatedBurn: surplus } } } });
     }
   });
 
-  // Analyze extra training (overload/imbalance) via Gemini
+  // Analyze extra training
   app.post('/guardian/analyze-extra-training', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as any).user;
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
-
     const body = z.object({
       exerciseName: z.string(),
       durationMinutes: z.number().optional(),
@@ -480,262 +328,57 @@ export async function guardianRoutes(app: FastifyInstance) {
       lang: z.string().default('en'),
       todaysPlan: z.array(z.any()).optional()
     }).parse(req.body);
-
     const { exerciseName, durationMinutes, muscleGroups = [], profile, lang, todaysPlan = [] } = body;
-
-    const prompt = `
-    GUARDIAN AI - EXTRA TRAINING REVIEW
-    New extra session: "${exerciseName}" ${durationMinutes ? '(' + durationMinutes + ' min)' : ''}.
-    Muscle groups (if detected): ${muscleGroups.join(', ') || 'unknown'}.
-    Today's planned training blocks: ${todaysPlan.map((p: any) => p?.title || p?.name || 'block').join(', ') || 'none'}.
-
-    Profile:
-    - Goal: ${profile.primaryGoal || 'maintain'}
-    - Fitness Level: ${profile.fitnessLevel || 'intermediate'}
-    - Conditions: ${profile.conditions?.join(', ') || 'none'}
-
-    Tasks:
-    - Detect potential overload or redundant work (same muscle groups back-to-back, too much volume).
-    - Suggest concrete adjustments to balance recovery.
-    - Keep it concise, 2-3 actionable options max.
-
-    Return JSON:
-    {
-      "warning": "string",
-      "suggestions": [
-        { "title": "string", "description": "string", "actionLabel": "string" }
-      ]
-    }
-    Language: ${lang}.
-    `;
-
-    const genEndpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+    const prompt = `GUARDIAN AI - EXTRA TRAINING REVIEW. New: ${exerciseName}. Muscles: ${muscleGroups.join(',')}. Plan: ${todaysPlan.map((p: any) => p?.title).join(',')}. Profile: ${profile.primaryGoal}. Detect overload. Return JSON { warning, suggestions }.`;
 
     try {
-      const res = await fetch(genEndpoint, {
+      const res = await fetch(GEN_ENDPOINT, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-goog-api-key': env.geminiApiKey
-        },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.geminiApiKey },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       });
-      if (!res.ok) {
-        const errorText = await res.text();
-        const isProduction = process.env.NODE_ENV === 'production';
-        throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
-      }
       const data: any = await res.json();
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
       const parsed = JSON.parse(cleanGeminiJson(text) || '{}');
-      if (!Array.isArray(parsed.suggestions)) parsed.suggestions = [];
-      return reply.send({
-        warning: parsed.warning || '',
-        suggestions: parsed.suggestions.slice(0, 3)
-      });
+      return reply.send({ warning: parsed.warning || '', suggestions: parsed.suggestions?.slice(0, 3) || [] });
     } catch (e: any) {
-      const isProduction = process.env.NODE_ENV === 'production';
-      console.error("Guardian analyze extra training failed", e);
-      return reply.send({
-        warning: "Extra session logged. Consider recovery balance.",
-        suggestions: [
-          { title: "Lighten next similar muscle session", description: "Reduce sets or load for overlapping muscle groups.", actionLabel: "Got it" }
-        ]
+      return reply.send({ warning: "Consider recovery.", suggestions: [] });
+    }
+  });
+
+  // Analyze meal replacement
+  app.post('/guardian/analyze-meal-replacement', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
+    // Use the same model for simplicity
+    const body = z.object({
+      loggedFood: z.any(),
+      profile: z.any(),
+      nearbyMeals: z.array(z.any()).default([]),
+      lang: z.string().default('en')
+    }).parse(req.body);
+    const { loggedFood, nearbyMeals } = body;
+    if (nearbyMeals.length === 0) return reply.send({ shouldReplace: false });
+
+    const prompt = `GUARDIAN AI. User logged ${loggedFood.name}. Nearby: ${nearbyMeals[0].name}. Should replace? JSON { shouldReplace, suggestion }.`;
+
+    try {
+      const res = await fetch(GEN_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.geminiApiKey },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       });
+      const data: any = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      return reply.send(JSON.parse(cleanGeminiJson(text)));
+    } catch (e: any) {
+      return reply.send({ shouldReplace: false });
     }
   });
 
   app.get('/guardian/actions', { preHandler: authGuard }, async (req) => {
     const user = (req as any).user;
-    const { rows } = await pool.query(
-      `SELECT id, action_type, item_type, item_title, payload, created_at
-       FROM guardian_actions
-       WHERE user_id = $1
-       ORDER BY created_at DESC
-       LIMIT 50`,
-      [user.userId]
-    );
-    return rows.map((r: any) => ({
-      id: r.id,
-      actionType: r.action_type,
-      itemType: r.item_type,
-      itemTitle: r.item_title,
-      payload: r.payload,
-      createdAt: r.created_at
-    }));
-  });
-
-  // Analyze meal replacement opportunity
-  app.post('/guardian/analyze-meal-replacement', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
-    if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
-
-    const body = z.object({
-      loggedFood: z.object({
-        name: z.string(),
-        calories: z.number(),
-        timestamp: z.string(), // ISO string
-        protein: z.number().optional(),
-        carbs: z.number().optional(),
-        fat: z.number().optional()
-      }),
-      profile: z.any(),
-      nearbyMeals: z.array(z.object({
-        dayIndex: z.number(),
-        mealIndex: z.number(),
-        type: z.string(), // breakfast, lunch, dinner, etc.
-        name: z.string(),
-        calories: z.number(),
-        time: z.string() // HH:mm format
-      })).default([]),
-      lang: z.string().default('en')
-    }).parse(req.body);
-
-    const { loggedFood, profile, nearbyMeals, lang } = body;
-
-    if (nearbyMeals.length === 0) {
-      return reply.send({ shouldReplace: false, suggestion: null });
-    }
-
-    // Find the closest meal by time
-    const loggedTime = new Date(loggedFood.timestamp);
-    const loggedMinutes = loggedTime.getHours() * 60 + loggedTime.getMinutes();
-    
-    let closestMeal = nearbyMeals[0];
-    let minDiff = Infinity;
-    
-    nearbyMeals.forEach(meal => {
-      const [hours, minutes] = meal.time.split(':').map(Number);
-      const mealMinutes = hours * 60 + minutes;
-      const diff = Math.abs(loggedMinutes - mealMinutes);
-      if (diff < minDiff && diff <= 120) { // Within 2 hours
-        minDiff = diff;
-        closestMeal = meal;
-      }
-    });
-
-    if (minDiff > 120) {
-      return reply.send({ shouldReplace: false, suggestion: null });
-    }
-
-    const calorieDiff = loggedFood.calories - closestMeal.calories;
-    const isHigher = calorieDiff > 0;
-    const diffAbs = Math.abs(calorieDiff);
-
-    const prompt = `
-    ACT AS GUARDIAN AI - MEAL REPLACEMENT ADVISOR.
-    User just logged: "${loggedFood.name}" (${loggedFood.calories} kcal) at ${loggedTime.toLocaleTimeString()}.
-    
-    NEARBY PLAN MEAL:
-    - Type: ${closestMeal.type}
-    - Name: ${closestMeal.name}
-    - Calories: ${closestMeal.calories} kcal
-    - Scheduled Time: ${closestMeal.time}
-    - Time Difference: ${Math.round(minDiff)} minutes
-    
-    USER PROFILE:
-    - Primary Goal: ${profile.primaryGoal || 'maintain'}
-    - Fitness Level: ${profile.fitnessLevel || 'intermediate'}
-    - Daily Target: ${profile.target || 2000} kcal
-    
-    CALORIE DIFFERENCE: ${isHigher ? '+' : ''}${calorieDiff} kcal (${isHigher ? 'higher' : 'lower'} than planned)
-    
-    GENERATE REPLACEMENT SUGGESTION:
-    
-    ${isHigher ? `
-    - WARNING: Tracked meal is ${diffAbs} kcal MORE than planned ${closestMeal.type}
-    - Suggest: "Bunu ${closestMeal.type === 'breakfast' ? 'kahvaltı' : closestMeal.type === 'lunch' ? 'öğle yemeği' : closestMeal.type === 'dinner' ? 'akşam yemeği' : closestMeal.type} yerine mi yedin?"
-    - Action: Replace plan meal with logged food
-    - Impact: ${diffAbs} kcal surplus - suggest mitigation if > 100 kcal
-    ` : `
-    - INFO: Tracked meal is ${diffAbs} kcal LESS than planned ${closestMeal.type}
-    - Suggest: "Bunu ${closestMeal.type === 'breakfast' ? 'kahvaltı' : closestMeal.type === 'lunch' ? 'öğle yemeği' : closestMeal.type === 'dinner' ? 'akşam yemeği' : closestMeal.type} yerine mi yedin?"
-    - Action: Replace plan meal with logged food
-    - Impact: ${diffAbs} kcal deficit - may need to add snack later
-    `}
-    
-    OUTPUT JSON:
-    {
-      "shouldReplace": true,
-      "suggestion": {
-        "title": "Bunu ${closestMeal.type === 'breakfast' ? 'kahvaltı' : closestMeal.type === 'lunch' ? 'öğle yemeği' : closestMeal.type === 'dinner' ? 'akşam yemeği' : closestMeal.type} yerine mi yedin?",
-        "description": "${loggedFood.name} (${loggedFood.calories} kcal) planlanan ${closestMeal.name} (${closestMeal.calories} kcal) yerine geçsin mi?",
-        "calorieDiff": ${calorieDiff},
-        "isHigher": ${isHigher},
-        "planMeal": {
-          "dayIndex": ${closestMeal.dayIndex},
-          "mealIndex": ${closestMeal.mealIndex},
-          "type": "${closestMeal.type}",
-          "name": "${closestMeal.name}",
-          "calories": ${closestMeal.calories}
-        },
-        "loggedFood": {
-          "name": "${loggedFood.name}",
-          "calories": ${loggedFood.calories}
-        },
-        "mitigation": ${diffAbs > 100 && isHigher ? `"Bu değişiklik ${diffAbs} kcal fazla kalori ekliyor. Surplus mitigation önerilir."` : diffAbs > 100 && !isHigher ? `"Bu değişiklik ${diffAbs} kcal eksik kalori bırakıyor. Daha sonra bir atıştırmalık eklemeyi düşünün."` : '"Değişiklik minimal, ek aksiyon gerekmiyor."'}
-      }
-    }
-    `;
-
-    try {
-      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-goog-api-key': env.geminiApiKey
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.7,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 1024
-          }
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        const isProduction = process.env.NODE_ENV === 'production';
-        throw new Error(isProduction ? `AI service error (${response.status})` : `Gemini API error: ${errorText}`);
-      }
-
-      const data: any = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const cleaned = cleanGeminiJson(text);
-      const parsed = JSON.parse(cleaned);
-
-      return reply.send(parsed);
-    } catch (e: any) {
-      console.error('Meal replacement analysis failed', e);
-      // Fallback: simple heuristic
-      return reply.send({
-        shouldReplace: true,
-        suggestion: {
-          title: `Bunu ${closestMeal.type === 'breakfast' ? 'kahvaltı' : closestMeal.type === 'lunch' ? 'öğle yemeği' : closestMeal.type === 'dinner' ? 'akşam yemeği' : closestMeal.type} yerine mi yedin?`,
-          description: `${loggedFood.name} (${loggedFood.calories} kcal) planlanan ${closestMeal.name} (${closestMeal.calories} kcal) yerine geçsin mi?`,
-          calorieDiff,
-          isHigher,
-          planMeal: {
-            dayIndex: closestMeal.dayIndex,
-            mealIndex: closestMeal.mealIndex,
-            type: closestMeal.type,
-            name: closestMeal.name,
-            calories: closestMeal.calories
-          },
-          loggedFood: {
-            name: loggedFood.name,
-            calories: loggedFood.calories
-          },
-          mitigation: diffAbs > 100 && isHigher 
-            ? `Bu değişiklik ${diffAbs} kcal fazla kalori ekliyor. Surplus mitigation önerilir.`
-            : diffAbs > 100 && !isHigher
-            ? `Bu değişiklik ${diffAbs} kcal eksik kalori bırakıyor. Daha sonra bir atıştırmalık eklemeyi düşünün.`
-            : 'Değişiklik minimal, ek aksiyon gerekmiyor.'
-        }
-      });
-    }
+    const { rows } = await pool.query(`SELECT id, action_type, item_type, item_title, payload, created_at FROM guardian_actions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`, [user.userId]);
+    return rows.map((r: any) => ({ id: r.id, actionType: r.action_type, itemType: r.item_type, itemTitle: r.item_title, payload: r.payload, createdAt: r.created_at }));
   });
 }

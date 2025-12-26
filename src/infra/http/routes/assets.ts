@@ -40,6 +40,14 @@ export async function assetsRoutes(app: FastifyInstance) {
     const value = rows[0].value;
     const assetType = rows[0].asset_type;
     
+    // If it's an image (base64 string), send it directly as text to avoid JSON serialization issues
+    if (assetType === 'image' && typeof value === 'string') {
+      // Ensure it has data:image prefix
+      const imageValue = value.startsWith('data:image') ? value : `data:image/png;base64,${value}`;
+      reply.type('text/plain');
+      return reply.send(imageValue);
+    }
+    
     // Return as JSON string to maintain compatibility with frontend
     // Frontend expects string | null
     return reply.send(value);
@@ -141,11 +149,18 @@ export async function assetsRoutes(app: FastifyInstance) {
     const { baseKey, specificThemeId } = req.body as any;
     const keysToTry = specificThemeId ? [`${baseKey}_theme_${specificThemeId}`, baseKey] : [baseKey];
     const { rows } = await pool.query(
-      `SELECT key, value FROM cached_assets WHERE key = ANY($1) AND status IN ('active','auto') ORDER BY status DESC LIMIT 1`,
+      `SELECT key, value, asset_type FROM cached_assets WHERE key = ANY($1) AND status IN ('active','auto') ORDER BY status DESC LIMIT 1`,
       [keysToTry]
     );
     if (rows.length === 0) return reply.send(null);
-    return rows[0].value;
+    
+    const value = rows[0].value;
+    // If it's an image (base64 string), send it directly as text to avoid JSON serialization
+    if (rows[0].asset_type === 'image' && typeof value === 'string' && value.startsWith('data:image')) {
+      reply.type('text/plain');
+      return reply.send(value);
+    }
+    return reply.send(value);
   });
 
   app.get('/assets/meta/:key', { preHandler: authGuard }, async (req, reply) => {
@@ -171,7 +186,20 @@ export async function assetsRoutes(app: FastifyInstance) {
        LIMIT $3`,
       [body.movementId, `${body.movementId}%`, limit]
     );
-    return rows;
+    // Ensure image values have proper data:image prefix for frontend display
+    const processedRows = rows.map((row: any) => {
+      if (row.asset_type === 'image' && row.value && typeof row.value === 'string') {
+        // If value doesn't have data:image prefix, add it
+        if (!row.value.startsWith('data:image')) {
+          // Check if it's base64 (starts with valid base64 chars)
+          if (/^[A-Za-z0-9+/=]+$/.test(row.value)) {
+            row.value = `data:image/png;base64,${row.value}`;
+          }
+        }
+      }
+      return row;
+    });
+    return processedRows;
   });
 }
 

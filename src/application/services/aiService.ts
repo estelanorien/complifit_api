@@ -43,7 +43,7 @@ export class AiService {
     return { text };
   }
 
-  async generateImage({ prompt, model = 'models/gemini-2.0-flash-exp' }: GenerateImageParams) {
+  async generateImage({ prompt, model = 'models/gemini-2.5-flash-image' }: GenerateImageParams) {
     const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
       method: 'POST',
       headers: { 
@@ -51,8 +51,7 @@ export class AiService {
         'x-goog-api-key': this.apiKey
       },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: 'image/png' }
+        contents: [{ parts: [{ text: prompt }] }]
       })
     });
     if (!res.ok) {

@@ -829,9 +829,9 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   app.post('/ai/generate/image', { preHandler: authGuard }, async (req, reply) => {
     try {
       const { prompt } = imgProxySchema.parse(req.body);
-      // Try to use a model that might support image gen or just text description if failed
-      // Using 2.0-flash-exp for broader capabilities
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent`, {
+      // Use gemini-2.5-flash-image for image generation (higher quota limits)
+      const model = 'models/gemini-2.5-flash-image';
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

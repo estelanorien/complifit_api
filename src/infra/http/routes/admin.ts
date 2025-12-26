@@ -32,9 +32,8 @@ export async function adminRoutes(app: FastifyInstance) {
     let value: string | null = null;
     try {
       if (mode === 'image') {
-        // Gemini'de image generation için doğru model: gemini-2.0-flash-exp veya gemini-1.5-flash
-        // Image generation için generationConfig ile image generation özelliği aktif edilmeli
-        const model = 'models/gemini-2.0-flash-exp';
+        // Eski model: gemini-2.5-flash-image (image generation için özel model)
+        const model = 'models/gemini-2.5-flash-image';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
         
         const res = await fetch(genEndpoint, {
@@ -44,10 +43,7 @@ export async function adminRoutes(app: FastifyInstance) {
             'x-goog-api-key': env.geminiApiKey
           },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }]}],
-            generationConfig: {
-              responseMimeType: 'image/png'
-            }
+            contents: [{ parts: [{ text: prompt }]}]
           })
         });
         
@@ -63,16 +59,6 @@ export async function adminRoutes(app: FastifyInstance) {
         const inline = parts.find((p: any) => p.inlineData?.data);
         if (inline?.inlineData?.data) {
           value = `data:image/png;base64,${inline.inlineData.data}`;
-        } else {
-          // Fallback: Eğer inline data yoksa, text response'dan base64 çıkarmayı dene
-          const textPart = parts.find((p: any) => p.text);
-          if (textPart?.text) {
-            // Base64 string olabilir
-            const base64Match = textPart.text.match(/data:image\/[^;]+;base64,([^\s]+)/);
-            if (base64Match) {
-              value = base64Match[0];
-            }
-          }
         }
       } else if (mode === 'json') {
         const model = 'models/gemini-2.0-flash-exp';
