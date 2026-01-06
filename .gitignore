@@ -62,3 +62,4 @@ coverage/
 .pm2/
 ecosystem.config.js.bak
 
+node_modules
