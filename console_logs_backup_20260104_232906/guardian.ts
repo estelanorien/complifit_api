@@ -153,14 +153,14 @@ export async function guardianRoutes(app: FastifyInstance) {
       if (!result.warning) result.warning = 'Confirm deletion?';
 
       // Log action
-      await       pool.query(
+      await pool.query(
         `INSERT INTO guardian_actions(user_id, action_type, item_type, item_title, payload) VALUES($1,$2,$3,$4,$5)`,
         [user.userId, 'analysis', type, title, JSON.stringify({ calories, result })]
-      ).catch(e => req.log.error({ error: e, requestId: (req as any).requestId }, 'Failed to log guardian action'));
+      ).catch(console.error);
 
       return reply.send(result);
     } catch (e: any) {
-      req.log.error({ error: "Guardian analysis failed", e, requestId: (req as any).requestId });
+      console.error("Guardian analysis failed", e);
       return reply.send({
         isSafe: true,
         impactLevel: 'low',
@@ -220,9 +220,9 @@ export async function guardianRoutes(app: FastifyInstance) {
             calories: calories,
             note: `Guardian: ${remedy.title}`
           });
-          req.log.info(`[Guardian] Applied ${remedy.type} to ${mealId}: ${calories} cal`);
+          console.log(`[Guardian] Applied ${remedy.type} to ${mealId}: ${calories} cal`);
         } else {
-          req.log.warn(`[Guardian] Could not find meal ID for name '${targetName}'.`);
+          console.warn(`[Guardian] Could not find meal ID for name '${targetName}'.`);
         }
 
       } else if (remedy.type === 'plug') {
@@ -322,7 +322,7 @@ export async function guardianRoutes(app: FastifyInstance) {
 
     } catch (e: any) {
       await client.query('ROLLBACK');
-      req.log.error({ error: "Apply remedy failed", e, requestId: (req as any).requestId });
+      console.error("Apply remedy failed", e);
       return reply.status(500).send({ error: e.message });
     } finally {
       client.release();
@@ -571,14 +571,14 @@ export async function guardianRoutes(app: FastifyInstance) {
       }
 
       // Log action
-      await       pool.query(
+      await pool.query(
         `INSERT INTO guardian_actions(user_id, action_type, item_type, item_title, payload) VALUES($1,$2,$3,$4,$5)`,
         [user.userId, 'analysis', 'late_wake', `Wake at ${wakeTime}`, JSON.stringify({ missedItems, result })]
-      ).catch(e => req.log.error({ error: e, requestId: (req as any).requestId }, 'Failed to log late wake guardian action'));
+      ).catch(console.error);
 
       return reply.send(result);
     } catch (e: any) {
-      req.log.error({ error: "Guardian late wake analysis failed", e, requestId: (req as any).requestId });
+      console.error("Guardian late wake analysis failed", e);
       
       // Fallback response
       return reply.send({
@@ -828,7 +828,7 @@ export async function guardianRoutes(app: FastifyInstance) {
 
     } catch (e: any) {
       await client.query('ROLLBACK');
-      req.log.error({ error: "Apply late wake recommendation failed", e, requestId: (req as any).requestId });
+      console.error("Apply late wake recommendation failed", e);
       return reply.status(500).send({ error: e.message });
     } finally {
       client.release();

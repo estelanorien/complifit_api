@@ -173,14 +173,14 @@ export async function restaurantRoutes(app: FastifyInstance) {
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         matches = JSON.parse(cleaned);
       } catch (e) {
-        req.log.error({ error: 'Failed to parse match response', e, requestId: (req as any).requestId });
+        console.error('Failed to parse match response', e);
         return reply.status(500).send({ error: 'Failed to parse AI response' });
       }
 
       return reply.send(matches);
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'match-meal failed', e, requestId: (req as any).requestId });
+      console.error('match-meal failed', e);
       return reply.status(500).send({ error: isProduction ? 'Meal matching service unavailable' : (e.message || 'Match meal failed') });
     }
   });

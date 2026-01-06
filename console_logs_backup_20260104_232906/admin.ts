@@ -146,7 +146,7 @@ export async function adminRoutes(app: FastifyInstance) {
       return reply.send({ value });
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'admin generate asset failed', e, requestId: (req as any).requestId });
+      console.error('admin generate asset failed', e);
       
       // Always show rate limit errors to the user
       const errorMessage = e.message || 'generation failed';

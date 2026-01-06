@@ -43,46 +43,26 @@ CREATE INDEX IF NOT EXISTS idx_guardian_actions_payload_gin
 ON guardian_actions USING GIN (payload);
 
 -- training_exercises tablosu için
--- metadata kolonu JSONB
-CREATE INDEX IF NOT EXISTS idx_training_exercises_metadata_gin 
-ON training_exercises USING GIN (metadata);
+-- exercise_data kolonu JSONB
+CREATE INDEX IF NOT EXISTS idx_training_exercises_exercise_data_gin 
+ON training_exercises USING GIN (exercise_data);
 
 -- meals tablosu için
--- macros, ingredients, instructions, metadata kolonları JSONB
-CREATE INDEX IF NOT EXISTS idx_meals_macros_gin 
-ON meals USING GIN (macros);
+-- meal_data kolonu JSONB (zaten 021 migration'da eklendi)
+-- CREATE INDEX IF NOT EXISTS idx_meals_data_gin 
+-- ON meals USING GIN (meal_data);
 
-CREATE INDEX IF NOT EXISTS idx_meals_ingredients_gin 
-ON meals USING GIN (ingredients);
+-- menu_items tablosu için (estimated_macros yok, sadece description vs. var)
+-- Gerekirse eklenebilir
 
-CREATE INDEX IF NOT EXISTS idx_meals_instructions_gin 
-ON meals USING GIN (instructions);
+-- restaurants tablosu için (location_data yok, address, lat, lng ayrı kolonlarda)
+-- Gerekirse eklenebilir
 
-CREATE INDEX IF NOT EXISTS idx_meals_metadata_gin 
-ON meals USING GIN (metadata);
+-- inventory_transactions tablosu için (cost ve metadata yok, sadece amount var)
+-- Gerekirse eklenebilir
 
--- menu_items tablosu için
--- estimated_macros kolonu JSONB
-CREATE INDEX IF NOT EXISTS idx_menu_items_estimated_macros_gin 
-ON menu_items USING GIN (estimated_macros);
-
--- restaurants tablosu için
--- location_data kolonu JSONB
-CREATE INDEX IF NOT EXISTS idx_restaurants_location_data_gin 
-ON restaurants USING GIN (location_data);
-
--- inventory_transactions tablosu için
--- cost ve metadata kolonları JSONB
-CREATE INDEX IF NOT EXISTS idx_inventory_transactions_cost_gin 
-ON inventory_transactions USING GIN (cost);
-
-CREATE INDEX IF NOT EXISTS idx_inventory_transactions_metadata_gin 
-ON inventory_transactions USING GIN (metadata);
-
--- system_messages tablosu için
--- payload kolonu JSONB
-CREATE INDEX IF NOT EXISTS idx_system_messages_payload_gin 
-ON system_messages USING GIN (payload);
+-- system_messages tablosu yok (kullanılmıyor)
+-- Gerekirse eklenebilir
 
 -- moderation_queue tablosu için
 -- content kolonu JSONB
@@ -90,4 +70,3 @@ CREATE INDEX IF NOT EXISTS idx_moderation_queue_content_gin
 ON moderation_queue USING GIN (content);
 
 COMMIT;
-

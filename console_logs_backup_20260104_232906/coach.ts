@@ -61,7 +61,7 @@ export async function coachRoutes(app: FastifyInstance) {
       ));
       return reply.send({ reply: text || "I'm refining your plan, please ask again." });
     } catch (e: any) {
-      req.log.error({ error: 'Training coach error', e, requestId: (req as any).requestId });
+      console.error('Training coach error', e);
       return reply.status(500).send({ error: e.message || 'Training coach failed' });
     }
   });
@@ -84,7 +84,7 @@ export async function coachRoutes(app: FastifyInstance) {
       ));
       return reply.send({ reply: text || "I'm reviewing your meals, please retry." });
     } catch (e: any) {
-      req.log.error({ error: 'Nutrition coach error', e, requestId: (req as any).requestId });
+      console.error('Nutrition coach error', e);
       const isProduction = process.env.NODE_ENV === 'production';
       return reply.status(500).send({ 
         error: isProduction ? 'Nutrition coach service unavailable' : (e.message || 'Nutrition coach failed') 
@@ -125,7 +125,7 @@ export async function coachRoutes(app: FastifyInstance) {
       });
       return reply.send({ insight: text ? JSON.parse(text) : null });
     } catch (e: any) {
-      req.log.error({ error: 'Dietary tips error', e, requestId: (req as any).requestId });
+      console.error('Dietary tips error', e);
       const isProduction = process.env.NODE_ENV === 'production';
       return reply.status(500).send({ 
         error: isProduction ? 'Dietary tips service unavailable' : (e.message || 'Dietary tips failed') 
@@ -158,7 +158,7 @@ export async function coachRoutes(app: FastifyInstance) {
       });
       return reply.send({ items: text ? JSON.parse(text) : items });
     } catch (e: any) {
-      req.log.error({ error: 'Shopping consolidate error', e, requestId: (req as any).requestId });
+      console.error('Shopping consolidate error', e);
       const isProduction = process.env.NODE_ENV === 'production';
       return reply.status(500).send({ 
         error: isProduction ? 'Shopping list service unavailable' : (e.message || 'Shopping consolidation failed') 
@@ -200,7 +200,7 @@ export async function coachRoutes(app: FastifyInstance) {
       });
       return reply.send({ meal: text ? JSON.parse(text) : null });
     } catch (e: any) {
-      req.log.error({ error: 'Culinary explorer error', e, requestId: (req as any).requestId });
+      console.error('Culinary explorer error', e);
       const isProduction = process.env.NODE_ENV === 'production';
       return reply.status(500).send({ 
         error: isProduction ? 'Culinary explorer service unavailable' : (e.message || 'Explorer failed') 
@@ -243,7 +243,7 @@ export async function coachRoutes(app: FastifyInstance) {
       const text = await callGemini(buildGeminiPayload(history, systemPrompt));
       return reply.send({ reply: text || "I'm here to help! What would you like to know?" });
     } catch (e: any) {
-      req.log.error({ error: 'Agent error', e, requestId: (req as any).requestId });
+      console.error('Agent error', e);
       const isProduction = process.env.NODE_ENV === 'production';
       return reply.status(500).send({ 
         error: isProduction ? 'Agent service unavailable' : (e.message || 'Agent failed') 

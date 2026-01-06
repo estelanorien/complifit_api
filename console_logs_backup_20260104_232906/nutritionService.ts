@@ -220,8 +220,7 @@ NUTRITION TIPS (nutritionTips array):
       }
       return null;
     } catch (e) {
-      // Service doesn't have req, log to stderr
-      process.stderr.write(`[NutritionService] Error checking existing recipe for ${mealName}: ${e}\n`);
+      console.error(`[NutritionService] Error checking existing recipe for ${mealName}:`, e);
       return null;
     }
   };
@@ -238,7 +237,7 @@ NUTRITION TIPS (nutritionTips array):
           
               if (existingRecipe) {
                 // Use existing recipe from database
-                // Service doesn't have req logger, skip logging or use process.stdout
+                console.log(`[NutritionService] Using existing recipe from DB: ${mealName}`);
                 meal.recipe.ingredients = existingRecipe.ingredients || meal.recipe.ingredients;
                 meal.recipe.instructions = existingRecipe.instructions || meal.recipe.instructions;
                 meal.recipe.time = existingRecipe.time || meal.recipe.time;

@@ -92,7 +92,7 @@ export async function aiRoutes(app: FastifyInstance) {
       const firstText = contentParts.find((p: any) => p?.text)?.text || '';
       return reply.send({ text: firstText, parts: contentParts });
     } catch (e: any) {
-      req.log.error({ error: 'generate-content proxy failed', e, requestId: (req as any).requestId });
+      console.error('generate-content proxy failed', e);
       return reply.status(500).send({ error: e.message || 'generate failed' });
     }
   });
@@ -321,7 +321,7 @@ export async function aiRoutes(app: FastifyInstance) {
     // CRITICAL: Only use defaults if AI didn't provide values. If AI provided values, use them!
     const ensureDefaults = (obj: any) => {
       if (!obj || typeof obj !== 'object') {
-        req.log.warn('ensureDefaults: obj is not an object, using fallback');
+        console.warn('ensureDefaults: obj is not an object, using fallback');
         obj = {};
       }
       
@@ -351,17 +351,9 @@ export async function aiRoutes(app: FastifyInstance) {
           typeof obj.macros.fat === 'number';
         // If AI didn't provide proper values, throw error instead of using defaults
         if (!hasCalories || !hasMacros) {
-          req.log.error({ 
-            requestId: (req as any).requestId,
-            hasCalories,
-            hasMacros,
-            message: '❌ ensureDefaults: AI did not provide required values!'
-          });
-          req.log.error({ 
-            requestId: (req as any).requestId,
-            obj: JSON.stringify(obj, null, 2),
-            message: 'AI response object'
-          });
+          console.error('❌ ensureDefaults: AI did not provide required values!');
+          console.error('Has calories:', hasCalories, 'Has macros:', hasMacros);
+          console.error('Object:', JSON.stringify(obj, null, 2));
           throw new Error("AI response missing required calories or macros");
         }
         
@@ -406,7 +398,7 @@ export async function aiRoutes(app: FastifyInstance) {
           const exactCached = await pool.query('SELECT response FROM food_analysis_cache WHERE cache_key = $1 LIMIT 1', [imageKey]);
           if (exactCached.rows.length > 0) {
             const cachedResp = exactCached.rows[0].response;
-            req.log.info({ cachedResp, message: '📦 Cache hit (image)' });
+            console.log('📦 Cache hit (image):', JSON.stringify(cachedResp, null, 2));
             
             // Check if cached response has default values
             const isCachedDefault = cachedResp?.calories === 350 && 
@@ -415,7 +407,7 @@ export async function aiRoutes(app: FastifyInstance) {
                                  cachedResp?.macros?.fat === 12;
             
             if (isCachedDefault) {
-              req.log.error({ error: '🚨 Cached response has default values - ignoring cache and recalculating', requestId: (req as any).requestId });
+              console.error('🚨 Cached response has default values - ignoring cache and recalculating');
               // Don't return cached - let it fall through to AI call
             } else {
               return reply.send(ensureDefaults(cachedResp));
@@ -429,7 +421,7 @@ export async function aiRoutes(app: FastifyInstance) {
           const textCached = await pool.query('SELECT response FROM food_analysis_cache WHERE cache_key = $1 LIMIT 1', [textKey]);
           if (textCached.rows.length > 0) {
             const cachedResp = textCached.rows[0].response;
-            req.log.info({ cachedResp, message: '📦 Cache hit (text)' });
+            console.log('📦 Cache hit (text):', JSON.stringify(cachedResp, null, 2));
             
             // Check if cached response has default values
             const isCachedDefault = cachedResp?.calories === 350 && 
@@ -438,7 +430,7 @@ export async function aiRoutes(app: FastifyInstance) {
                                    cachedResp?.macros?.fat === 12;
             
             if (isCachedDefault) {
-              req.log.error({ error: '🚨 Cached response has default values - ignoring cache and recalculating', requestId: (req as any).requestId });
+              console.error('🚨 Cached response has default values - ignoring cache and recalculating');
               // Don't return cached - let it fall through to AI call
             } else {
               return reply.send(ensureDefaults(cachedResp));
@@ -446,7 +438,7 @@ export async function aiRoutes(app: FastifyInstance) {
           }
         }
       } catch (e) {
-        req.log.warn({ error: e, requestId: (req as any).requestId, message: 'food-log cache lookup failed' });
+        console.warn('food-log cache lookup failed', e);
       }
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`, {
@@ -547,12 +539,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       });
       if (!res.ok) {
         const txt = await res.text();
-        req.log.error({ 
-          requestId: (req as any).requestId,
-          status: res.status,
-          responseText: txt,
-          message: 'food-log proxy: non-200'
-        });
+        console.error('food-log proxy: non-200', res.status, txt);
         throw new Error(`Gemini food-log error ${res.status}: ${txt}`);
       }
       const data: any = await res.json();
@@ -599,7 +586,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       }
 
       if (!parsed) {
-        req.log.warn({ responseParts: JSON.stringify(responseParts).slice(0, 1000), message: 'food-log proxy: could not parse candidate parts' });
+        console.warn('food-log proxy: could not parse candidate parts', JSON.stringify(responseParts).slice(0, 1000));
         // If Gemini refused (e.g. safety), it might return text. Treat as "Not Food" / Error.
         const refusalText = responseParts.map(p => p.text).join(' ');
         if (refusalText.toLowerCase().includes("cannot") || refusalText.toLowerCase().includes("safety")) {
@@ -619,7 +606,8 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       }
 
       // CRITICAL: Check if AI returned default values (this check MUST happen BEFORE ensureDefaults)
-      req.log.info({ parsed, message: '=== CHECKING AI RESPONSE ===' });
+      console.log('=== CHECKING AI RESPONSE ===');
+      console.log('Raw parsed:', JSON.stringify(parsed, null, 2));
       
       const isDefaultValues = parsed?.calories === 350 && 
                               parsed?.macros?.protein === 20 && 
@@ -627,30 +615,17 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
                               parsed?.macros?.fat === 12;
       
       if (isDefaultValues) {
-        req.log.error({ 
-          requestId: (req as any).requestId,
-          parsed,
-          message: '🚨🚨🚨 CRITICAL: AI returned default values (350/20/35/12)!'
-        });
-        req.log.error({ 
-          requestId: (req as any).requestId,
-          message: 'AI did NOT calculate - rejecting response!'
-        });
-        req.log.error({ 
-          requestId: (req as any).requestId,
-          response: JSON.stringify(parsed, null, 2),
-          message: 'Full response'
-        });
+        console.error('🚨🚨🚨 CRITICAL: AI returned default values (350/20/35/12)!');
+        console.error('AI did NOT calculate - rejecting response!');
+        console.error('Full response:', JSON.stringify(parsed, null, 2));
         throw new Error("AI returned default values (350/20/35/12) - recalculation needed");
       }
       
       // If we get here, AI provided non-default values - proceed with ensureDefaults
       const finalResp = ensureDefaults(parsed);
-      req.log.info({ 
-        requestId: (req as any).requestId,
+      console.log('✅ AI provided calculated values:', { 
         calories: finalResp.calories, 
-        macros: finalResp.macros,
-        message: '✅ AI provided calculated values'
+        macros: finalResp.macros 
       });
 
       // 2) Cache store (best effort)
@@ -678,12 +653,12 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
           }
         }
       } catch (e) {
-        req.log.warn({ error: e, requestId: (req as any).requestId, message: 'food-log cache save failed' });
+        console.warn('food-log cache save failed', e);
       }
 
       return reply.send(finalResp);
     } catch (e: any) {
-      req.log.error({ error: 'food-log proxy failed', e, requestId: (req as any).requestId });
+      console.error('food-log proxy failed', e);
       
       // If error is about default values, return a more helpful error
       if (e.message?.includes('default values') || e.message?.includes('recalculation needed')) {
@@ -1025,7 +1000,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         items = JSON.parse(cleaned);
       } catch (e) {
-        req.log.error({ error: 'Failed to parse menu analysis response', e, requestId: (req as any).requestId });
+        console.error('Failed to parse menu analysis response', e);
         return reply.status(500).send({ error: 'Failed to parse AI response' });
       }
 
@@ -1035,7 +1010,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       return reply.send(items);
     } catch (e: any) {
-      req.log.error({ error: 'menu-analysis failed', e, requestId: (req as any).requestId });
+      console.error('menu-analysis failed', e);
       return reply.status(500).send({ error: e.message || 'Menu analysis failed' });
     }
   });
@@ -1085,7 +1060,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       
       return reply.status(500).send({ error: 'No image returned from AI' });
     } catch (e: any) {
-      req.log.error({ error: 'generate step-image failed', e, requestId: (req as any).requestId });
+      console.error('generate step-image failed', e);
       return reply.status(500).send({ error: e.message || 'Generate step image failed' });
     }
   });
@@ -1137,7 +1112,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       return reply.status(500).send({ error: 'No image returned from AI' });
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'generate gamification-asset failed', e, requestId: (req as any).requestId });
+      console.error('generate gamification-asset failed', e);
       return reply.status(500).send({ error: isProduction ? 'Asset generation service unavailable' : (e.message || 'Generate gamification asset failed') });
     }
   });
@@ -1187,7 +1162,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       return reply.status(500).send({ error: 'No image returned from AI' });
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'generate portion-visual failed', e, requestId: (req as any).requestId });
+      console.error('generate portion-visual failed', e);
       return reply.status(500).send({ error: isProduction ? 'Portion visual generation service unavailable' : (e.message || 'Generate portion visual failed') });
     }
   });

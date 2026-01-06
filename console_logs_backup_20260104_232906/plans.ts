@@ -471,7 +471,7 @@ export async function plansRoutes(app: FastifyInstance) {
           }
           return null;
         } catch (e) {
-          req.log.error({ error: `[Plans] Error checking existing recipe for ${mealName}:`, e, requestId: (req as any).requestId });
+          console.error(`[Plans] Error checking existing recipe for ${mealName}:`, e);
           return null;
         }
       };
@@ -518,7 +518,7 @@ export async function plansRoutes(app: FastifyInstance) {
                 
                 if (existingRecipe) {
                   // Use existing recipe from database
-                  req.log.info(`[Plans] Using existing recipe from DB: ${mealName}`);
+                  console.log(`[Plans] Using existing recipe from DB: ${mealName}`);
                   meal.recipe.ingredients = existingRecipe.ingredients || meal.recipe.ingredients;
                   meal.recipe.instructions = existingRecipe.instructions || meal.recipe.instructions;
                   meal.recipe.time = existingRecipe.time || meal.recipe.time;
@@ -666,7 +666,7 @@ export async function plansRoutes(app: FastifyInstance) {
       if (existingMealResult.rows.length > 0 && !body.avoidItem) {
         // Use existing recipe from database if it matches and user didn't explicitly avoid it
         const existing = existingMealResult.rows[0];
-        req.log.info(`[Plans] Using existing recipe from DB for reroll: ${existing.name}`);
+        console.log(`[Plans] Using existing recipe from DB for reroll: ${existing.name}`);
         meal = {
           type: body.type,
           recipe: {
@@ -701,7 +701,7 @@ export async function plansRoutes(app: FastifyInstance) {
         if (existingRecipeResult.rows.length > 0) {
           // Use existing recipe from database instead of generated one
           const existing = existingRecipeResult.rows[0];
-          req.log.info(`[Plans] Generated meal already exists in DB, using existing: ${meal.recipe.name}`);
+          console.log(`[Plans] Generated meal already exists in DB, using existing: ${meal.recipe.name}`);
           meal.recipe.ingredients = existing.ingredients ? (typeof existing.ingredients === 'string' ? JSON.parse(existing.ingredients) : existing.ingredients) : meal.recipe.ingredients;
           meal.recipe.instructions = existing.instructions ? (typeof existing.instructions === 'string' ? JSON.parse(existing.instructions) : existing.instructions) : meal.recipe.instructions;
           meal.recipe.time = existing.time_label || meal.recipe.time;
@@ -776,7 +776,7 @@ export async function plansRoutes(app: FastifyInstance) {
     } catch (e: any) {
       await client.query('ROLLBACK').catch(() => { }); // Ignore if already rolled back
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: "reroll meal failed", e, requestId: (req as any).requestId });
+      console.error("reroll meal failed", e);
       return reply.status(500).send({ error: isProduction ? 'Meal reroll service unavailable' : (e.message || 'Reroll meal failed') });
     } finally {
       client.release();
@@ -878,7 +878,7 @@ export async function plansRoutes(app: FastifyInstance) {
     } catch (e: any) {
       await client.query('ROLLBACK').catch(() => { }); // Ignore if already rolled back
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: "reroll exercise failed", e, requestId: (req as any).requestId });
+      console.error("reroll exercise failed", e);
       return reply.status(500).send({ error: isProduction ? 'Exercise reroll service unavailable' : (e.message || 'Reroll exercise failed') });
     } finally {
       client.release();

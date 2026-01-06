@@ -56,6 +56,48 @@ export class AuthService {
     return { user: { id: user.id, email: user.email, username: user.username }, token };
   }
 
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Get current password hash
+      const { rows } = await client.query(
+        'SELECT password_hash FROM users WHERE id = $1',
+        [userId]
+      );
+
+      if (rows.length === 0) {
+        throw new Error('User not found');
+      }
+
+      // Verify current password
+      const user = rows[0];
+      const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password_hash);
+      
+      if (!isCurrentPasswordValid) {
+        throw new Error('Current password is incorrect');
+      }
+
+      // Hash new password
+      const newHash = await bcrypt.hash(newPassword, 10);
+
+      // Update password
+      await client.query(
+        'UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2',
+        [newHash, userId]
+      );
+
+      await client.query('COMMIT');
+      return { success: true };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
   issueToken(payload: JwtPayload) {
     return jwt.sign(payload, env.jwtSecret, { expiresIn: this.accessTtlSec });
   }

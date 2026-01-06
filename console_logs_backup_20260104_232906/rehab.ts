@@ -24,7 +24,7 @@ export async function rehabRoutes(app: FastifyInstance) {
       const plan = await generateRehabPlan(body);
       return reply.send({ plan });
     } catch (e: any) {
-      req.log.error({ error: 'Rehab generate failed', e, requestId: (req as any).requestId });
+      console.error('Rehab generate failed', e);
       return reply.status(500).send({ error: e.message || 'Rehab generate failed' });
     }
   });
@@ -60,7 +60,7 @@ export async function rehabRoutes(app: FastifyInstance) {
       return reply.send({ success: true });
     } catch (e: any) {
       await client.query('ROLLBACK');
-      req.log.error({ error: 'Rehab apply failed', e, requestId: (req as any).requestId });
+      console.error('Rehab apply failed', e);
       return reply.status(500).send({ error: e.message || 'Rehab apply failed' });
     } finally {
       client.release();

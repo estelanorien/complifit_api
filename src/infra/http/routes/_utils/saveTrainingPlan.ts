@@ -53,22 +53,27 @@ export const saveTrainingProgram = async (
     }
   }
 
+  // Get current profile_data to preserve all existing data
+  const { rows: profileRows } = await client.query(
+    `SELECT profile_data FROM user_profiles WHERE user_id = $1`,
+    [userId]
+  );
+  
+  const currentProfileData = profileRows.length > 0 ? (profileRows[0].profile_data || {}) : {};
+  
+  // Update only training program related fields, preserve everything else
+  const updatedProfileData = {
+    ...currentProfileData,
+    currentTrainingProgram: trainingPlan,
+    trainingProgramStartDate: startDate || new Date().toISOString().split('T')[0]
+  };
+  
   await client.query(
     `UPDATE user_profiles
-     SET profile_data = jsonb_set(
-         jsonb_set(
-           COALESCE(profile_data, '{}'::jsonb),
-           '{currentTrainingProgram}',
-           $1::jsonb,
-           true
-         ),
-         '{trainingProgramStartDate}',
-         to_jsonb(COALESCE($2, to_char(now(),'YYYY-MM-DD'))::text),
-         true
-       ),
+     SET profile_data = $1::jsonb,
          updated_at = now()
-     WHERE user_id = $3`,
-    [JSON.stringify(trainingPlan), startDate || null, userId]
+     WHERE user_id = $2`,
+    [JSON.stringify(updatedProfileData), userId]
   );
 
   return trainingId;

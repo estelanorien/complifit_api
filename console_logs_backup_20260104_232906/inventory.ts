@@ -308,7 +308,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
       if (error.message === 'NOT_ENOUGH_FLEX') {
         return reply.status(400).send({ error: 'Not enough Flex credits' });
       }
-      req.log.error({ err: error, requestId: (req as any).requestId, message: 'Inventory purchase failed' });
+      console.error('Inventory purchase failed', error);
       return reply.status(500).send({ error: 'Purchase failed' });
     } finally {
       client.release();
@@ -398,7 +398,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
       if (error.message === 'NOT_ENOUGH_ITEMS') {
         return reply.status(400).send({ error: 'Item not available in inventory' });
       }
-      req.log.error({ err: error, requestId: (req as any).requestId, message: 'Inventory consume failed' });
+      console.error('Inventory consume failed', error);
       return reply.status(500).send({ error: 'Consume failed' });
     } finally {
       client.release();

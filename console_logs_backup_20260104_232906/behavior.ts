@@ -75,7 +75,7 @@ export async function behaviorRoutes(app: FastifyInstance) {
       return reply.send(rows[0]);
     } catch (e: any) {
       await client.query('ROLLBACK');
-      req.log.error({ error: 'behavior config save failed', e, requestId: (req as any).requestId });
+      console.error('behavior config save failed', e);
       return reply.status(500).send({ error: e.message || 'Behavior config save failed' });
     } finally {
       client.release();

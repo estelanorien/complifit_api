@@ -78,5 +78,36 @@ export async function authRoutes(app: FastifyInstance) {
     const user = (req as any).user;
     return { user };
   });
+
+  app.post('/auth/change-password', { preHandler: authGuard }, async (req, reply) => {
+    try {
+      const user = (req as any).user;
+      const body = z.object({
+        currentPassword: z.string().min(6),
+        newPassword: z.string().min(8).regex(
+          /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/,
+          'Password must contain at least one uppercase letter, one lowercase letter, and one number'
+        )
+      }).parse(req.body);
+
+      await auth.changePassword(user.userId, body.currentPassword, body.newPassword);
+
+      req.log.info({
+        type: 'password_changed',
+        requestId: (req as any).requestId,
+        userId: user.userId,
+      });
+
+      return reply.send({ success: true, message: 'Password changed successfully' });
+    } catch (e: any) {
+      if (e instanceof z.ZodError) {
+        throw new ValidationError('Validation failed', e);
+      }
+      if (e.message?.includes('Current password is incorrect')) {
+        throw new AuthenticationError('Current password is incorrect');
+      }
+      throw e;
+    }
+  });
 }
 

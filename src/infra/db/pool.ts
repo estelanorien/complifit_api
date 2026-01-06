@@ -12,19 +12,20 @@ export const pool = new Pool({
 });
 
 pool.on('error', (err) => {
-  console.error('Unexpected PG pool error', err);
-  // In production, you might want to send this to an error tracking service
+  // Note: This will be logged by Fastify's logger when pool is used in routes
+  // For standalone errors, we use process stderr
+  process.stderr.write(`Unexpected PG pool error: ${err.message}\n`);
 });
 
 // Graceful shutdown handler
 process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, closing database pool...');
+  process.stdout.write('SIGTERM received, closing database pool...\n');
   await pool.end();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
-  console.log('SIGINT received, closing database pool...');
+  process.stdout.write('SIGINT received, closing database pool...\n');
   await pool.end();
   process.exit(0);
 });

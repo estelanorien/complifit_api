@@ -100,7 +100,7 @@ export async function logsRoutes(app: FastifyInstance) {
     } catch (e: any) {
       await client.query('ROLLBACK');
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'Food log save failed', e, requestId: (req as any).requestId });
+      console.error('Food log save failed', e);
       return reply.status(500).send({ error: isProduction ? 'Failed to save food log' : (e.message || 'Food log save failed') });
     } finally {
       client.release();
@@ -173,7 +173,7 @@ export async function logsRoutes(app: FastifyInstance) {
     } catch (e: any) {
       await client.query('ROLLBACK');
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'Exercise log save failed', e, requestId: (req as any).requestId });
+      console.error('Exercise log save failed', e);
       return reply.status(500).send({ error: isProduction ? 'Failed to save exercise log' : (e.message || 'Exercise log save failed') });
     } finally {
       client.release();
@@ -217,7 +217,7 @@ export async function logsRoutes(app: FastifyInstance) {
     } catch (e: any) {
       await client.query('ROLLBACK');
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'Plan completion log save failed', e, requestId: (req as any).requestId });
+      console.error('Plan completion log save failed', e);
       return reply.status(500).send({ error: isProduction ? 'Failed to save plan completion log' : (e.message || 'Plan completion log save failed') });
     } finally {
       client.release();
@@ -280,7 +280,7 @@ export async function logsRoutes(app: FastifyInstance) {
     } catch (e: any) {
       await client.query('ROLLBACK');
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'Extra exercise log save failed', e, requestId: (req as any).requestId });
+      console.error('Extra exercise log save failed', e);
       return reply.status(500).send({ error: isProduction ? 'Failed to save extra exercise log' : (e.message || 'Extra exercise log save failed') });
     } finally {
       client.release();
@@ -327,7 +327,7 @@ export async function logsRoutes(app: FastifyInstance) {
       return reply.send({ success: true });
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'Day conclusion save failed', e, requestId: (req as any).requestId });
+      console.error('Day conclusion save failed', e);
       return reply.status(500).send({ error: isProduction ? 'Failed to save day conclusion' : (e.message || 'Day conclusion save failed') });
     }
   });
@@ -361,7 +361,7 @@ export async function logsRoutes(app: FastifyInstance) {
       });
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'Day conclusion fetch failed', e, requestId: (req as any).requestId });
+      console.error('Day conclusion fetch failed', e);
       return reply.status(500).send({ error: isProduction ? 'Failed to fetch day conclusion' : (e.message || 'Day conclusion fetch failed') });
     }
   });
@@ -381,7 +381,7 @@ export async function logsRoutes(app: FastifyInstance) {
       return reply.send({ streakCount: parseInt(rows[0]?.count || '0') });
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'Streak count fetch failed', e, requestId: (req as any).requestId });
+      console.error('Streak count fetch failed', e);
       return reply.status(500).send({ error: isProduction ? 'Failed to fetch streak count' : (e.message || 'Streak count fetch failed') });
     }
   });

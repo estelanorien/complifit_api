@@ -41,7 +41,7 @@ const saveMealPlanToDb = async (client: any, userId: string, mealPlan: MealPlan,
               meal.recipe?.time || null,
               toJsonOrNull(meal.recipe?.ingredients || null),
               toJsonOrNull(meal.recipe?.instructions || null),
-              toJsonOrNull((meal.recipe as any)?.nutritionTips || null),
+              toJsonOrNull(meal.recipe?.nutritionTips || null),
               toJsonOrNull(meal)
             ]
           );
@@ -113,13 +113,13 @@ export async function nutritionRoutes(app: FastifyInstance) {
         return reply.send({ nutrition: nutritionPlan, mealPlanId });
       } catch (e: any) {
         await client.query('ROLLBACK');
-        req.log.error({ error: 'nutrition generate save failed', e, requestId: (req as any).requestId });
+        console.error('nutrition generate save failed', e);
         return reply.status(500).send({ error: e.message || 'Nutrition save failed' });
       } finally {
         client.release();
       }
     } catch (e: any) {
-      req.log.error({ error: 'Nutrition generate failed', e, requestId: (req as any).requestId });
+      console.error('Nutrition generate failed', e);
       return reply.status(500).send({ error: e.message || 'Nutrition generate failed' });
     }
   });
@@ -192,7 +192,7 @@ export async function nutritionRoutes(app: FastifyInstance) {
       return reply.send({ success: true });
     } catch (e: any) {
       await client.query('ROLLBACK');
-      req.log.error({ error: 'nutrition archive load failed', e, requestId: (req as any).requestId });
+      console.error('nutrition archive load failed', e);
       return reply.status(500).send({ error: e.message || 'Archive load failed' });
     } finally {
       client.release();

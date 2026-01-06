@@ -203,7 +203,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         workout = JSON.parse(cleaned);
       } catch (e) {
-        req.log.error({ error: 'Failed to parse workout response', e, requestId: (req as any).requestId });
+        console.error('Failed to parse workout response', e);
         return reply.status(500).send({ error: 'Failed to parse AI response' });
       }
 
@@ -213,7 +213,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
 
       return reply.send(workout);
     } catch (e: any) {
-      req.log.error({ error: 'generate-burner-workout failed', e, requestId: (req as any).requestId });
+      console.error('generate-burner-workout failed', e);
       return reply.status(500).send({ error: e.message || 'Generate burner workout failed' });
     }
   });
@@ -302,7 +302,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         meal = JSON.parse(cleaned);
       } catch (e) {
-        req.log.error({ error: 'Failed to parse meal response', e, requestId: (req as any).requestId });
+        console.error('Failed to parse meal response', e);
         return reply.status(500).send({ error: 'Failed to parse AI response' });
       }
 
@@ -312,7 +312,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
 
       return reply.send(meal);
     } catch (e: any) {
-      req.log.error({ error: 'generate-reward-meal failed', e, requestId: (req as any).requestId });
+      console.error('generate-reward-meal failed', e);
       return reply.status(500).send({ error: e.message || 'Generate reward meal failed' });
     }
   });
