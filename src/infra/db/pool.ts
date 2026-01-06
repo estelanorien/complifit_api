@@ -8,7 +8,8 @@ export const pool = new Pool({
   idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
   connectionTimeoutMillis: 10000, // Timeout after 10 seconds if connection cannot be established
   maxUses: 7500, // Close (and replace) a connection after it has been used this many times
-  allowExitOnIdle: false // Don't allow process to exit while clients are connected
+  allowExitOnIdle: false, // Don't allow process to exit while clients are connected
+  ssl: env.nodeEnv === 'production' || env.databaseUrl.includes('104.199') ? { rejectUnauthorized: false } : undefined
 });
 
 pool.on('error', (err) => {
