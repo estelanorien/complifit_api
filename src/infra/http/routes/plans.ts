@@ -572,7 +572,9 @@ export async function plansRoutes(app: FastifyInstance) {
 
         // Auto-save to archive so user doesn't need to manually save
         const archiveId = (await client.query('SELECT gen_random_uuid() AS id')).rows[0].id;
-        const archiveName = trainingPlan?.name || nutritionPlan?.name || 'Smart Plan';
+        const timestamp = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const baseName = trainingPlan?.name || nutritionPlan?.name || 'Smart Plan';
+        const archiveName = `${baseName} (${timestamp})`;
         const archiveSummary = `${settings.cycleGoal || 'Fitness'} • ${settings.frequency || 4} Days/Wk • ${settings.duration || 7} Day Cycle`;
         await client.query(
           `INSERT INTO saved_smart_plans(id, user_id, name, date_created, training, nutrition, progress_day_index, summary)
