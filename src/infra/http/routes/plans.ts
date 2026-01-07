@@ -322,7 +322,7 @@ export async function plansRoutes(app: FastifyInstance) {
 
     const { profile, settings, lang, calculatedBiometrics } = body;
     const apiKey = env.geminiApiKey;
-    const genEndpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent';
+    const genEndpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
     // Extract values
     const focusAreas = profile.focusAreas || [];
@@ -647,7 +647,7 @@ export async function plansRoutes(app: FastifyInstance) {
     - Base tips on real nutritional science, not generic advice
     `;
 
-    const genEndpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent';
+    const genEndpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
     const callGemini = async () => {
       const res = await fetch(genEndpoint, {
         method: 'POST',
@@ -849,7 +849,7 @@ export async function plansRoutes(app: FastifyInstance) {
       `;
     }
 
-    const genEndpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent';
+    const genEndpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
     const callGemini = async () => {
       const res = await fetch(genEndpoint, {
         method: 'POST',
