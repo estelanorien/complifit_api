@@ -961,5 +961,126 @@ export async function plansRoutes(app: FastifyInstance) {
       client.release();
     }
   });
+
+  // Smart Refactor - AI-powered redistribution of missed items to future days
+  app.post('/plans/smart-refactor', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
+
+    const bodySchema = z.object({
+      missedCalories: z.number(),
+      missedWorkouts: z.number(),
+      currentDate: z.string(),
+      daysToDistribute: z.number().default(7),
+      userProfile: z.object({
+        fitnessLevel: z.string().optional(),
+        primaryGoal: z.string().optional(),
+        dietaryPreference: z.string().optional(),
+        dailyCalorieTarget: z.number().optional()
+      }).optional()
+    });
+
+    const body = bodySchema.parse(req.body);
+    const { missedCalories, missedWorkouts, currentDate, daysToDistribute, userProfile } = body;
+
+    // Safety limits
+    const MAX_EXTRA_CALORIES_PER_DAY = 300; // Max extra calories per day for safe deficit recovery
+    const MAX_EXTRA_EXERCISES_PER_DAY = 2; // Max extra exercises per day
+
+    const prompt = `
+    You are a certified nutrition and fitness coach. A user has skipped their plan today and needs to safely redistribute the missed items over the next ${daysToDistribute} days.
+
+    MISSED TODAY:
+    - Calories: ${missedCalories} kcal (not consumed)
+    - Workouts: ${missedWorkouts} session(s)
+
+    USER PROFILE:
+    - Fitness Level: ${userProfile?.fitnessLevel || 'intermediate'}
+    - Goal: ${userProfile?.primaryGoal || 'general fitness'}
+    - Diet: ${userProfile?.dietaryPreference || 'balanced'}
+    - Daily Target: ${userProfile?.dailyCalorieTarget || 2000} kcal
+
+    SAFETY CONSTRAINTS (CRITICAL):
+    1. Never recommend more than ${MAX_EXTRA_CALORIES_PER_DAY} kcal deficit per day
+    2. Never add more than ${MAX_EXTRA_EXERCISES_PER_DAY} extra exercises per day
+    3. Include at least 1 rest day in the recovery week
+    4. Prioritize gradual recovery over aggressive catch-up
+    5. Consider user's fitness level - beginners need gentler plans
+
+    OUTPUT JSON ONLY:
+    {
+      "summary": "Brief explanation of the recovery plan",
+      "totalRecoveryDays": <number>,
+      "dailyAdjustments": [
+        {
+          "dayOffset": 1,
+          "extraCalorieDeficit": <number 0-${MAX_EXTRA_CALORIES_PER_DAY}>,
+          "extraExercises": <number 0-${MAX_EXTRA_EXERCISES_PER_DAY}>,
+          "exerciseSuggestion": "light cardio" | "strength" | "HIIT" | "rest",
+          "note": "Brief note about this day"
+        }
+      ],
+      "safetyNote": "Important health note for user",
+      "canFullyRecover": <boolean - true if all missed items can be safely recovered>
+    }
+    `;
+
+    try {
+      const genEndpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
+      const res = await fetch(`${genEndpoint}?key=${env.geminiApiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 2000 }
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        req.log.error({ error: errText }, 'Gemini smart-refactor failed');
+        return reply.status(500).send({ error: 'AI service unavailable' });
+      }
+
+      const data = await res.json() as any;
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+      if (!text) {
+        return reply.status(500).send({ error: 'Empty response from AI' });
+      }
+
+      const plan = JSON.parse(cleanGeminiJson(text));
+
+      // Validate safety constraints
+      if (plan.dailyAdjustments) {
+        for (const adj of plan.dailyAdjustments) {
+          if (adj.extraCalorieDeficit > MAX_EXTRA_CALORIES_PER_DAY) {
+            adj.extraCalorieDeficit = MAX_EXTRA_CALORIES_PER_DAY;
+            adj.note = `(Capped at ${MAX_EXTRA_CALORIES_PER_DAY} kcal for safety) ${adj.note || ''}`;
+          }
+          if (adj.extraExercises > MAX_EXTRA_EXERCISES_PER_DAY) {
+            adj.extraExercises = MAX_EXTRA_EXERCISES_PER_DAY;
+          }
+        }
+      }
+
+      // Log the refactor action
+      await pool.query(
+        `INSERT INTO activity_logs(id, user_id, action, metadata, created_at)
+         VALUES(gen_random_uuid(), $1, 'smart_refactor', $2, now())`,
+        [user.userId, JSON.stringify({ currentDate, missedCalories, missedWorkouts, plan })]
+      );
+
+      return reply.send({
+        success: true,
+        refactorPlan: plan,
+        appliedAt: new Date().toISOString()
+      });
+
+    } catch (e: any) {
+      req.log.error({ error: e }, 'Smart refactor failed');
+      return reply.status(500).send({ error: e.message || 'Smart refactor failed' });
+    }
+  });
 }
 
