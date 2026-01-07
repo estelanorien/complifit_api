@@ -962,7 +962,7 @@ export async function plansRoutes(app: FastifyInstance) {
     }
   });
 
-  // Smart Refactor - AI-powered redistribution of missed items to future days
+  // Smart Refactor - AI-powered redistribution of missed items into existing plan
   app.post('/plans/smart-refactor', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as any).user;
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
@@ -970,58 +970,75 @@ export async function plansRoutes(app: FastifyInstance) {
     const bodySchema = z.object({
       missedCalories: z.number(),
       missedWorkouts: z.number(),
-      currentDate: z.string(),
-      daysToDistribute: z.number().default(7),
+      currentDayIndex: z.number(), // Which day of the plan user is on (0-indexed)
+      currentTrainingPlan: z.any(), // The user's current training plan
+      currentNutritionPlan: z.any(), // The user's current meal plan
       userProfile: z.object({
         fitnessLevel: z.string().optional(),
         primaryGoal: z.string().optional(),
-        dietaryPreference: z.string().optional(),
-        dailyCalorieTarget: z.number().optional()
+        dietaryPreference: z.string().optional()
       }).optional()
     });
 
     const body = bodySchema.parse(req.body);
-    const { missedCalories, missedWorkouts, currentDate, daysToDistribute, userProfile } = body;
+    const { missedCalories, missedWorkouts, currentDayIndex, currentTrainingPlan, currentNutritionPlan, userProfile } = body;
+
+    // Calculate remaining days in the plan
+    const totalTrainingDays = currentTrainingPlan?.schedule?.length || 7;
+    const totalNutritionDays = currentNutritionPlan?.days?.length || 7;
+    const remainingDays = Math.max(totalTrainingDays, totalNutritionDays) - currentDayIndex - 1;
+
+    if (remainingDays <= 0) {
+      return reply.status(400).send({ error: 'No remaining days in plan to redistribute items' });
+    }
 
     // Safety limits
-    const MAX_EXTRA_CALORIES_PER_DAY = 300; // Max extra calories per day for safe deficit recovery
-    const MAX_EXTRA_EXERCISES_PER_DAY = 2; // Max extra exercises per day
+    const MAX_EXTRA_CALORIES_PER_DAY = 200; // Smaller daily adjustment for in-plan distribution
+    const MAX_EXTRA_SETS_PER_DAY = 3; // Extra sets, not whole exercises
 
     const prompt = `
-    You are a certified nutrition and fitness coach. A user has skipped their plan today and needs to safely redistribute the missed items over the next ${daysToDistribute} days.
+    You are a certified fitness coach. A user has skipped today's items and needs them redistributed SAFELY into their remaining plan.
 
     MISSED TODAY:
-    - Calories: ${missedCalories} kcal (not consumed)
+    - Calories: ${missedCalories} kcal (meals skipped)
     - Workouts: ${missedWorkouts} session(s)
+
+    CURRENT PLAN DETAILS:
+    - Current day: ${currentDayIndex + 1} of ${Math.max(totalTrainingDays, totalNutritionDays)}
+    - Remaining days: ${remainingDays}
+    - Training schedule has ${totalTrainingDays} days
+    - Nutrition plan has ${totalNutritionDays} days
 
     USER PROFILE:
     - Fitness Level: ${userProfile?.fitnessLevel || 'intermediate'}
     - Goal: ${userProfile?.primaryGoal || 'general fitness'}
     - Diet: ${userProfile?.dietaryPreference || 'balanced'}
-    - Daily Target: ${userProfile?.dailyCalorieTarget || 2000} kcal
 
-    SAFETY CONSTRAINTS (CRITICAL):
-    1. Never recommend more than ${MAX_EXTRA_CALORIES_PER_DAY} kcal deficit per day
-    2. Never add more than ${MAX_EXTRA_EXERCISES_PER_DAY} extra exercises per day
-    3. Include at least 1 rest day in the recovery week
-    4. Prioritize gradual recovery over aggressive catch-up
-    5. Consider user's fitness level - beginners need gentler plans
+    SAFETY CONSTRAINTS (CRITICAL - MUST FOLLOW):
+    1. Max ${MAX_EXTRA_CALORIES_PER_DAY} kcal extra per day (spread deficit evenly)
+    2. Max ${MAX_EXTRA_SETS_PER_DAY} extra exercise sets per day
+    3. If missed workouts, add them to REST DAYS only - never double up intense days
+    4. If calories can't be fully recovered safely, that's OK - health first
+    5. Never exceed user's fitness level capabilities
+
+    TASK: Return modifications to apply to the remaining days of the plan.
 
     OUTPUT JSON ONLY:
     {
-      "summary": "Brief explanation of the recovery plan",
-      "totalRecoveryDays": <number>,
-      "dailyAdjustments": [
+      "summary": "Brief explanation of how missed items are being redistributed",
+      "safetyNote": "Important health reminder for the user",
+      "canFullyRecover": <boolean>,
+      "unrecoverableCalories": <number - calories that can't be safely recovered>,
+      "unrecoverableWorkouts": <number - workouts that can't fit safely>,
+      "modifications": [
         {
-          "dayOffset": 1,
-          "extraCalorieDeficit": <number 0-${MAX_EXTRA_CALORIES_PER_DAY}>,
-          "extraExercises": <number 0-${MAX_EXTRA_EXERCISES_PER_DAY}>,
-          "exerciseSuggestion": "light cardio" | "strength" | "HIIT" | "rest",
-          "note": "Brief note about this day"
+          "dayIndex": <number - 0-indexed day of plan to modify>,
+          "type": "nutrition" | "training",
+          "action": "increase_calories" | "add_exercise" | "increase_sets",
+          "amount": <number - calories to add OR sets to add>,
+          "note": "Brief explanation"
         }
-      ],
-      "safetyNote": "Important health note for user",
-      "canFullyRecover": <boolean - true if all missed items can be safely recovered>
+      ]
     }
     `;
 
@@ -1049,17 +1066,17 @@ export async function plansRoutes(app: FastifyInstance) {
         return reply.status(500).send({ error: 'Empty response from AI' });
       }
 
-      const plan = JSON.parse(cleanGeminiJson(text));
+      const refactorResult = JSON.parse(cleanGeminiJson(text));
 
-      // Validate safety constraints
-      if (plan.dailyAdjustments) {
-        for (const adj of plan.dailyAdjustments) {
-          if (adj.extraCalorieDeficit > MAX_EXTRA_CALORIES_PER_DAY) {
-            adj.extraCalorieDeficit = MAX_EXTRA_CALORIES_PER_DAY;
-            adj.note = `(Capped at ${MAX_EXTRA_CALORIES_PER_DAY} kcal for safety) ${adj.note || ''}`;
+      // Validate and cap modifications for safety
+      if (refactorResult.modifications) {
+        for (const mod of refactorResult.modifications) {
+          if (mod.type === 'nutrition' && mod.amount > MAX_EXTRA_CALORIES_PER_DAY) {
+            mod.amount = MAX_EXTRA_CALORIES_PER_DAY;
+            mod.note = `(Capped at ${MAX_EXTRA_CALORIES_PER_DAY} kcal for safety) ${mod.note || ''}`;
           }
-          if (adj.extraExercises > MAX_EXTRA_EXERCISES_PER_DAY) {
-            adj.extraExercises = MAX_EXTRA_EXERCISES_PER_DAY;
+          if (mod.type === 'training' && mod.action === 'increase_sets' && mod.amount > MAX_EXTRA_SETS_PER_DAY) {
+            mod.amount = MAX_EXTRA_SETS_PER_DAY;
           }
         }
       }
@@ -1068,12 +1085,12 @@ export async function plansRoutes(app: FastifyInstance) {
       await pool.query(
         `INSERT INTO activity_logs(id, user_id, action, metadata, created_at)
          VALUES(gen_random_uuid(), $1, 'smart_refactor', $2, now())`,
-        [user.userId, JSON.stringify({ currentDate, missedCalories, missedWorkouts, plan })]
+        [user.userId, JSON.stringify({ currentDayIndex, missedCalories, missedWorkouts, result: refactorResult })]
       );
 
       return reply.send({
         success: true,
-        refactorPlan: plan,
+        refactorPlan: refactorResult,
         appliedAt: new Date().toISOString()
       });
 
