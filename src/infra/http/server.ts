@@ -30,11 +30,11 @@ import { locationRoutes } from './routes/location';
 import { requestLogger, responseLogger, errorLogger } from './hooks/requestLogger';
 import { requestIdMiddleware } from './middleware/requestId';
 import { errorHandler } from './middleware/errors';
-import { 
-  registerGlobalRateLimit, 
-  registerAuthRateLimit, 
-  registerAiRateLimit, 
-  registerAdminRateLimit 
+import {
+  registerGlobalRateLimit,
+  registerAuthRateLimit,
+  registerAiRateLimit,
+  registerAdminRateLimit
 } from './middleware/rateLimit';
 
 import { env } from '../../config/env';
@@ -58,7 +58,7 @@ export function buildServer() {
       },
     },
     bodyLimit: 10 * 1024 * 1024,
-    requestTimeout: 30000, // 30 second timeout
+    requestTimeout: 300000, // 5 minutes timeout
     requestIdHeader: 'x-request-id', // Use custom header for request ID
     requestIdLogLabel: 'requestId',
     disableRequestLogging: false,
@@ -67,15 +67,15 @@ export function buildServer() {
   // CORS configuration - production-safe
   const corsOptions = env.nodeEnv === 'production' && env.allowedOrigins
     ? {
-        origin: env.allowedOrigins,
-        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        credentials: true
-      }
+      origin: env.allowedOrigins,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      credentials: true
+    }
     : {
-        origin: ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5174'],
-        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        credentials: true
-      };
+      origin: ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5174'],
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      credentials: true
+    };
 
   // Security headers
   app.register(helmet, {
@@ -113,7 +113,7 @@ export function buildServer() {
 
   // Register routes with specific rate limiting
   app.register(healthRoutes, { prefix: '/api' });
-  
+
   // Auth routes with strict rate limiting
   app.register(async function (app) {
     registerAuthRateLimit(app);
