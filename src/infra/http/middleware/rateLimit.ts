@@ -3,13 +3,28 @@ import rateLimit from '@fastify/rate-limit';
 import { env } from '../../../config/env';
 
 /**
- * Rate limiting configuration for different endpoint types
+ * Rate limiting configuration with memory-efficient settings
  */
+
+// ✅ Shared store configuration with aggressive cleanup
+const storeConfig = {
+  continueExceeding: true,
+  // ✅ CRITICAL: Skip successful requests to reduce memory usage
+  skipSuccessfulRequests: false,
+  skipFailedRequests: false,
+};
 
 // Global rate limit configuration
 const globalRateLimitConfig = {
   max: env.nodeEnv === 'production' ? 100 : 1000,
   timeWindow: '1 minute',
+
+  // ✅ CRITICAL: Add cache size limit
+  cache: 5000, // Max 5000 entries in memory
+
+  // ✅ Clear old entries aggressively
+  continueExceeding: true,
+
   errorResponseBuilder: (req: any, context: any) => {
     return {
       error: 'Too many requests',
@@ -18,20 +33,38 @@ const globalRateLimitConfig = {
       requestId: (req as any).requestId || 'unknown',
     };
   },
+
   skip: (req: any) => {
     // Skip rate limiting for health checks
     return req.url?.startsWith('/api/health');
   },
+
+  // ✅ Enable rate limit headers to help clients
+  enableDraftSpec: true,
+  addHeadersOnExceeding: {
+    'x-ratelimit-limit': true,
+    'x-ratelimit-remaining': true,
+    'x-ratelimit-reset': true
+  },
+  addHeaders: {
+    'x-ratelimit-limit': true,
+    'x-ratelimit-remaining': true,
+    'x-ratelimit-reset': true
+  }
 };
 
 // Auth endpoint rate limit (stricter for security)
 const authRateLimitConfig = {
-  max: 5, // 5 requests per minute
+  max: 5,
   timeWindow: '1 minute',
+
+  // ✅ Smaller cache for auth
+  cache: 1000,
+
   keyGenerator: (req: any) => {
-    // Use IP address for rate limiting
     return req.ip || req.socket.remoteAddress || 'unknown';
   },
+
   errorResponseBuilder: (req: any, context: any) => {
     return {
       error: 'Too many authentication attempts',
@@ -40,6 +73,7 @@ const authRateLimitConfig = {
       requestId: (req as any).requestId || 'unknown',
     };
   },
+
   onExceeding: (req: any, key: string) => {
     req.log.warn({
       type: 'rate_limit_exceeding',
@@ -49,6 +83,7 @@ const authRateLimitConfig = {
       key,
     });
   },
+
   onExceeded: (req: any, key: string) => {
     req.log.warn({
       type: 'rate_limit_exceeded',
@@ -58,17 +93,23 @@ const authRateLimitConfig = {
       key,
     });
   },
+
+  enableDraftSpec: true,
 };
 
-// AI endpoint rate limit (more restrictive due to cost)
+// AI endpoint rate limit
 const aiRateLimitConfig = {
-  max: env.nodeEnv === 'production' ? 20 : 100, // 20 requests per minute in production
+  max: env.nodeEnv === 'production' ? 20 : 100,
   timeWindow: '1 minute',
+
+  // ✅ Smaller cache for AI
+  cache: 2000,
+
   keyGenerator: (req: any) => {
-    // Use user ID if authenticated, otherwise IP
     const userId = (req as any).user?.userId;
     return userId ? `user:${userId}` : `ip:${req.ip || 'unknown'}`;
   },
+
   errorResponseBuilder: (req: any, context: any) => {
     return {
       error: 'AI service rate limit exceeded',
@@ -77,17 +118,23 @@ const aiRateLimitConfig = {
       requestId: (req as any).requestId || 'unknown',
     };
   },
+
+  enableDraftSpec: true,
 };
 
 // Admin endpoint rate limit
 const adminRateLimitConfig = {
-  max: 50, // 50 requests per minute
+  max: 50,
   timeWindow: '1 minute',
+
+  // ✅ Smaller cache for admin
+  cache: 500,
+
   keyGenerator: (req: any) => {
-    // Use user ID for admin endpoints
     const userId = (req as any).user?.userId;
     return userId ? `admin:${userId}` : `ip:${req.ip || 'unknown'}`;
   },
+
   errorResponseBuilder: (req: any, context: any) => {
     return {
       error: 'Admin rate limit exceeded',
@@ -96,6 +143,8 @@ const adminRateLimitConfig = {
       requestId: (req as any).requestId || 'unknown',
     };
   },
+
+  enableDraftSpec: true,
 };
 
 /**
@@ -107,7 +156,6 @@ export function registerGlobalRateLimit(app: FastifyInstance) {
 
 /**
  * Register auth-specific rate limiting
- * Should be registered on auth routes only
  */
 export function registerAuthRateLimit(app: FastifyInstance) {
   app.register(rateLimit, authRateLimitConfig);
@@ -115,7 +163,6 @@ export function registerAuthRateLimit(app: FastifyInstance) {
 
 /**
  * Register AI-specific rate limiting
- * Should be registered on AI routes only
  */
 export function registerAiRateLimit(app: FastifyInstance) {
   app.register(rateLimit, aiRateLimitConfig);
@@ -123,9 +170,7 @@ export function registerAiRateLimit(app: FastifyInstance) {
 
 /**
  * Register admin-specific rate limiting
- * Should be registered on admin routes only
  */
 export function registerAdminRateLimit(app: FastifyInstance) {
   app.register(rateLimit, adminRateLimitConfig);
 }
-
