@@ -1014,14 +1014,32 @@ export async function plansRoutes(app: FastifyInstance) {
     - Goal: ${userProfile?.primaryGoal || 'general fitness'}
     - Diet: ${userProfile?.dietaryPreference || 'balanced'}
 
-    SAFETY CONSTRAINTS (CRITICAL - MUST FOLLOW):
-    1. Max ${MAX_EXTRA_CALORIES_PER_DAY} kcal extra per day (spread deficit evenly)
-    2. Max ${MAX_EXTRA_SETS_PER_DAY} extra exercise sets per day
-    3. If missed workouts, add them to REST DAYS only - never double up intense days
-    4. If calories can't be fully recovered safely, that's OK - health first
-    5. Never exceed user's fitness level capabilities
+    MUSCLE GROUP RECOVERY SCIENCE (FOLLOW STRICTLY):
+    - Muscle groups need 48-72 hours recovery before training again
+    - DIFFERENT muscle groups CAN be trained on consecutive days
+    - Examples of compatible pairings (can add exercises to these days):
+      * Leg exercises → Chest/Back/Shoulder days (safe - different muscles)
+      * Chest exercises → Leg/Back days (safe)
+      * Back exercises → Chest/Leg days (safe)  
+      * Arm exercises → Any non-arm day (safe)
+    - NEVER add exercises to a day training the SAME muscle group
+    - Compound exercises (squats, deadlifts, bench) are more taxing - limit to 2-3 extra sets
+    - Isolation exercises (curls, extensions) are less taxing - can add 3-4 extra sets
+    
+    REST DAY RULES:
+    - REST days can receive light-moderate exercises from missed sessions
+    - Don't turn a rest day into a full intense workout
+    - Max 1 compound exercise OR 2-3 isolation exercises on rest days
 
-    TASK: Return modifications to apply to the remaining days of the plan.
+    SAFETY CONSTRAINTS:
+    1. Max ${MAX_EXTRA_CALORIES_PER_DAY} kcal extra per day (spread deficit evenly)
+    2. Max ${MAX_EXTRA_SETS_PER_DAY} extra sets per day on training days
+    3. Prioritize adding to days with NON-OVERLAPPING muscle groups first
+    4. If rest day, keep additions light (max 15-20 min extra work)
+    5. Never exceed user's fitness level capabilities
+    6. If can't redistribute safely, leave items unrecovered - health first
+
+    TASK: Analyze the missed exercises and redistribute them to compatible training days OR rest days in the remaining plan.
 
     OUTPUT JSON ONLY:
     {
