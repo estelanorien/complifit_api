@@ -75,7 +75,7 @@ export async function adminRoutes(app: FastifyInstance) {
           value = `data:image/png;base64,${inline.inlineData.data}`;
         }
       } else if (mode === 'json') {
-        const model = 'models/gemini-1.5-flash';
+        const model = 'models/gemini-3-flash-preview';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
         
         const res = await fetch(genEndpoint, {
@@ -101,7 +101,7 @@ export async function adminRoutes(app: FastifyInstance) {
         value = text;
       } else {
         // video placeholder: return raw text
-        const model = 'models/gemini-1.5-flash';
+        const model = 'models/gemini-3-flash-preview';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
         
         const res = await fetch(genEndpoint, {
