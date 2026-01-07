@@ -17,10 +17,20 @@ steps:
       - '--image'
       - 'gcr.io/$PROJECT_ID/vitality-api'
       - '--region'
-      - 'europe-west1' # Default region, can be changed
+      - 'europe-west1'
       - '--platform'
       - 'managed'
       - '--allow-unauthenticated'
+      - '--memory'
+      - '2Gi'
+      - '--cpu'
+      - '2'
+      - '--timeout'
+      - '300s'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '3'
 
 images:
   - 'gcr.io/$PROJECT_ID/vitality-api'
