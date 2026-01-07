@@ -31,6 +31,8 @@ steps:
       - '0'
       - '--max-instances'
       - '3'
+      - '--update-env-vars'
+      - 'PORT=8080'
 
 images:
   - 'gcr.io/$PROJECT_ID/vitality-api'
