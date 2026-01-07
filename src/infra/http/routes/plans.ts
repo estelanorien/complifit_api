@@ -21,12 +21,19 @@ const loadSchema = z.object({
 
 export async function plansRoutes(app: FastifyInstance) {
   const cleanGeminiJson = (text: string): string => {
-    if (!text) return text;
+    if (!text) return '{}';
+    // Find the first '{' and the last '}'
+    const callbackOpen = text.indexOf('{');
+    const callbackClose = text.lastIndexOf('}');
+
+    if (callbackOpen !== -1 && callbackClose !== -1 && callbackClose > callbackOpen) {
+      return text.substring(callbackOpen, callbackClose + 1);
+    }
+
+    // Fallback: try cleanup of markdown only if braces not found (unlikely for JSON)
     let cleaned = text.trim();
     cleaned = cleaned.replace(/^```[a-zA-Z]*\s*/, '').replace(/```$/, '').trim();
-    if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
-    if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
-    return cleaned.trim();
+    return cleaned;
   };
   const savePlanToDb = async (client: any, userId: string, training: any, nutrition: any, startDate?: string) => {
     const trainingId = (await client.query('SELECT gen_random_uuid() AS id')).rows[0].id;
@@ -194,7 +201,7 @@ export async function plansRoutes(app: FastifyInstance) {
     );
     if (rows.length === 0) return reply.status(404).send({ error: 'Not found' });
     const r = rows[0];
-    
+
     // Calculate start date based on progress
     let startDate = new Date().toISOString().split('T')[0];
     if (r.progress_day_index) {
@@ -202,7 +209,7 @@ export async function plansRoutes(app: FastifyInstance) {
       d.setDate(d.getDate() - r.progress_day_index);
       startDate = d.toISOString().split('T')[0];
     }
-    
+
     // Apply plan to user profile
     await pool.query(
       `UPDATE user_profiles
@@ -227,7 +234,7 @@ export async function plansRoutes(app: FastifyInstance) {
        WHERE user_id = $4`,
       [JSON.stringify(r.training), JSON.stringify(r.nutrition), startDate, user.userId]
     );
-    
+
     return {
       id: r.id,
       name: r.name,
@@ -457,7 +464,7 @@ export async function plansRoutes(app: FastifyInstance) {
              LIMIT 1`,
             [mealName]
           );
-          
+
           if (result.rows.length > 0) {
             const existing = result.rows[0];
             return {
@@ -481,13 +488,13 @@ export async function plansRoutes(app: FastifyInstance) {
         if (!Array.isArray(instructions)) {
           return [{ simple: 'Enjoy mindfully.', detailed: 'Enjoy this meal mindfully and savor each bite.' }];
         }
-        
+
         return instructions.map((inst: any) => {
           // If already in InstructionBlock format
           if (typeof inst === 'object' && inst !== null && inst.simple && inst.detailed) {
             return inst;
           }
-          
+
           // If it's a string, create both simple and detailed versions
           if (typeof inst === 'string') {
             const simple = inst.length > 80 ? inst.substring(0, 80) + '...' : inst;
@@ -496,7 +503,7 @@ export async function plansRoutes(app: FastifyInstance) {
               detailed: inst
             };
           }
-          
+
           // Fallback
           return {
             simple: 'Prepare as directed.',
@@ -511,11 +518,11 @@ export async function plansRoutes(app: FastifyInstance) {
           if (Array.isArray(day.meals)) {
             for (const meal of day.meals) {
               const mealName = meal?.recipe?.name;
-              
+
               if (mealName) {
                 // Check database for existing recipe
                 const existingRecipe = await getExistingRecipe(mealName);
-                
+
                 if (existingRecipe) {
                   // Use existing recipe from database
                   req.log.info(`[Plans] Using existing recipe from DB: ${mealName}`);
@@ -529,7 +536,7 @@ export async function plansRoutes(app: FastifyInstance) {
                   }
                 }
               }
-              
+
               // Normalize instructions
               if (meal?.recipe?.instructions) {
                 meal.recipe.instructions = normalizeInstructions(meal.recipe.instructions);
@@ -718,13 +725,13 @@ export async function plansRoutes(app: FastifyInstance) {
         if (!Array.isArray(instructions)) {
           return [{ simple: 'Enjoy mindfully.', detailed: 'Enjoy this meal mindfully and savor each bite.' }];
         }
-        
+
         return instructions.map((inst: any) => {
           // If already in InstructionBlock format
           if (typeof inst === 'object' && inst !== null && inst.simple && inst.detailed) {
             return inst;
           }
-          
+
           // If it's a string, create both simple and detailed versions
           if (typeof inst === 'string') {
             const simple = inst.length > 80 ? inst.substring(0, 80) + '...' : inst;
@@ -733,7 +740,7 @@ export async function plansRoutes(app: FastifyInstance) {
               detailed: inst
             };
           }
-          
+
           // Fallback
           return {
             simple: 'Prepare as directed.',
