@@ -436,8 +436,23 @@ export async function plansRoutes(app: FastifyInstance) {
         const isProduction = process.env.NODE_ENV === 'production';
         throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
       }
-      const data: any = await res.json();
+
+      let data: any;
+      try {
+        const rawText = await res.text();
+        if (!rawText || rawText.trim() === '') {
+          throw new Error('Empty response body from Google API');
+        }
+        data = JSON.parse(rawText);
+      } catch (parseError: any) {
+        throw new Error(`Gemini Response Parse Error: ${parseError.message}`);
+      }
+
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      if (!text) {
+        req.log.warn({ requestId: (req as any).requestId, data }, 'Gemini returned no text content candidate');
+        // Fallback? No, return empty string which handling logic defaults to {}
+      }
       return text;
     };
 
