@@ -432,6 +432,8 @@ export async function plansRoutes(app: FastifyInstance) {
     Excludes: ${excludes.join(', ') || "None"}.
     Language: ${lang}.
     
+    PRE-WORKOUT NUTRITION TIMING: If including pre-workout snacks, they should be scheduled 30-60 minutes BEFORE the workout, not hours before. For example, if workout is at 6:00 PM, pre-workout snack should be at 5:00-5:30 PM. Label pre-workout meals with type "pre_workout" and post-workout meals with type "post_workout" to link them with training sessions.
+    
     IMPORTANT: You MUST generate a full UNIQUE meal plan for ALL ${durationDays} DAYS. Do not stop at Day 7. The 'days' array must have ${durationDays} items.
     
     OUTPUT JSON ONLY: { "name": "...", "overview": "...", "days": [{"day": "Day 1", "meals": [{"type": "breakfast", "recipe": {"name": "Name", "calories": 500, "time": "15 min", "ingredients": [], "instructions": [{"simple": "Quick instruction (max 15 words)", "detailed": "Detailed instruction with tips (2-3 sentences)"}], "nutritionTips": ["Scientific tip 1", "Scientific tip 2"]}}]}] }
