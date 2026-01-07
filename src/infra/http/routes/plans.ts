@@ -569,8 +569,19 @@ export async function plansRoutes(app: FastifyInstance) {
         await client.query('SET statement_timeout = 30000'); // 30 seconds timeout
         await client.query('BEGIN');
         const { trainingId, mealPlanId } = await savePlanToDb(client, user.userId, trainingPlan, nutritionPlan, body.startDate);
+
+        // Auto-save to archive so user doesn't need to manually save
+        const archiveId = (await client.query('SELECT gen_random_uuid() AS id')).rows[0].id;
+        const archiveName = trainingPlan?.name || nutritionPlan?.name || 'Smart Plan';
+        const archiveSummary = `${settings.cycleGoal || 'Fitness'} • ${settings.frequency || 4} Days/Wk • ${settings.duration || 7} Day Cycle`;
+        await client.query(
+          `INSERT INTO saved_smart_plans(id, user_id, name, date_created, training, nutrition, progress_day_index, summary)
+           VALUES($1,$2,$3,now(),$4,$5,0,$6)`,
+          [archiveId, user.userId, archiveName, trainingPlan, nutritionPlan, archiveSummary]
+        );
+
         await client.query('COMMIT');
-        return reply.send({ training: trainingPlan, nutrition: nutritionPlan, trainingId, mealPlanId });
+        return reply.send({ training: trainingPlan, nutrition: nutritionPlan, trainingId, mealPlanId, archiveId });
       } catch (e: any) {
         await client.query('ROLLBACK');
         req.log.error({ error: e, requestId: (req as any).requestId }, 'Generate plan save failed');
