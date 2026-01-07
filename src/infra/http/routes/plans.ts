@@ -384,8 +384,10 @@ export async function plansRoutes(app: FastifyInstance) {
       debtBurnerPrompt = `Standard workout structure. No debt repayment obligations.`;
     }
 
+    const durationDays = settings.duration || 7;
+
     const trainingPrompt = `
-    PHASE A (TRAINING - 7 DAY SEED).
+    PHASE A (TRAINING - ${durationDays} DAY CYCLE).
     Freq: ${trainingFrequency} Days/Wk.
     Goals: ${detailedTrainingGoals}. Level: ${profile.fitnessLevel}. Intensity: ${intensity}.
     Equipment: ${equipment.join(', ')}. Focus: [${focusAreas.join(', ')}].
@@ -394,14 +396,14 @@ export async function plansRoutes(app: FastifyInstance) {
     ${safetyPrompt}
     ${debtBurnerPrompt}
     
-    IMPORTANT: Distribute the ${trainingFrequency} workout days evenly across the 7 days (e.g. Day 1: Workout, Day 2: Workout, Day 3: Rest). Do NOT schedule them all consecutively unless requested. Mark rest days clearly locally but in the output array only include workout days if you prefer, or include Rest days with empty exercises. Ideally, return exactly 7 items in the schedule array, marking Rest days clearly.
+    IMPORTANT: Distribute the workouts evenly across the ${durationDays} days. Do NOT schedule them all consecutively unless requested. Mark rest days clearly locally but in the output array only include workout days if you prefer, or include Rest days with empty exercises. Ideally, return exactly ${durationDays} items in the schedule array, marking Rest days clearly.
     
     Return JSON with structure: { "name": "...", "analysis": "...", "schedule": [{"day": "Day 1", "focus": "...", "exercises": [{"name": "...", "sets": "3", "reps": "10", "notes": "", "drillContext": ""}]}] }
     Language: ${lang}
     `;
 
     const nutritionPrompt = `
-    PHASE B (NUTRITION - FULL 7 DAY PLAN).
+    PHASE B (NUTRITION - FULL ${durationDays} DAY PLAN).
     Goals: ${settings.nutritionGoal || detailedTrainingGoals}.
     Diet: ${dietType}. Cuisines: ${cuisines.join(', ') || "Global"}.
     ${chefStylePrompt}
@@ -411,15 +413,14 @@ export async function plansRoutes(app: FastifyInstance) {
     Excludes: ${excludes.join(', ') || "None"}.
     Language: ${lang}.
     
-    IMPORTANT: You MUST generate a full UNIQUE meal plan for ALL 7 DAYS. Do not stop at Day 1. The 'days' array must have 7 items.
+    IMPORTANT: You MUST generate a full UNIQUE meal plan for ALL ${durationDays} DAYS. Do not stop at Day 7. The 'days' array must have ${durationDays} items.
     
     OUTPUT JSON ONLY: { "name": "...", "overview": "...", "days": [{"day": "Day 1", "meals": [{"type": "breakfast", "recipe": {"name": "Name", "calories": 500, "time": "15 min", "ingredients": [], "instructions": [{"simple": "Quick instruction (max 15 words)", "detailed": "Detailed instruction with tips (2-3 sentences)"}], "nutritionTips": ["Scientific tip 1", "Scientific tip 2"]}}]}] }
     
-    CRITICAL: Each instruction MUST be an object with "simple" and "detailed" fields:
-    - "simple": Quick mode - Brief, actionable (max 15 words). Example: "Heat oil in pan, add onions, cook 5 min"
-    - "detailed": Chef mode - Detailed with technique, timing, tips (2-3 sentences). Example: "Heat 2 tbsp olive oil in a large skillet over medium heat. Add diced onions and cook, stirring occasionally, until translucent and fragrant (about 5 minutes). This builds the flavor base for the dish."
-    - Use imperative mood (no "you should", just "Heat", "Add", "Cook")
-    - NO conversational fillers like "Here's how", "First", "Then"
+    CRITICAL: Each instruction MUST be an object with "simple" and "detailed" fields.
+    - "simple": Quick mode (max 15 words).
+    - "detailed": Chef mode (2-3 sentences).
+    - Use imperative mood.
     `;
 
     const callGemini = async (prompt: string) => {
