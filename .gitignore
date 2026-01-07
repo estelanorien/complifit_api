@@ -1,0 +1,65 @@
+# Logs
+logs/
+*.log
+*.log.*
+
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Test coverage
+coverage/
+.nyc_output/
+*.lcov
+
+# Process files
+*.pid
+*.seed
+*.pid.lock
+
+# Certificate and key files
+*.pem
+*.key
+*.crt
+*.cert
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
+
+# PM2
+.pm2/
+ecosystem.config.js.bak
+
+node_modules
