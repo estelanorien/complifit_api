@@ -163,6 +163,25 @@ export async function plansRoutes(app: FastifyInstance) {
   app.post('/plans/archive', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as any).user;
     const body = saveSchema.parse(req.body);
+
+    // Check for recent duplicate saves (within 5 minutes)
+    const recentDuplicate = await pool.query(
+      `SELECT id, name FROM saved_smart_plans 
+       WHERE user_id = $1 
+       AND date_created > NOW() - INTERVAL '5 minutes'
+       LIMIT 1`,
+      [user.userId]
+    );
+
+    if (recentDuplicate.rows.length > 0 && !body.id) {
+      // Duplicate found, return warning
+      return reply.send({
+        id: recentDuplicate.rows[0].id,
+        alreadySaved: true,
+        message: `Plan "${recentDuplicate.rows[0].name}" was already saved recently`
+      });
+    }
+
     const id = body.id || (await pool.query('SELECT gen_random_uuid() AS id')).rows[0].id;
     await pool.query(
       `INSERT INTO saved_smart_plans(id, user_id, name, date_created, training, nutrition, progress_day_index, summary)
@@ -185,7 +204,7 @@ export async function plansRoutes(app: FastifyInstance) {
         body.summary || null
       ]
     );
-    return reply.send({ id });
+    return reply.send({ id, alreadySaved: false });
   });
 
   // Load one and apply to user profile
@@ -571,19 +590,39 @@ export async function plansRoutes(app: FastifyInstance) {
         const { trainingId, mealPlanId } = await savePlanToDb(client, user.userId, trainingPlan, nutritionPlan, body.startDate);
 
         // Auto-save to archive so user doesn't need to manually save
-        const archiveId = (await client.query('SELECT gen_random_uuid() AS id')).rows[0].id;
-        const timestamp = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-        const baseName = trainingPlan?.name || nutritionPlan?.name || 'Smart Plan';
-        const archiveName = `${baseName} (${timestamp})`;
-        const archiveSummary = `${settings.cycleGoal || 'Fitness'} • ${settings.frequency || 4} Days/Wk • ${settings.duration || 7} Day Cycle`;
-        await client.query(
-          `INSERT INTO saved_smart_plans(id, user_id, name, date_created, training, nutrition, progress_day_index, summary)
-           VALUES($1,$2,$3,now(),$4,$5,0,$6)`,
-          [archiveId, user.userId, archiveName, trainingPlan, nutritionPlan, archiveSummary]
+        // First, check if same plan was saved recently (within 5 minutes) to prevent duplicates
+        const recentDuplicate = await client.query(
+          `SELECT id FROM saved_smart_plans 
+           WHERE user_id = $1 
+           AND date_created > NOW() - INTERVAL '5 minutes'
+           LIMIT 1`,
+          [user.userId]
         );
 
+        let archiveId = null;
+        let alreadySaved = false;
+
+        if (recentDuplicate.rows.length > 0) {
+          // Plan was recently saved, skip duplicate save
+          archiveId = recentDuplicate.rows[0].id;
+          alreadySaved = true;
+          req.log.info({ requestId: (req as any).requestId }, 'Skipping duplicate archive save - recent plan exists');
+        } else {
+          // No recent duplicate, save to archive
+          archiveId = (await client.query('SELECT gen_random_uuid() AS id')).rows[0].id;
+          const timestamp = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+          const baseName = trainingPlan?.name || nutritionPlan?.name || 'Smart Plan';
+          const archiveName = `${baseName} (${timestamp})`;
+          const archiveSummary = `${settings.cycleGoal || 'Fitness'} • ${settings.frequency || 4} Days/Wk • ${settings.duration || 7} Day Cycle`;
+          await client.query(
+            `INSERT INTO saved_smart_plans(id, user_id, name, date_created, training, nutrition, progress_day_index, summary)
+             VALUES($1,$2,$3,now(),$4,$5,0,$6)`,
+            [archiveId, user.userId, archiveName, trainingPlan, nutritionPlan, archiveSummary]
+          );
+        }
+
         await client.query('COMMIT');
-        return reply.send({ training: trainingPlan, nutrition: nutritionPlan, trainingId, mealPlanId, archiveId });
+        return reply.send({ training: trainingPlan, nutrition: nutritionPlan, trainingId, mealPlanId, archiveId, alreadySaved });
       } catch (e: any) {
         await client.query('ROLLBACK');
         req.log.error({ error: e, requestId: (req as any).requestId }, 'Generate plan save failed');
