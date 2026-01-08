@@ -74,7 +74,7 @@ export class AuthService {
       // Verify current password
       const user = rows[0];
       const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password_hash);
-      
+
       if (!isCurrentPasswordValid) {
         throw new Error('Current password is incorrect');
       }
@@ -87,6 +87,35 @@ export class AuthService {
         'UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2',
         [newHash, userId]
       );
+
+      await client.query('COMMIT');
+      return { success: true };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  async deleteAccount(userId: string) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Get user details for logging
+      const { rows } = await client.query('SELECT email FROM users WHERE id = $1', [userId]);
+      if (rows.length === 0) throw new Error('User not found');
+      const userEmail = rows[0].email;
+
+      // 2. Log to audit table
+      await client.query(
+        'INSERT INTO deleted_users_log(original_user_id, email, deletion_reason) VALUES($1, $2, $3)',
+        [userId, userEmail, 'User requested deletion']
+      );
+
+      // 3. Delete user (Assumes CASCADE on related tables)
+      await client.query('DELETE FROM users WHERE id = $1', [userId]);
 
       await client.query('COMMIT');
       return { success: true };

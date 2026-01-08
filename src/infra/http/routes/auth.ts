@@ -9,22 +9,22 @@ const auth = new AuthService();
 export async function authRoutes(app: FastifyInstance) {
   app.post('/auth/signup', async (req, reply) => {
     try {
-      const body = z.object({ 
-        email: z.string().email().toLowerCase().trim(), 
-        password: z.string().min(8).regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, 'Password must contain at least one uppercase letter, one lowercase letter, and one number'), 
-        fullName: z.string().optional(), 
-        username: z.string().optional() 
+      const body = z.object({
+        email: z.string().email().toLowerCase().trim(),
+        password: z.string().min(8).regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, 'Password must contain at least one uppercase letter, one lowercase letter, and one number'),
+        fullName: z.string().optional(),
+        username: z.string().optional()
       }).parse(req.body);
-      
+
       const { user, token } = await auth.signUp(body.email, body.password, body.fullName, body.username);
-      
+
       req.log.info({
         type: 'user_signup',
         requestId: (req as any).requestId,
         userId: user.id,
         email: user.email,
       });
-      
+
       return reply.send({ user, token });
     } catch (e: any) {
       if (e instanceof z.ZodError) {
@@ -40,13 +40,13 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/auth/login', async (req, reply) => {
     try {
       // email veya username kabul ediyoruz, bu yüzden sadece min length kontrolü
-      const body = z.object({ 
-        email: z.string().min(1).trim(), 
-        password: z.string().min(6) 
+      const body = z.object({
+        email: z.string().min(1).trim(),
+        password: z.string().min(6)
       }).parse(req.body);
-      
+
       const { user, token } = await auth.signIn(body.email, body.password);
-      
+
       req.log.info({
         type: 'user_login',
         requestId: (req as any).requestId,
@@ -54,7 +54,7 @@ export async function authRoutes(app: FastifyInstance) {
         email: user.email,
         ip: req.ip,
       });
-      
+
       return reply.send({ user, token });
     } catch (e: any) {
       if (e instanceof z.ZodError) {
@@ -108,6 +108,19 @@ export async function authRoutes(app: FastifyInstance) {
       }
       throw e;
     }
+  });
+
+  app.delete('/auth/me', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    await auth.deleteAccount(user.userId);
+
+    req.log.info({
+      type: 'account_deleted',
+      requestId: (req as any).requestId,
+      userId: user.userId,
+    });
+
+    return reply.send({ success: true, message: 'Account deleted successfully' });
   });
 }
 
