@@ -1,6 +1,6 @@
 -- 1. Ledger Entries (The Bank & Vault Transaction History)
 CREATE TABLE ledger_entries (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     user_id UUID REFERENCES users (id) NOT NULL,
     type VARCHAR(50) NOT NULL, -- 'missed_meal', 'missed_workout', 'vault_deposit', 'redeem_vacation', 'extra_food'
     name VARCHAR(255) NOT NULL,
@@ -18,7 +18,7 @@ ADD COLUMN vault_balance INTEGER DEFAULT 0;
 
 -- 3. Behavioral Pledges
 CREATE TABLE user_pledges (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     user_id UUID REFERENCES users (id) NOT NULL,
     type VARCHAR(50) NOT NULL, -- 'iron_contract', 'public_vow', 'momentum'
     goal_type VARCHAR(50) NOT NULL, -- 'log_streak', 'workout_frequency', 'no_sugar', 'sleep_early'
