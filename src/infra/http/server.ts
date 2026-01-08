@@ -27,6 +27,7 @@ import { timelineRoutes } from './routes/timeline';
 import { negotiationRoutes } from './routes/negotiations';
 import { lookupRoutes } from './routes/lookups';
 import { locationRoutes } from './routes/location';
+import { gamificationRoutes } from './routes/gamification';
 import { requestLogger, responseLogger, errorLogger } from './hooks/requestLogger';
 import { requestIdMiddleware } from './middleware/requestId';
 import { errorHandler } from './middleware/errors';
@@ -155,6 +156,7 @@ export function buildServer() {
   app.register(negotiationRoutes, { prefix: '/api' });
   app.register(lookupRoutes, { prefix: '/api' });
   app.register(locationRoutes, { prefix: '/api' });
+  app.register(gamificationRoutes, { prefix: '/api' });
 
   return app;
 }

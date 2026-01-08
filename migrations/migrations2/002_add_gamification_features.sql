@@ -1,17 +1,24 @@
 -- Migration: Add Gamification, Social, and Metabolic Features
--- Created: 2026-01-06
--- 1. Users Table Updates
-ALTER TABLE users
-ADD COLUMN calorie_bank INTEGER DEFAULT 0;
+-- Created: 2026-01-06 (Updated for Idempotency)
 
-ALTER TABLE users
-ADD COLUMN metabolic_status VARCHAR(50) DEFAULT 'adaptive';
+-- 1. Users Table Updates
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='calorie_bank') THEN
+        ALTER TABLE users ADD COLUMN calorie_bank INTEGER DEFAULT 0;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='metabolic_status') THEN
+        ALTER TABLE users ADD COLUMN metabolic_status VARCHAR(50) DEFAULT 'adaptive';
+    END IF;
+END $$;
 
 -- 'adaptive', 'responsive', 'plateau'
 -- Note: Guild ID will be handled via the relationships, or typically users.guild_id
+
 -- 2. Guilds Table
-CREATE TABLE guilds (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
+CREATE TABLE IF NOT EXISTS guilds (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     name VARCHAR(255) NOT NULL,
     description TEXT,
     created_at TIMESTAMP
@@ -25,16 +32,21 @@ CREATE TABLE guilds (
 );
 
 -- Add guild_id to users after creating guilds table
-ALTER TABLE users
-ADD COLUMN guild_id UUID REFERENCES guilds (id);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='guild_id') THEN
+        ALTER TABLE users ADD COLUMN guild_id UUID REFERENCES guilds (id);
+    END IF;
+END $$;
 
 -- 3. Guild Members (Junction - optional if 1:1, but good for history/expansion)
 -- If we stick to 1 guild per user strictly, the users.guild_id FK is sufficient.
 -- If we want to track 'roles' within a guild or multiple guilds, we need this table.
 -- For simpler 'Groups of 5', strict 1-guild logic on users table is often easier.
+
 -- 4. Metabolic Alerts
-CREATE TABLE metabolic_alerts (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
+CREATE TABLE IF NOT EXISTS metabolic_alerts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     user_id UUID REFERENCES users (id) NOT NULL,
     type VARCHAR(50) NOT NULL, -- 'plateau', 'rapid_loss', 'rapid_gain'
     detected_at TIMESTAMP
@@ -46,8 +58,8 @@ CREATE TABLE metabolic_alerts (
 );
 
 -- 5. Health Reports (Snapshots)
-CREATE TABLE health_reports (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
+CREATE TABLE IF NOT EXISTS health_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     user_id UUID REFERENCES users (id) NOT NULL,
     generated_at TIMESTAMP
     WITH
@@ -58,8 +70,8 @@ CREATE TABLE health_reports (
 );
 
 -- 6. Wearable Metrics (Time Series)
-CREATE TABLE wearable_metrics (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
+CREATE TABLE IF NOT EXISTS wearable_metrics (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     user_id UUID REFERENCES users (id) NOT NULL,
     timestamp TIMESTAMP
     WITH
@@ -82,8 +94,7 @@ INSERT INTO
         description,
         type,
         rarity,
-        cost_currency,
-        cost_amount,
+        cost,
         is_consumable
     )
 VALUES
@@ -93,7 +104,6 @@ VALUES
         'Protects your streak for 24 hours. Auto-consumes on missed check-in.',
         'utility',
         'rare',
-        'sparks',
-        250, -- Base cost in Coins
+        '{"currency": "sparks", "amount": 250}',
         TRUE
     ) ON CONFLICT (id) DO NOTHING;
