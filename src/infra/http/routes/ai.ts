@@ -1281,4 +1281,111 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       });
     }
   });
+
+  // Body Composition Analysis - Visual Body Fat Scanner
+  const bodyCompSchema = z.object({
+    imageBase64: z.string().min(100),
+    gender: z.enum(['male', 'female']).optional(),
+    age: z.number().optional(),
+    height: z.number().optional(),
+    weight: z.number().optional()
+  });
+
+  app.post('/ai/analyze-body-composition', { preHandler: authGuard }, async (req, reply) => {
+    const { imageBase64, gender, age, height, weight } = bodyCompSchema.parse(req.body);
+
+    const contextInfo = [
+      gender ? `Gender: ${gender}` : null,
+      age ? `Age: ${age}` : null,
+      height ? `Height: ${height}cm` : null,
+      weight ? `Weight: ${weight}kg` : null
+    ].filter(Boolean).join(', ');
+
+    const prompt = `You are a fitness and body composition analyst. Analyze this body photo and estimate the following metrics.
+
+${contextInfo ? `Context: ${contextInfo}` : ''}
+
+IMPORTANT: This is for educational and motivational purposes only. Make reasonable estimates based on visible physique characteristics.
+
+Analyze and return a JSON object with these fields:
+{
+  "estimatedBodyFatPercentage": number (estimate between 5-50%),
+  "confidenceLevel": "low" | "medium" | "high",
+  "bodyType": "ectomorph" | "mesomorph" | "endomorph" | "combination",
+  "visibleMuscleGroups": ["chest", "shoulders", "arms", "abs", "back", "legs"] (list which are visibly developed),
+  "recommendations": [string] (2-3 actionable fitness tips based on current physique),
+  "analysis": string (2-3 sentence analysis of the physique)
+}
+
+If the image is not a suitable body photo (clothed, face-only, unclear, or inappropriate), return:
+{
+  "error": true,
+  "message": "descriptive reason why analysis could not be performed"
+}
+
+Return ONLY valid JSON, no markdown.`;
+
+    try {
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': aiConfig.geminiApiKey
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType: 'image/jpeg', data: imageBase64.replace(/^data:image\/\w+;base64,/, '') } }
+            ]
+          }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 1024 }
+        })
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`Gemini Vision error ${res.status}: ${txt.substring(0, 200)}`);
+      }
+
+      const data: any = await res.json();
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+
+      // Clean JSON from markdown blocks
+      const cleanJson = rawText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+
+      let parsed;
+      try {
+        parsed = JSON.parse(cleanJson);
+      } catch {
+        return reply.status(400).send({
+          error: true,
+          message: 'Could not parse analysis results'
+        });
+      }
+
+      if (parsed.error) {
+        return reply.status(400).send(parsed);
+      }
+
+      // Store analysis in database for tracking progress
+      const user = (req as any).user;
+      await pool.query(
+        `INSERT INTO body_composition_logs (user_id, estimated_bf, body_type, analysis, created_at)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        [user.userId, parsed.estimatedBodyFatPercentage, parsed.bodyType, JSON.stringify(parsed)]
+      ).catch(() => { /* Table may not exist, ignore */ });
+
+      return reply.send({
+        success: true,
+        ...parsed
+      });
+    } catch (e: any) {
+      req.log.error({ error: 'analyze-body-composition failed', e, requestId: (req as any).requestId });
+      return reply.status(500).send({
+        error: true,
+        message: e.message || 'Body composition analysis failed'
+      });
+    }
+  });
 }
