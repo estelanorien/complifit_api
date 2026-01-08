@@ -10,10 +10,11 @@ const isProduction = nodeEnv === 'production';
 const envSchema = z.object({
   PORT: z.string().optional().transform(val => val ? Number(val) : 8080),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
-  JWT_SECRET: isProduction 
+  JWT_SECRET: isProduction
     ? z.string().min(32, 'JWT_SECRET must be at least 32 characters for production security')
     : z.string().min(1, 'JWT_SECRET is required'),
   GEMINI_API_KEY: z.string().min(1, 'GEMINI_API_KEY is required'),
+  GOOGLE_PLACES_KEY: z.string().optional(),
   NODE_ENV: z.enum(['development', 'production', 'test']).optional().default('development'),
   ALLOWED_ORIGINS: z.string().optional()
 });
@@ -25,6 +26,7 @@ const parseEnv = () => {
       DATABASE_URL: process.env.DATABASE_URL,
       JWT_SECRET: process.env.JWT_SECRET,
       GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+      GOOGLE_PLACES_KEY: process.env.GOOGLE_PLACES_KEY,
       NODE_ENV: process.env.NODE_ENV,
       ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS
     });
@@ -45,6 +47,7 @@ export const env = {
   databaseUrl: envVars.DATABASE_URL,
   jwtSecret: envVars.JWT_SECRET,
   geminiApiKey: envVars.GEMINI_API_KEY,
+  googlePlacesKey: envVars.GOOGLE_PLACES_KEY,
   nodeEnv: envVars.NODE_ENV,
   allowedOrigins: envVars.ALLOWED_ORIGINS ? envVars.ALLOWED_ORIGINS.split(',').map(o => o.trim()) : undefined
 };
