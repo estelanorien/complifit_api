@@ -60,7 +60,7 @@ export async function restaurantRoutes(app: FastifyInstance) {
   // Match planned meal to restaurant menu options
   app.post('/restaurants/match-meal', { preHandler: authGuard }, async (req, reply) => {
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
-    
+
     const body = z.object({
       targetMeal: z.object({
         name: z.string(),
@@ -168,7 +168,7 @@ export async function restaurantRoutes(app: FastifyInstance) {
       const data: any = await res.json();
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
       let matches: any[] = [];
-      
+
       try {
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         matches = JSON.parse(cleaned);
@@ -184,5 +184,126 @@ export async function restaurantRoutes(app: FastifyInstance) {
       return reply.status(500).send({ error: isProduction ? 'Meal matching service unavailable' : (e.message || 'Match meal failed') });
     }
   });
-}
+  // Google Places Proxy with DB Enrichment
+  app.get('/places/nearby', { preHandler: authGuard }, async (req, reply) => {
+    const query = z.object({
+      lat: z.coerce.number(),
+      lng: z.coerce.number(),
+      radius: z.coerce.number().default(5), // km
+      keyword: z.string().optional()
+    }).parse(req.query);
 
+    const radiusMeters = Math.min(query.radius * 1000, 50000);
+    const venues: any[] = [];
+    const seenPlaceIds = new Set<string>();
+
+    const lat = query.lat;
+    const lng = query.lng;
+
+    // 1. Search Local DB (Simple bounding box)
+    // 1 degree lat ~ 111km. 1 degree lng ~ 111km * cos(lat)
+    const latDelta = (query.radius + 2) / 111;
+    const lngDelta = (query.radius + 2) / (111 * Math.cos(lat * (Math.PI / 180)));
+
+    try {
+      const { rows: dbRows } = await pool.query(
+        `SELECT * FROM restaurants 
+             WHERE lat BETWEEN $1 AND $2 
+             AND lng BETWEEN $3 AND $4
+             LIMIT 50`,
+        [lat - latDelta, lat + latDelta, lng - lngDelta, lng + lngDelta]
+      );
+
+      dbRows.forEach((r: any) => {
+        // Calculate distance roughly to filter precise radius if needed
+        // For now, simple box is fine
+        venues.push({
+          id: r.id,
+          placeId: r.google_place_id,
+          name: r.name,
+          location: {
+            address: r.address,
+            lat: parseFloat(r.lat),
+            lng: parseFloat(r.lng)
+          },
+          tier: r.tier,
+          cuisine: r.cuisine || []
+        });
+        if (r.google_place_id) seenPlaceIds.add(r.google_place_id);
+      });
+    } catch (e) {
+      req.log.error({ error: 'DB Search failed', e });
+      // Continue to Google if DB fails
+    }
+
+    // 2. Search Google (if key exists)
+    if (env.googlePlacesKey) {
+      let url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${query.lat},${query.lng}&radius=${radiusMeters}&type=restaurant&key=${env.googlePlacesKey}`;
+      if (query.keyword) {
+        url += `&keyword=${encodeURIComponent(query.keyword)}`;
+      }
+
+      try {
+        const googleRes = await fetch(url);
+        const data: any = await googleRes.json();
+
+        if (data.status === 'OK' && data.results) {
+          const googleVenues = data.results.map((p: any) => ({
+            placeId: p.place_id,
+            name: p.name,
+            address: p.vicinity,
+            lat: p.geometry.location.lat,
+            lng: p.geometry.location.lng,
+            types: p.types || [],
+            rating: p.rating
+          }));
+
+          // 3. Upsert/Enrich into DB
+          const enrichmentQueries = googleVenues.map(async (g: any) => {
+            // Update DB if exists, or Insert new
+            await pool.query(
+              `INSERT INTO restaurants (google_place_id, name, address, lat, lng, cuisine, tier, updated_at)
+                      VALUES ($1, $2, $3, $4, $5, $6, 'public', now())
+                      ON CONFLICT (google_place_id) 
+                      DO UPDATE SET 
+                        name = EXCLUDED.name, 
+                        address = EXCLUDED.address,
+                        lat = EXCLUDED.lat,
+                        lng = EXCLUDED.lng,
+                        updated_at = now()`,
+              [g.placeId, g.name, g.address, g.lat, g.lng, g.types]
+            );
+
+            // Add to result if not already from DB
+            if (!seenPlaceIds.has(g.placeId)) {
+              venues.push({
+                id: `google_${g.placeId}`, // temporary ID until next fetch
+                placeId: g.placeId,
+                name: g.name,
+                location: {
+                  address: g.address,
+                  lat: g.lat,
+                  lng: g.lng
+                },
+                tier: 'public',
+                cuisine: g.types,
+                rating: g.rating
+              });
+              seenPlaceIds.add(g.placeId);
+            }
+          });
+
+          // Run upserts in background (don't block response too long)
+          // But usually we want to return fast. 
+          // We'll await strict processing for now to ensure consistency, 
+          // or Promise.allSettled.
+          await Promise.allSettled(enrichmentQueries);
+        }
+      } catch (e: any) {
+        req.log.error({ error: 'Google Search failed', e });
+      }
+    }
+
+    return reply.send(venues);
+  });
+}
