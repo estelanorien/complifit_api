@@ -1,5 +1,5 @@
 -- 1. Ledger Entries (The Bank & Vault Transaction History)
-CREATE TABLE ledger_entries (
+CREATE TABLE IF NOT EXISTS ledger_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     user_id UUID REFERENCES users (id) NOT NULL,
     type VARCHAR(50) NOT NULL, -- 'missed_meal', 'missed_workout', 'vault_deposit', 'redeem_vacation', 'extra_food'
@@ -13,11 +13,15 @@ CREATE TABLE ledger_entries (
 );
 
 -- 2. User Updates (Vault Balance)
-ALTER TABLE users
-ADD COLUMN vault_balance INTEGER DEFAULT 0;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='vault_balance') THEN
+        ALTER TABLE users ADD COLUMN vault_balance INTEGER DEFAULT 0;
+    END IF;
+END $$;
 
 -- 3. Behavioral Pledges
-CREATE TABLE user_pledges (
+CREATE TABLE IF NOT EXISTS user_pledges (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     user_id UUID REFERENCES users (id) NOT NULL,
     type VARCHAR(50) NOT NULL, -- 'iron_contract', 'public_vow', 'momentum'
@@ -43,8 +47,7 @@ INSERT INTO
         description,
         type,
         rarity,
-        cost_currency,
-        cost_amount,
+        cost,
         is_consumable
     )
 VALUES
@@ -54,7 +57,6 @@ VALUES
         'Freeze your streak for 24 hours. Purchased with Vault Balance.',
         'utility',
         'legendary',
-        'vault_calories', -- Special currency: Vault Calories
-        2000, -- Cost: 2000 saved calories = 1 day off
+        '{"currency": "vault_calories", "amount": 2000}', -- Special currency: Vault Calories
         true
-    );
+    ) ON CONFLICT (id) DO NOTHING;

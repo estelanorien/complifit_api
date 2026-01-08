@@ -72,7 +72,7 @@ export async function aiRoutes(app: FastifyInstance) {
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': aiConfig.geminiApiKey
         },
@@ -324,14 +324,14 @@ export async function aiRoutes(app: FastifyInstance) {
         req.log.warn('ensureDefaults: obj is not an object, using fallback');
         obj = {};
       }
-      
+
       // default flags
       const explicitNotFood = obj.isFood === false || obj.errorType === 'not_food' || obj.errorType === 'unrecognized_food';
       obj.isFood = explicitNotFood ? false : (typeof obj.isFood === 'boolean' ? obj.isFood : true);
       obj.errorType = obj.errorType || 'ok';
       obj.message = obj.message || '';
       obj.name = obj.name || text || 'Extra Food';
-      
+
       if (explicitNotFood) {
         obj.calories = 0;
         obj.macros = obj.macros || {};
@@ -345,26 +345,26 @@ export async function aiRoutes(app: FastifyInstance) {
         // CRITICAL: AI MUST provide calories and macros - NO defaults!
         // If AI didn't provide values, throw error instead of using defaults
         const hasCalories = typeof obj.calories === 'number' && obj.calories > 0;
-        const hasMacros = obj.macros && 
-          typeof obj.macros.protein === 'number' && 
-          typeof obj.macros.carbs === 'number' && 
+        const hasMacros = obj.macros &&
+          typeof obj.macros.protein === 'number' &&
+          typeof obj.macros.carbs === 'number' &&
           typeof obj.macros.fat === 'number';
         // If AI didn't provide proper values, throw error instead of using defaults
         if (!hasCalories || !hasMacros) {
-          req.log.error({ 
+          req.log.error({
             requestId: (req as any).requestId,
             hasCalories,
             hasMacros,
             message: '❌ ensureDefaults: AI did not provide required values!'
           });
-          req.log.error({ 
+          req.log.error({
             requestId: (req as any).requestId,
             obj: JSON.stringify(obj, null, 2),
             message: 'AI response object'
           });
           throw new Error("AI response missing required calories or macros");
         }
-        
+
         // AI provided values - use them directly, no defaults!
         obj.calories = obj.calories;
         obj.macros = {
@@ -372,12 +372,12 @@ export async function aiRoutes(app: FastifyInstance) {
           carbs: obj.macros.carbs,
           fat: obj.macros.fat
         };
-        
+
         obj.status = obj.status || 'extra';
         obj.matchIndex = typeof obj.matchIndex === 'number' ? obj.matchIndex : -1;
         obj.confidence = typeof obj.confidence === 'number' ? obj.confidence : 0;
       }
-      
+
       return obj;
     };
 
@@ -407,13 +407,13 @@ export async function aiRoutes(app: FastifyInstance) {
           if (exactCached.rows.length > 0) {
             const cachedResp = exactCached.rows[0].response;
             req.log.info({ cachedResp, message: '📦 Cache hit (image)' });
-            
+
             // Check if cached response has default values
-            const isCachedDefault = cachedResp?.calories === 350 && 
-                                 cachedResp?.macros?.protein === 20 && 
-                                 cachedResp?.macros?.carbs === 35 && 
-                                 cachedResp?.macros?.fat === 12;
-            
+            const isCachedDefault = cachedResp?.calories === 350 &&
+              cachedResp?.macros?.protein === 20 &&
+              cachedResp?.macros?.carbs === 35 &&
+              cachedResp?.macros?.fat === 12;
+
             if (isCachedDefault) {
               req.log.error({ error: '🚨 Cached response has default values - ignoring cache and recalculating', requestId: (req as any).requestId });
               // Don't return cached - let it fall through to AI call
@@ -430,13 +430,13 @@ export async function aiRoutes(app: FastifyInstance) {
           if (textCached.rows.length > 0) {
             const cachedResp = textCached.rows[0].response;
             req.log.info({ cachedResp, message: '📦 Cache hit (text)' });
-            
+
             // Check if cached response has default values
-            const isCachedDefault = cachedResp?.calories === 350 && 
-                                   cachedResp?.macros?.protein === 20 && 
-                                   cachedResp?.macros?.carbs === 35 && 
-                                   cachedResp?.macros?.fat === 12;
-            
+            const isCachedDefault = cachedResp?.calories === 350 &&
+              cachedResp?.macros?.protein === 20 &&
+              cachedResp?.macros?.carbs === 35 &&
+              cachedResp?.macros?.fat === 12;
+
             if (isCachedDefault) {
               req.log.error({ error: '🚨 Cached response has default values - ignoring cache and recalculating', requestId: (req as any).requestId });
               // Don't return cached - let it fall through to AI call
@@ -451,7 +451,7 @@ export async function aiRoutes(app: FastifyInstance) {
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': aiConfig.geminiApiKey
         },
@@ -492,7 +492,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
               required: ['name', 'calories', 'macros', 'status', 'matchIndex', 'confidence', 'isFood', 'errorType', 'message'],
               properties: {
                 name: { type: 'string' },
-                calories: { 
+                calories: {
                   type: 'number',
                   description: 'Total calories calculated based on visual portion estimation. MUST be realistic (typically 200-1200 for meals).'
                 },
@@ -500,43 +500,43 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
                   type: 'object',
                   required: ['protein', 'carbs', 'fat'],
                   properties: {
-                    protein: { 
+                    protein: {
                       type: 'number',
                       description: 'Protein in grams. Must satisfy: protein × 4 + carbs × 4 + fat × 9 ≈ calories'
                     },
-                    carbs: { 
+                    carbs: {
                       type: 'number',
                       description: 'Carbohydrates in grams'
                     },
-                    fat: { 
+                    fat: {
                       type: 'number',
                       description: 'Fat in grams'
                     }
                   }
-              },
-                status: { 
+                },
+                status: {
                   type: 'string',
                   enum: ['matched', 'extra'],
                   description: 'matched if food matches a planned meal, extra otherwise'
                 },
-                matchIndex: { 
+                matchIndex: {
                   type: 'number',
                   description: 'Index of matched meal (0-based) if status is matched, else -1'
                 },
-                confidence: { 
+                confidence: {
                   type: 'number',
                   description: 'Confidence score 0-100 based on how clear the portion size is'
                 },
-                isFood: { 
+                isFood: {
                   type: 'boolean',
                   description: 'true if image contains food, false otherwise'
                 },
-                errorType: { 
+                errorType: {
                   type: 'string',
                   enum: ['ok', 'not_food', 'unrecognized_food'],
                   description: 'ok if food identified, not_food if no food in image, unrecognized_food if too blurry'
                 },
-                message: { 
+                message: {
                   type: 'string',
                   description: 'Description of what was identified and estimated portion (e.g. "200g grilled chicken with 1.5 cups rice, estimated 850 kcal")'
                 }
@@ -547,7 +547,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       });
       if (!res.ok) {
         const txt = await res.text();
-        req.log.error({ 
+        req.log.error({
           requestId: (req as any).requestId,
           status: res.status,
           responseText: txt,
@@ -620,35 +620,35 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       // CRITICAL: Check if AI returned default values (this check MUST happen BEFORE ensureDefaults)
       req.log.info({ parsed, message: '=== CHECKING AI RESPONSE ===' });
-      
-      const isDefaultValues = parsed?.calories === 350 && 
-                              parsed?.macros?.protein === 20 && 
-                              parsed?.macros?.carbs === 35 && 
-                              parsed?.macros?.fat === 12;
-      
+
+      const isDefaultValues = parsed?.calories === 350 &&
+        parsed?.macros?.protein === 20 &&
+        parsed?.macros?.carbs === 35 &&
+        parsed?.macros?.fat === 12;
+
       if (isDefaultValues) {
-        req.log.error({ 
+        req.log.error({
           requestId: (req as any).requestId,
           parsed,
           message: '🚨🚨🚨 CRITICAL: AI returned default values (350/20/35/12)!'
         });
-        req.log.error({ 
+        req.log.error({
           requestId: (req as any).requestId,
           message: 'AI did NOT calculate - rejecting response!'
         });
-        req.log.error({ 
+        req.log.error({
           requestId: (req as any).requestId,
           response: JSON.stringify(parsed, null, 2),
           message: 'Full response'
         });
         throw new Error("AI returned default values (350/20/35/12) - recalculation needed");
       }
-      
+
       // If we get here, AI provided non-default values - proceed with ensureDefaults
       const finalResp = ensureDefaults(parsed);
-      req.log.info({ 
+      req.log.info({
         requestId: (req as any).requestId,
-        calories: finalResp.calories, 
+        calories: finalResp.calories,
         macros: finalResp.macros,
         message: '✅ AI provided calculated values'
       });
@@ -684,7 +684,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       return reply.send(finalResp);
     } catch (e: any) {
       req.log.error({ error: 'food-log proxy failed', e, requestId: (req as any).requestId });
-      
+
       // If error is about default values, return a more helpful error
       if (e.message?.includes('default values') || e.message?.includes('recalculation needed')) {
         return reply.status(500).send({
@@ -699,7 +699,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
           confidence: 0
         });
       }
-      
+
       // Fallback: If we crashed, assume it's NOT a valid food analysis rather than "Extra Food"
       // This prevents "Picture of a cat" -> "Extra Food 350kcal"
       return reply.send({
@@ -737,7 +737,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': aiConfig.geminiApiKey
         },
@@ -783,7 +783,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': aiConfig.geminiApiKey
         },
@@ -822,7 +822,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': aiConfig.geminiApiKey
         },
@@ -858,7 +858,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const model = 'models/gemini-2.5-flash-image';
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`, {
         method: 'POST',
-        headers: {  
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': aiConfig.geminiApiKey
         },
@@ -873,14 +873,14 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
         } catch (e) {
           errorData = null;
         }
-        
+
         // Check for rate limit error
         if (res.status === 429 || errorData?.error?.message?.includes('quota')) {
           const retryDelay = errorData?.error?.details?.find((d: any) => d['@type']?.includes('RetryInfo'))?.retryDelay;
           const waitTime = retryDelay ? parseInt(retryDelay) : 60;
           throw new Error(`Rate limit exceeded. Please wait ${waitTime} seconds and try again.`);
         }
-        
+
         const isProduction = process.env.NODE_ENV === 'production';
         throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
       }
@@ -895,13 +895,13 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
-      
+
       // Always show rate limit errors to the user
       const errorMessage = e.message || 'Image generation failed';
       const isRateLimitError = errorMessage.includes('Rate limit') || errorMessage.includes('quota');
-      
-      return reply.status(500).send({ 
-        error: (isRateLimitError || !isProduction) ? errorMessage : 'Image generation service unavailable' 
+
+      return reply.status(500).send({
+        error: (isRateLimitError || !isProduction) ? errorMessage : 'Image generation service unavailable'
       });
     }
   });
@@ -909,7 +909,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   // Menu photo analysis - extract multiple dishes from menu photo
   app.post('/ai/menu-analysis', { preHandler: authGuard }, async (req, reply) => {
     if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
-    
+
     const body = z.object({
       imageBase64: z.string(),
       restaurantName: z.string().optional(),
@@ -919,7 +919,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
     try {
       const { imageBase64, restaurantName, allergens, lang } = body;
-      
+
       const prompt = `
       MENU PHOTO ANALYSIS - EXTRACT ALL DISHES.
       
@@ -974,7 +974,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': aiConfig.geminiApiKey
         },
@@ -1019,7 +1019,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       const data: any = await res.json();
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-      
+
       let items: any[] = [];
       try {
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
@@ -1043,7 +1043,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   // Generate step image (exercise or recipe step)
   app.post('/ai/generate/step-image', { preHandler: authGuard }, async (req, reply) => {
     if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
-    
+
     const body = z.object({
       type: z.enum(['exercise', 'recipe']),
       name: z.string(),
@@ -1054,64 +1054,14 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
     try {
       const { type, name, instruction, index, lang } = body;
-      
+
       const prompt = type === 'exercise'
         ? `Fitness photography: ${name} exercise, step ${index || 1}. ${instruction}. Proper form, athletic model, gym setting, cinematic lighting, 8k resolution, professional quality.`
         : `Food photography: ${name} recipe, step ${index || 1}. ${instruction}. Hyperrealistic, delicious, soft lighting, 8k resolution, professional quality.`;
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-goog-api-key': aiConfig.geminiApiKey
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }] })
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        const isProduction = process.env.NODE_ENV === 'production';
-        throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
-      }
-
-      const data: any = await res.json();
-      const parts = data?.candidates?.[0]?.content?.parts || [];
-      const inline = parts.find((p: any) => p.inlineData?.data);
-      
-      if (inline?.inlineData?.data) {
-        return reply.send({ image: `data:image/png;base64,${inline.inlineData.data}` });
-      }
-      
-      return reply.status(500).send({ error: 'No image returned from AI' });
-    } catch (e: any) {
-      req.log.error({ error: 'generate step-image failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'Generate step image failed' });
-    }
-  });
-
-  // Generate gamification asset
-  app.post('/ai/generate/gamification-asset', { preHandler: authGuard }, async (req, reply) => {
-    if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
-    
-    const body = z.object({
-      type: z.enum(['challenge', 'badge', 'item']),
-      context: z.string(),
-      lang: z.string().default('en')
-    }).parse(req.body);
-
-    try {
-      const { type, context, lang } = body;
-      
-      const prompt = type === 'challenge'
-        ? `Gaming challenge icon: ${context}. Bold, colorful, motivational, 8k resolution, professional game asset style.`
-        : type === 'badge'
-        ? `Achievement badge icon: ${context}. Metallic, shiny, prestigious, 8k resolution, professional game asset style.`
-        : `Game item icon: ${context}. Detailed, appealing, 8k resolution, professional game asset style.`;
-
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`, {
-        method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': aiConfig.geminiApiKey
         },
@@ -1129,11 +1079,62 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const data: any = await res.json();
       const parts = data?.candidates?.[0]?.content?.parts || [];
       const inline = parts.find((p: any) => p.inlineData?.data);
-      
+
       if (inline?.inlineData?.data) {
         return reply.send({ image: `data:image/png;base64,${inline.inlineData.data}` });
       }
-      
+
+      return reply.status(500).send({ error: 'No image returned from AI' });
+    } catch (e: any) {
+      req.log.error({ error: 'generate step-image failed', e, requestId: (req as any).requestId });
+      return reply.status(500).send({ error: e.message || 'Generate step image failed' });
+    }
+  });
+
+  // Generate gamification asset
+  app.post('/ai/generate/gamification-asset', { preHandler: authGuard }, async (req, reply) => {
+    if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
+
+    const body = z.object({
+      type: z.enum(['challenge', 'badge', 'item']),
+      context: z.string(),
+      lang: z.string().default('en')
+    }).parse(req.body);
+
+    try {
+      const { type, context, lang } = body;
+
+      const prompt = type === 'challenge'
+        ? `Gaming challenge icon: ${context}. Bold, colorful, motivational, 8k resolution, professional game asset style.`
+        : type === 'badge'
+          ? `Achievement badge icon: ${context}. Metallic, shiny, prestigious, 8k resolution, professional game asset style.`
+          : `Game item icon: ${context}. Detailed, appealing, 8k resolution, professional game asset style.`;
+
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': aiConfig.geminiApiKey
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        const isProduction = process.env.NODE_ENV === 'production';
+        throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
+      }
+
+      const data: any = await res.json();
+      const parts = data?.candidates?.[0]?.content?.parts || [];
+      const inline = parts.find((p: any) => p.inlineData?.data);
+
+      if (inline?.inlineData?.data) {
+        return reply.send({ image: `data:image/png;base64,${inline.inlineData.data}` });
+      }
+
       return reply.status(500).send({ error: 'No image returned from AI' });
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
@@ -1145,7 +1146,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   // Generate portion visual
   app.post('/ai/generate/portion-visual', { preHandler: authGuard }, async (req, reply) => {
     if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
-    
+
     const body = z.object({
       mealName: z.string(),
       calories: z.number(),
@@ -1155,13 +1156,13 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
     try {
       const { mealName, calories, type, lang } = body;
-      
+
       const sizeDesc = type === 'large' ? 'large portion' : 'small portion';
       const prompt = `Food photography: ${mealName}, ${sizeDesc}, ${calories} calories. Visual portion size comparison, hyperrealistic, professional quality, 8k resolution, soft lighting.`;
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': aiConfig.geminiApiKey
         },
@@ -1179,16 +1180,105 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const data: any = await res.json();
       const parts = data?.candidates?.[0]?.content?.parts || [];
       const inline = parts.find((p: any) => p.inlineData?.data);
-      
+
       if (inline?.inlineData?.data) {
         return reply.send({ image: `data:image/png;base64,${inline.inlineData.data}` });
       }
-      
+
       return reply.status(500).send({ error: 'No image returned from AI' });
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error({ error: 'generate portion-visual failed', e, requestId: (req as any).requestId });
       return reply.status(500).send({ error: isProduction ? 'Portion visual generation service unavailable' : (e.message || 'Generate portion visual failed') });
+    }
+  });
+
+  // ========== PROOF OF SWEAT - Workout Selfie Verification ==========
+  const verifyWorkoutSchema = z.object({
+    imageBase64: z.string().min(100)
+  });
+
+  app.post('/ai/verify-workout', { preHandler: authGuard }, async (req, reply) => {
+    const { imageBase64 } = verifyWorkoutSchema.parse(req.body);
+
+    try {
+      const mime = imageBase64.includes('png') ? 'image/png' : 'image/jpeg';
+      const cleanBase64 = imageBase64.split(',')[1] || imageBase64;
+
+      const prompt = `
+      WORKOUT VERIFICATION TASK.
+      
+      Analyze this selfie/photo to determine if the person has JUST COMPLETED A WORKOUT.
+      
+      Look for these indicators:
+      - Gym equipment visible (dumbbells, machines, mats)
+      - Athletic wear (tank top, shorts, sneakers)
+      - Signs of exertion (sweat, flushed skin, tired expression)
+      - Gym environment (mirrors, lockers, outdoor trail)
+      - Post-workout context (water bottle, towel)
+      
+      Be LENIENT but not foolish:
+      - Accept: Sweaty person in gym, person on running trail, home workout with mat
+      - Reject: Person at desk, obvious old photo, professional photoshoot
+      
+      Return JSON:
+      {
+        "verified": boolean,
+        "confidence": number (0-100),
+        "notes": "string explaining what you see"
+      }
+      `;
+
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': aiConfig.geminiApiKey
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { inlineData: { mimeType: mime, data: cleanBase64 } },
+              { text: prompt }
+            ]
+          }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.3,
+            responseSchema: {
+              type: 'object',
+              required: ['verified', 'confidence', 'notes'],
+              properties: {
+                verified: { type: 'boolean' },
+                confidence: { type: 'number' },
+                notes: { type: 'string' }
+              }
+            }
+          }
+        })
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`Gemini verify-workout error ${res.status}: ${txt}`);
+      }
+
+      const data: any = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+      const parsed = JSON.parse(text);
+
+      return reply.send({
+        verified: parsed.verified ?? false,
+        confidence: parsed.confidence ?? 0,
+        notes: parsed.notes ?? 'Could not analyze image'
+      });
+    } catch (e: any) {
+      req.log.error({ error: 'verify-workout failed', e, requestId: (req as any).requestId });
+      return reply.status(500).send({
+        verified: false,
+        confidence: 0,
+        notes: e.message || 'Verification failed'
+      });
     }
   });
 }
