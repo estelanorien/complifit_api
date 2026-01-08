@@ -45,6 +45,14 @@ CREATE TABLE IF NOT EXISTS menu_scans (
 );
 
 -- Indexes for Geo-spatial searching (simple approximate using lat/lng)
+-- First ensure columns exist (table may have been created with different schema)
+ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS lat numeric(10, 8);
+ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS lng numeric(11, 8);
+ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS address text;
+ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS restaurant_id uuid;
+ALTER TABLE menu_scans ADD COLUMN IF NOT EXISTS user_id uuid;
+ALTER TABLE menu_scans ADD COLUMN IF NOT EXISTS restaurant_id uuid;
+
 CREATE INDEX IF NOT EXISTS idx_restaurants_location ON restaurants(lat, lng);
 CREATE INDEX IF NOT EXISTS idx_menu_items_restaurant ON menu_items(restaurant_id);
 CREATE INDEX IF NOT EXISTS idx_menu_scans_user ON menu_scans(user_id);

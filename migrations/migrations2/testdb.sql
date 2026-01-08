@@ -1,4 +1,4 @@
-:-- Vitality AI Fitness - Master Migration (final)
+-- Vitality AI Fitness - Master Migration (final)
 
 -- Extensions
 CREATE EXTENSION IF NOT EXISTS pgcrypto; -- for gen_random_uuid()
@@ -142,6 +142,9 @@ CREATE TABLE menu_scans (
 CREATE INDEX idx_restaurants_location ON restaurants(lat, lng);
 CREATE INDEX idx_menu_items_restaurant ON menu_items(restaurant_id);
 CREATE INDEX idx_menu_scans_user ON menu_scans(user_id);
+
+-- Meal planning
+CREATE TABLE IF NOT EXISTS meal_plans (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id      uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name         text,
@@ -379,7 +382,7 @@ CREATE INDEX idx_flash_quests_user ON flash_quests(user_id);
 CREATE TABLE feature_flags (
   key         text PRIMARY KEY,
   description text,
-  rollout     jsonb, -- % veya segment kuralları
+  rollout     jsonb, -- % veya segment kurallarÄ±
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 
@@ -390,6 +393,7 @@ CREATE TABLE user_features (
   expires_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, feature_key)
+);
 
 -- GAMIFICATION & OPTIMIZATION (Added 2026-01-06)
 
@@ -462,64 +466,46 @@ VALUES (
     'sparks',
     250,
     TRUE
-) ON CONFLICT (id) DO NOTHING;- -   1 .   L e d g e r   E n t r i e s   ( T h e   B a n k   &   V a u l t   T r a n s a c t i o n   H i s t o r y )  
- C R E A T E   T A B L E   l e d g e r _ e n t r i e s   (  
-         i d   U U I D   P R I M A R Y   K E Y   D E F A U L T   u u i d _ g e n e r a t e _ v 4   ( ) ,  
-         u s e r _ i d   U U I D   R E F E R E N C E S   u s e r s   ( i d )   N O T   N U L L ,  
-         t y p e   V A R C H A R ( 5 0 )   N O T   N U L L ,   - -   ' m i s s e d _ m e a l ' ,   ' m i s s e d _ w o r k o u t ' ,   ' v a u l t _ d e p o s i t ' ,   ' r e d e e m _ v a c a t i o n ' ,   ' e x t r a _ f o o d '  
-         n a m e   V A R C H A R ( 2 5 5 )   N O T   N U L L ,  
-         c a l o r i e s   I N T E G E R   N O T   N U L L ,   - -   P o s i t i v e   =   C r e d i t   ( S a v e d ) ,   N e g a t i v e   =   D e b t   ( O w e d )  
-         d a t e   T I M E S T A M P  
-         W I T H  
-                 T I M E   Z O N E   D E F A U L T   N O W   ( ) ,  
-                 s t a t u s   V A R C H A R ( 2 0 )   D E F A U L T   ' p e n d i n g ' ,   - -   ' p e n d i n g ' ,   ' r e m e d i e d ' ,   ' f o r g i v e n ' ,   ' h o n o r e d '  
-                 r e m e d y _ l o g _ i d   V A R C H A R ( 2 5 5 )   - -   L i n k   t o   t h e   w o r k o u t / l o g   t h a t   f i x e d   a   d e b t  
- ) ;  
-  
- - -   2 .   U s e r   U p d a t e s   ( V a u l t   B a l a n c e )  
- A L T E R   T A B L E   u s e r s  
- A D D   C O L U M N   v a u l t _ b a l a n c e   I N T E G E R   D E F A U L T   0 ;  
-  
- - -   3 .   B e h a v i o r a l   P l e d g e s  
- C R E A T E   T A B L E   u s e r _ p l e d g e s   (  
-         i d   U U I D   P R I M A R Y   K E Y   D E F A U L T   u u i d _ g e n e r a t e _ v 4   ( ) ,  
-         u s e r _ i d   U U I D   R E F E R E N C E S   u s e r s   ( i d )   N O T   N U L L ,  
-         t y p e   V A R C H A R ( 5 0 )   N O T   N U L L ,   - -   ' i r o n _ c o n t r a c t ' ,   ' p u b l i c _ v o w ' ,   ' m o m e n t u m '  
-         g o a l _ t y p e   V A R C H A R ( 5 0 )   N O T   N U L L ,   - -   ' l o g _ s t r e a k ' ,   ' w o r k o u t _ f r e q u e n c y ' ,   ' n o _ s u g a r ' ,   ' s l e e p _ e a r l y '  
-         s t a k e _ a m o u n t   I N T E G E R   D E F A U L T   0 ,   - -   S p a r k s   s t a k e d  
-         t a r g e t _ v a l u e   I N T E G E R ,   - -   e . g .   3   d a y s ,   5   w o r k o u t s  
-         c u r r e n t _ v a l u e   I N T E G E R   D E F A U L T   0 ,  
-         s t a r t _ d a t e   T I M E S T A M P  
-         W I T H  
-                 T I M E   Z O N E   D E F A U L T   N O W   ( ) ,  
-                 e n d _ d a t e   T I M E S T A M P  
-         W I T H  
-                 T I M E   Z O N E ,  
-                 s t a t u s   V A R C H A R ( 2 0 )   D E F A U L T   ' a c t i v e ' ,   - -   ' a c t i v e ' ,   ' s u c c e s s ' ,   ' f a i l e d '  
-                 c o n t r a c t _ a d d r e s s   V A R C H A R ( 2 5 5 )   - -   O p t i o n a l :   f o r   " S m a r t   C o n t r a c t "   f l a i r   o r   h a s h  
- ) ;  
-  
- - -   4 .   I n i t i a l   " V a c a t i o n   M o d e "   I t e m   i n   S h o p  
- I N S E R T   I N T O  
-         g a m e _ i t e m s   (  
-                 i d ,  
-                 n a m e ,  
-                 d e s c r i p t i o n ,  
-                 t y p e ,  
-                 r a r i t y ,  
-                 c o s t _ c u r r e n c y ,  
-                 c o s t _ a m o u n t ,  
-                 i s _ c o n s u m a b l e  
-         )  
- V A L U E S  
-         (  
-                 ' i t e m _ v a c a t i o n _ t i c k e t ' ,  
-                 ' V a c a t i o n   T i c k e t   ( 1   D a y ) ' ,  
-                 ' F r e e z e   y o u r   s t r e a k   f o r   2 4   h o u r s .   P u r c h a s e d   w i t h   V a u l t   B a l a n c e . ' ,  
-                 ' u t i l i t y ' ,  
-                 ' l e g e n d a r y ' ,  
-                 ' v a u l t _ c a l o r i e s ' ,   - -   S p e c i a l   c u r r e n c y :   V a u l t   C a l o r i e s  
-                 2 0 0 0 ,   - -   C o s t :   2 0 0 0   s a v e d   c a l o r i e s   =   1   d a y   o f f  
-                 t r u e  
-         ) ;  
- 
+) ON CONFLICT (id) DO NOTHING;
+
+-- 1. Ledger Entries (The Bank & Vault Transaction History)
+CREATE TABLE IF NOT EXISTS ledger_entries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) NOT NULL,
+    type VARCHAR(50) NOT NULL, -- 'missed_meal', 'missed_workout', 'vault_deposit', 'redeem_vacation', 'extra_food'
+    name VARCHAR(255) NOT NULL,
+    calories INTEGER NOT NULL, -- Positive = Credit (Saved), Negative = Debt (Owed)
+    date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'remedied', 'forgiven', 'honored'
+    remedy_log_id VARCHAR(255) -- Link to the workout/log that fixed a debt
+);
+
+-- 2. User Updates (Vault Balance)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS vault_balance INTEGER DEFAULT 0;
+
+-- 3. Behavioral Pledges
+CREATE TABLE IF NOT EXISTS user_pledges (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) NOT NULL,
+    type VARCHAR(50) NOT NULL, -- 'iron_contract', 'public_vow', 'momentum'
+    goal_type VARCHAR(50) NOT NULL, -- 'log_streak', 'workout_frequency', 'no_sugar', 'sleep_early'
+    stake_amount INTEGER DEFAULT 0, -- Sparks staked
+    target_value INTEGER, -- e.g. 3 days, 5 workouts
+    current_value INTEGER DEFAULT 0,
+    start_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    end_date TIMESTAMP WITH TIME ZONE,
+    status VARCHAR(20) DEFAULT 'active', -- 'active', 'success', 'failed'
+    contract_address VARCHAR(255) -- Optional: for "Smart Contract" flair or hash
+);
+
+-- 4. Initial "Vacation Mode" Item in Shop
+INSERT INTO game_items (id, name, description, type, rarity, cost, is_consumable)
+VALUES (
+    'item_vacation_ticket',
+    'Vacation Ticket (1 Day)',
+    'Freeze your streak for 24 hours. Purchased with Vault Balance.',
+    'utility',
+    'legendary',
+    '{"currency": "vault_calories", "amount": 2000}',
+    true
+) ON CONFLICT (id) DO NOTHING;
