@@ -970,9 +970,7 @@ export async function plansRoutes(app: FastifyInstance) {
     const bodySchema = z.object({
       missedCalories: z.number(),
       missedWorkouts: z.number(),
-      currentDayIndex: z.number(), // Which day of the plan user is on (0-indexed)
-      currentTrainingPlan: z.any(), // The user's current training plan
-      currentNutritionPlan: z.any(), // The user's current meal plan
+      remainingDays: z.number().min(1).default(6), // Days left in plan to redistribute to
       userProfile: z.object({
         fitnessLevel: z.string().optional(),
         primaryGoal: z.string().optional(),
@@ -981,16 +979,7 @@ export async function plansRoutes(app: FastifyInstance) {
     });
 
     const body = bodySchema.parse(req.body);
-    const { missedCalories, missedWorkouts, currentDayIndex, currentTrainingPlan, currentNutritionPlan, userProfile } = body;
-
-    // Calculate remaining days in the plan
-    const totalTrainingDays = currentTrainingPlan?.schedule?.length || 7;
-    const totalNutritionDays = currentNutritionPlan?.days?.length || 7;
-    const remainingDays = Math.max(totalTrainingDays, totalNutritionDays) - currentDayIndex - 1;
-
-    if (remainingDays <= 0) {
-      return reply.status(400).send({ error: 'No remaining days in plan to redistribute items' });
-    }
+    const { missedCalories, missedWorkouts, remainingDays, userProfile } = body;
 
     // Safety limits
     const MAX_EXTRA_CALORIES_PER_DAY = 200; // Smaller daily adjustment for in-plan distribution
@@ -1003,11 +992,8 @@ export async function plansRoutes(app: FastifyInstance) {
     - Calories: ${missedCalories} kcal (meals skipped)
     - Workouts: ${missedWorkouts} session(s)
 
-    CURRENT PLAN DETAILS:
-    - Current day: ${currentDayIndex + 1} of ${Math.max(totalTrainingDays, totalNutritionDays)}
-    - Remaining days: ${remainingDays}
-    - Training schedule has ${totalTrainingDays} days
-    - Nutrition plan has ${totalNutritionDays} days
+    PLAN DETAILS:
+    - Remaining days in plan: ${remainingDays}
 
     USER PROFILE:
     - Fitness Level: ${userProfile?.fitnessLevel || 'intermediate'}
@@ -1103,7 +1089,7 @@ export async function plansRoutes(app: FastifyInstance) {
       await pool.query(
         `INSERT INTO activity_logs(id, user_id, action, metadata, created_at)
          VALUES(gen_random_uuid(), $1, 'smart_refactor', $2, now())`,
-        [user.userId, JSON.stringify({ currentDayIndex, missedCalories, missedWorkouts, result: refactorResult })]
+        [user.userId, JSON.stringify({ remainingDays, missedCalories, missedWorkouts, result: refactorResult })]
       );
 
       return reply.send({
