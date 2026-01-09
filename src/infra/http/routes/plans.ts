@@ -740,15 +740,27 @@ export async function plansRoutes(app: FastifyInstance) {
 
       // First, try to find a matching meal in database based on type and calories
       // This prevents generating duplicate recipes
-      const existingMealResult = await client.query(
-        `SELECT name, ingredients, instructions, time_label, macros, calories, nutrition_tips
-         FROM meals
-         WHERE type = $1 
-           AND calories BETWEEN $2 - 50 AND $2 + 50
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [body.type, body.targetCalories]
-      );
+      let query = `
+        SELECT name, ingredients, instructions, time_label, macros, calories, nutrition_tips
+        FROM meals
+        WHERE type = $1 
+          AND calories BETWEEN $2 - 50 AND $2 + 50
+      `;
+      const params: any[] = [body.type, body.targetCalories];
+
+      if (body.additionalIngredients) {
+        // If ingredients are specified, ensure the cached meal contains them
+        query += ` AND ingredients::text ILIKE $3`;
+        params.push(`%${body.additionalIngredients}%`);
+      } else if (body.avoidItem) {
+        // If avoidance is specified, ensure cached meal doesn't contain it
+        query += ` AND ingredients::text NOT ILIKE $3`;
+        params.push(`%${body.avoidItem}%`);
+      }
+
+      query += ` ORDER BY created_at DESC LIMIT 1`;
+
+      const existingMealResult = await client.query(query, params);
 
       let meal: any = null;
 
