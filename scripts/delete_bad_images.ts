@@ -11,26 +11,36 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load env from multiple possible locations
-const envPaths = [
-    path.resolve(__dirname, '..', '.env'),
-    path.resolve(__dirname, '..', '..', 'vitality_app-main', 'vitality_app-main', '.env'),
-    path.resolve(process.cwd(), '.env')
+// Load env from multiple possible locations - use dotenv.parse() like deploy_migrations_node.ts
+const dirsToCheck = [
+    path.resolve(__dirname, '..'),
+    path.resolve(__dirname, '..', '..', 'vitality_app-main', 'vitality_app-main'),
+    process.cwd()
 ];
 
-for (const envPath of envPaths) {
-    if (fs.existsSync(envPath)) {
-        console.log(`Loading .env from ${envPath}`);
-        dotenv.config({ path: envPath });
-        break;
+let dbUrl = process.env.DATABASE_URL;
+
+if (!dbUrl) {
+    for (const dir of dirsToCheck) {
+        const envPath = path.join(dir, '.env');
+        if (fs.existsSync(envPath)) {
+            console.log(`Loading .env from ${envPath}`);
+            const envConfig = dotenv.parse(fs.readFileSync(envPath));
+            if (envConfig.DATABASE_URL) {
+                dbUrl = envConfig.DATABASE_URL;
+                break;
+            }
+        }
     }
 }
 
-const dbUrl = process.env.DATABASE_URL;
 if (!dbUrl) {
     console.error("DATABASE_URL not found!");
+    console.error("Searched in:", dirsToCheck.map(d => path.join(d, '.env')));
     process.exit(1);
 }
+
+console.log(`Target Database: ${dbUrl.replace(/:[^:@]*@/, ':****@')}`);
 
 const pool = new pg.Pool({
     connectionString: dbUrl,

@@ -59,7 +59,11 @@ export async function aiRoutes(app: FastifyInstance) {
   });
 
   app.post('/ai/image', { preHandler: authGuard }, async (req, reply) => {
-    const parsed = imageSchema.parse(req.body);
+    const inputSchema = imageSchema.extend({
+      referenceImage: z.string().optional() // Base64 image data
+    });
+
+    const parsed = inputSchema.parse(req.body);
     const result = await ai.generateImage(parsed);
     return reply.send(result);
   });
