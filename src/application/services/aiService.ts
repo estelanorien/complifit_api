@@ -9,6 +9,7 @@ type GenerateTextParams = {
 type GenerateImageParams = {
   prompt: string;
   model?: string;
+  referenceImage?: string; // Base64
 };
 
 export class AiService {
@@ -25,7 +26,7 @@ export class AiService {
   async generateText({ prompt, model = 'models/gemini-3-flash-preview' }: GenerateTextParams) {
     const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'x-goog-api-key': this.apiKey
       },
@@ -43,15 +44,32 @@ export class AiService {
     return { text };
   }
 
-  async generateImage({ prompt, model = 'models/gemini-2.5-flash-image' }: GenerateImageParams) {
+  async generateImage({ prompt, model = 'models/gemini-2.5-flash-image', referenceImage }: GenerateImageParams) {
+    const parts: any[] = [{ text: prompt }];
+
+    if (referenceImage) {
+      // Remove data URL prefix if present for raw data, but Gemini might expect standard base64
+      // Usually API expects: inlineData: { mimeType: 'image/jpeg', data: base64_string }
+      // We assume referenceImage input is raw base64 or handled by client. 
+      // Safe bet: stripping 'data:image/...;base64,' header if it exists.
+      const base64Data = referenceImage.replace(/^data:image\/\w+;base64,/, "");
+
+      parts.push({
+        inlineData: {
+          mimeType: 'image/jpeg', // Default to jpeg as widely supported
+          data: base64Data
+        }
+      });
+    }
+
     const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'x-goog-api-key': this.apiKey
       },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }]
+        contents: [{ parts }]
       })
     });
     if (!res.ok) {
