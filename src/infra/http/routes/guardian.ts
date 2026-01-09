@@ -92,8 +92,8 @@ export async function guardianRoutes(app: FastifyInstance) {
           - ALERT: "reschedule" -> Move to tomorrow if protein intake is critical.
        
        B. Goal: "lose_weight":
-          - PRIORITY: "plug" -> Suggest small snack if crash risk (e.g. low blood sugar).
-          - PRIORITY: "downshift" -> Reduce future meal (Target: [${availableMeals.join(', ')}]) to keep deficit steady.
+          - PRIORITY: "spread_today" -> Add calories to future meal/snack (Target: [${availableMeals.join(', ')}]) to prevent large deficit.
+          - PRIORITY: "plug" -> Suggest ADDING A NEW small snack (e.g. "Apple", "Yogurt") if crash risk.
           - PRIORITY: "bank_credit" -> Save credit.
     
     2. IF DELETING WORKOUT:
@@ -114,9 +114,9 @@ export async function guardianRoutes(app: FastifyInstance) {
           "actionLabel": "Button Label",
           "data": {
             // targetMeal MUST be one of: [${availableMeals.join(', ')}] if possible.
-            // spread_today: { "targetMeal": "string", "amount": number }
+            // spread_today: { "targetMeal": "string", "amount": number } (Use this to INCREASE existing meal/snack)
             // downshift: { "targetMeal": "string", "reduction": number }
-            // plug: { "replacement": "string", "calories": number }
+            // plug: { "replacement": "string", "calories": number } (Use this to ADD NEW snack)
             // bank_credit: { "amount": number, "description": "string" }
             // bank_debt: { "volume": number, "description": "string" }
           }
@@ -153,7 +153,7 @@ export async function guardianRoutes(app: FastifyInstance) {
       if (!result.warning) result.warning = 'Confirm deletion?';
 
       // Log action
-      await       pool.query(
+      await pool.query(
         `INSERT INTO guardian_actions(user_id, action_type, item_type, item_title, payload) VALUES($1,$2,$3,$4,$5)`,
         [user.userId, 'analysis', type, title, JSON.stringify({ calories, result })]
       ).catch(e => req.log.error({ error: e, requestId: (req as any).requestId }, 'Failed to log guardian action'));
@@ -245,17 +245,17 @@ export async function guardianRoutes(app: FastifyInstance) {
           lastSkip.rescheduleTo = targetDate;
           lastSkip.rescheduled = true;
         }
-        
+
         // Add to rescheduledItems if it's a workout
         if (item.type === 'training_block' || item.type === 'training') {
           const rescheduledItems = profileData.rescheduledItems || [];
-          
+
           // Find workout details from training program
           const trainingProgram = profileData.currentTrainingProgram;
           let workoutData: any = null;
           const today = new Date(date);
           const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' });
-          
+
           if (trainingProgram && trainingProgram.schedule && item.data) {
             // Use the exercise data from the item
             workoutData = {
@@ -281,7 +281,7 @@ export async function guardianRoutes(app: FastifyInstance) {
               name: item.title || 'Rescheduled Workout'
             };
           }
-          
+
           rescheduledItems.push({
             id: `rescheduled_workout_${Date.now()}`,
             type: 'workout',
@@ -291,7 +291,7 @@ export async function guardianRoutes(app: FastifyInstance) {
             originalDate: date,
             reason: 'Guardian reschedule recommendation'
           });
-          
+
           profileData.rescheduledItems = rescheduledItems;
         }
       } else if (remedy.type === 'bank_credit') {
@@ -306,9 +306,9 @@ export async function guardianRoutes(app: FastifyInstance) {
 
       await client.query(
         `UPDATE user_profiles SET profile_data = $1::jsonb, updated_at = now() WHERE user_id = $2`,
-        [JSON.stringify({ 
-          ...profileData, 
-          skippedItems: newSkipped, 
+        [JSON.stringify({
+          ...profileData,
+          skippedItems: newSkipped,
           dailyMealModifications: newMods,
           rescheduledItems: profileData.rescheduledItems || []
         }), user.userId]
@@ -571,7 +571,7 @@ export async function guardianRoutes(app: FastifyInstance) {
       }
 
       // Log action
-      await       pool.query(
+      await pool.query(
         `INSERT INTO guardian_actions(user_id, action_type, item_type, item_title, payload) VALUES($1,$2,$3,$4,$5)`,
         [user.userId, 'analysis', 'late_wake', `Wake at ${wakeTime}`, JSON.stringify({ missedItems, result })]
       ).catch(e => req.log.error({ error: e, requestId: (req as any).requestId }, 'Failed to log late wake guardian action'));
@@ -579,7 +579,7 @@ export async function guardianRoutes(app: FastifyInstance) {
       return reply.send(result);
     } catch (e: any) {
       req.log.error({ error: "Guardian late wake analysis failed", e, requestId: (req as any).requestId });
-      
+
       // Fallback response
       return reply.send({
         severity: 'medium',
@@ -593,7 +593,7 @@ export async function guardianRoutes(app: FastifyInstance) {
             description: 'Combine missed meals into your remaining meals today',
             actionLabel: 'Apply',
             affectedItems: missedMeals.map(m => m.name),
-            data: { 
+            data: {
               targetMeal: 'Dinner',
               addedCalories: missedMeals.reduce((sum, m) => sum + (m.calories || 0), 0),
               items: missedMeals.map(m => m.name)
@@ -626,7 +626,7 @@ export async function guardianRoutes(app: FastifyInstance) {
   // Apply late wake recommendation
   app.post('/guardian/apply-late-wake-recommendation', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as any).user;
-    
+
     const body = z.object({
       recommendation: z.object({
         id: z.string(),
@@ -662,13 +662,13 @@ export async function guardianRoutes(app: FastifyInstance) {
           if (recommendation.data?.targetMeal && recommendation.data?.addedCalories) {
             const targetMealName = recommendation.data.targetMeal;
             const addedCals = recommendation.data.addedCalories;
-            
+
             // Find meal ID from plan
             const mealId = findMealIdOrName(profileData, date, targetMealName);
-            
+
             if (!dailyMealModifications[date]) dailyMealModifications[date] = [];
             if (!Array.isArray(dailyMealModifications[date])) dailyMealModifications[date] = [];
-            
+
             if (mealId) {
               dailyMealModifications[date].push({
                 mealId: mealId,
@@ -696,10 +696,10 @@ export async function guardianRoutes(app: FastifyInstance) {
           // Mark workout as skipped and add to rescheduledItems for tomorrow
           if (recommendation.data?.workoutName) {
             const workoutName = recommendation.data.workoutName;
-            const tomorrowDate = recommendation.data.suggestedDate === 'tomorrow' 
+            const tomorrowDate = recommendation.data.suggestedDate === 'tomorrow'
               ? new Date(new Date(date).getTime() + 86400000).toISOString().split('T')[0]
               : recommendation.data.suggestedDate || new Date(new Date(date).getTime() + 86400000).toISOString().split('T')[0];
-            
+
             // Mark as skipped today
             skippedItems.push({
               id: `late_wake_workout_${Date.now()}`,
@@ -708,22 +708,22 @@ export async function guardianRoutes(app: FastifyInstance) {
               rescheduled: true,
               reason: recommendation.data.reason || 'Late wake-up'
             });
-            
+
             // Add to rescheduledItems for tomorrow
             const rescheduledItems = profileData.rescheduledItems || [];
-            
+
             // Find workout details from training program
             const trainingProgram = profileData.currentTrainingProgram;
             let workoutData: any = null;
             const today = new Date(date);
             const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' });
-            
+
             if (trainingProgram && trainingProgram.schedule) {
               // Find the workout in today's schedule
-              const todaySchedule = trainingProgram.schedule.find((day: any) => 
+              const todaySchedule = trainingProgram.schedule.find((day: any) =>
                 day.day === dayOfWeek || day.day.toLowerCase().includes(dayOfWeek.toLowerCase())
               );
-              
+
               if (todaySchedule && todaySchedule.exercises) {
                 workoutData = {
                   day: todaySchedule.day,
@@ -733,7 +733,7 @@ export async function guardianRoutes(app: FastifyInstance) {
                 };
               }
             }
-            
+
             // If workout data not found, create a basic structure
             if (!workoutData) {
               workoutData = {
@@ -743,7 +743,7 @@ export async function guardianRoutes(app: FastifyInstance) {
                 name: workoutName
               };
             }
-            
+
             rescheduledItems.push({
               id: `rescheduled_workout_${Date.now()}`,
               type: 'workout',
@@ -753,10 +753,10 @@ export async function guardianRoutes(app: FastifyInstance) {
               originalDate: date,
               reason: recommendation.data.reason || 'Late wake-up reschedule'
             });
-            
+
             appliedChanges.rescheduledWorkout = workoutName;
             appliedChanges.rescheduledTo = tomorrowDate;
-            
+
             // Update profileData with rescheduledItems
             profileData.rescheduledItems = rescheduledItems;
           }
@@ -819,7 +819,7 @@ export async function guardianRoutes(app: FastifyInstance) {
       );
 
       await client.query('COMMIT');
-      
+
       return reply.send({
         success: true,
         appliedChanges,

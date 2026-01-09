@@ -428,6 +428,18 @@ export async function plansRoutes(app: FastifyInstance) {
     ${chefStylePrompt}
     ${mealStructurePrompt}
     ${calorieLogic}
+    ${dietType === 'shreddmax' ? `SHREDDMAX PROTOCOL (CRITICAL RULES - NOAH RYAN STYLE):
+    1. BREAKFAST (Until Noon): FRUIT ONLY. (e.g., Melon, Berries, Citrus, Coconut Water). NO fats, NO proteins, NO starch.
+    2. POST-NOON: Low Fat, High Protein, Moderate/High Carb.
+    3. ALLOWED FATS: Saturated only (Butter, Coconut Oil, Tallow). NO SEED OILS (No Canola, Soybean, Sunflower oil).
+    4. LUNCH/DINNER: Lean Meat (Beef/Bison/Chicken) + White Rice/Potatoes + Fruit.
+    5. AVOID: Polyunsaturated Fats (PUFAs), processed foods, "fortified" grains.` : ''}
+    ${dietType === 'glp_support' ? `GLP-1 SUPPORT PROTOCOL (OZEMPIC/WEGOVY OPTIMIZED):
+    1. HIGH PROTEIN PRIORITY: Every meal MUST center around protein (30g+ minimum) to prevent muscle loss.
+    2. FIBER FOCUS: High fiber vegetables/fruits in every meal to support gut motility.
+    3. AVOID NAUSEA TRIGGERS: Strictly LIMIT high-fat, greasy, or deep-fried foods.
+    4. VOLUME: Small, nutrient-dense portions. Do not overwhelm volume.
+    5. HYDRATION: Emphasize water-rich foods (soups, smoothies, melons).` : ''}
     DEBT NOTE INSTRUCTION: If user is in debt, simply adjust the calories/macros. Do NOT add repetitive text like "Pledge: ..." or "Debt reduction..." to every meal description. Just modify the food itself.
     Excludes: ${excludes.join(', ') || "None"}.
     Language: ${lang}.
