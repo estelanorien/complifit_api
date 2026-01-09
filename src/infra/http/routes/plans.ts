@@ -36,6 +36,9 @@ export async function plansRoutes(app: FastifyInstance) {
     return cleaned;
   };
   const savePlanToDb = async (client: any, userId: string, training: any, nutrition: any, startDate?: string) => {
+    const toJsonOrNull = (val: any) => val === undefined || val === null ? null : JSON.stringify(val);
+
+    // --- Training Program ---
     const trainingId = (await client.query('SELECT gen_random_uuid() AS id')).rows[0].id;
     await client.query(
       `INSERT INTO training_programs(id, user_id, name, analysis, training_style, is_recovery, created_at)
@@ -43,38 +46,69 @@ export async function plansRoutes(app: FastifyInstance) {
       [trainingId, userId, training?.name || 'Smart Plan', training?.analysis || '', training?.trainingStyle || 'standard']
     );
 
-    if (Array.isArray(training?.schedule)) {
+    // Bulk insert training days and exercises
+    if (Array.isArray(training?.schedule) && training.schedule.length > 0) {
+      // 1. Prepare arrays for bulk insert of training_days
+      const dayIds: string[] = [];
+      const dayIndices: number[] = [];
+      const dayFocuses: string[] = [];
+
       for (let i = 0; i < training.schedule.length; i++) {
         const day = training.schedule[i];
         const dayId = (await client.query('SELECT gen_random_uuid() AS id')).rows[0].id;
-        await client.query(
-          `INSERT INTO training_days(id, training_program_id, day_index, focus)
-           VALUES($1,$2,$3,$4)
-           ON CONFLICT (training_program_id, day_index) DO NOTHING`,
-          [dayId, trainingId, i, day.focus || day.day || `Day ${i + 1}`]
-        );
+        dayIds.push(dayId);
+        dayIndices.push(i);
+        dayFocuses.push(day.focus || day.day || `Day ${i + 1}`);
+      }
+
+      // Bulk insert training days
+      await client.query(
+        `INSERT INTO training_days(id, training_program_id, day_index, focus)
+         SELECT unnest($1::uuid[]), $2, unnest($3::int[]), unnest($4::text[])
+         ON CONFLICT (training_program_id, day_index) DO NOTHING`,
+        [dayIds, trainingId, dayIndices, dayFocuses]
+      );
+
+      // 2. Prepare arrays for bulk insert of training_exercises
+      const exDayIds: string[] = [];
+      const exNames: string[] = [];
+      const exSets: string[] = [];
+      const exReps: string[] = [];
+      const exNotes: string[] = [];
+      const exTargetMuscles: (string | null)[] = [];
+      const exEquipment: (string | null)[] = [];
+      const exDifficulty: (string | null)[] = [];
+      const exMetadata: string[] = [];
+
+      for (let i = 0; i < training.schedule.length; i++) {
+        const day = training.schedule[i];
+        const dayId = dayIds[i];
         if (Array.isArray(day.exercises)) {
           for (const ex of day.exercises) {
-            await client.query(
-              `INSERT INTO training_exercises(id, training_day_id, name, sets, reps, notes, target_muscles, equipment, difficulty, metadata, created_at)
-               VALUES(gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, now())`,
-              [
-                dayId,
-                ex.name || 'Exercise',
-                ex.sets || '',
-                ex.reps || '',
-                ex.notes || ex.drillContext || '',
-                ex.targetMuscles || null,
-                ex.equipment || null,
-                ex.difficulty || null,
-                ex
-              ]
-            );
+            exDayIds.push(dayId);
+            exNames.push(ex.name || 'Exercise');
+            exSets.push(ex.sets || '');
+            exReps.push(ex.reps || '');
+            exNotes.push(ex.notes || ex.drillContext || '');
+            exTargetMuscles.push(ex.targetMuscles || null);
+            exEquipment.push(ex.equipment || null);
+            exDifficulty.push(ex.difficulty || null);
+            exMetadata.push(JSON.stringify(ex));
           }
         }
       }
+
+      // Bulk insert training exercises (if any)
+      if (exDayIds.length > 0) {
+        await client.query(
+          `INSERT INTO training_exercises(id, training_day_id, name, sets, reps, notes, target_muscles, equipment, difficulty, metadata, created_at)
+           SELECT gen_random_uuid(), unnest($1::uuid[]), unnest($2::text[]), unnest($3::text[]), unnest($4::text[]), unnest($5::text[]), unnest($6::text[]), unnest($7::text[]), unnest($8::text[]), unnest($9::jsonb[]), now()`,
+          [exDayIds, exNames, exSets, exReps, exNotes, exTargetMuscles, exEquipment, exDifficulty, exMetadata]
+        );
+      }
     }
 
+    // --- Meal Plan ---
     const mealPlanId = (await client.query('SELECT gen_random_uuid() AS id')).rows[0].id;
     await client.query(
       `INSERT INTO meal_plans(id, user_id, name, start_date, variety_mode, is_recovery, created_at)
@@ -82,41 +116,71 @@ export async function plansRoutes(app: FastifyInstance) {
       [mealPlanId, userId, nutrition?.name || 'Smart Meal Plan', startDate || null, nutrition?.varietyMode || null]
     );
 
-    const toJsonOrNull = (val: any) => val === undefined || val === null ? null : JSON.stringify(val);
+    // Bulk insert meal plan days and meals
+    if (Array.isArray(nutrition?.days) && nutrition.days.length > 0) {
+      // 1. Prepare arrays for bulk insert of meal_plan_days
+      const mealDayIds: string[] = [];
+      const mealDayIndices: number[] = [];
+      const mealDayCalories: (number | null)[] = [];
 
-    if (Array.isArray(nutrition?.days)) {
       for (let i = 0; i < nutrition.days.length; i++) {
         const day = nutrition.days[i];
         const dayId = (await client.query('SELECT gen_random_uuid() AS id')).rows[0].id;
-        await client.query(
-          `INSERT INTO meal_plan_days(id, meal_plan_id, day_index, target_calories)
-           VALUES($1,$2,$3,$4)
-           ON CONFLICT (meal_plan_id, day_index) DO NOTHING`,
-          [dayId, mealPlanId, i, day.targetCalories || null]
-        );
+        mealDayIds.push(dayId);
+        mealDayIndices.push(i);
+        mealDayCalories.push(day.targetCalories || null);
+      }
+
+      // Bulk insert meal plan days
+      await client.query(
+        `INSERT INTO meal_plan_days(id, meal_plan_id, day_index, target_calories)
+         SELECT unnest($1::uuid[]), $2, unnest($3::int[]), unnest($4::int[])
+         ON CONFLICT (meal_plan_id, day_index) DO NOTHING`,
+        [mealDayIds, mealPlanId, mealDayIndices, mealDayCalories]
+      );
+
+      // 2. Prepare arrays for bulk insert of meals
+      const mDayIds: string[] = [];
+      const mTypes: string[] = [];
+      const mNames: string[] = [];
+      const mCalories: (number | null)[] = [];
+      const mMacros: string[] = [];
+      const mTimeLabels: (string | null)[] = [];
+      const mIngredients: string[] = [];
+      const mInstructions: string[] = [];
+      const mNutritionTips: string[] = [];
+      const mMetadata: string[] = [];
+
+      for (let i = 0; i < nutrition.days.length; i++) {
+        const day = nutrition.days[i];
+        const dayId = mealDayIds[i];
         if (Array.isArray(day.meals)) {
           for (const meal of day.meals) {
-            await client.query(
-              `INSERT INTO meals(id, meal_plan_day_id, type, name, calories, macros, time_label, ingredients, instructions, nutrition_tips, metadata, created_at)
-               VALUES(gen_random_uuid(), $1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, now())`,
-              [
-                dayId,
-                meal.type || 'meal',
-                meal.recipe?.name || 'Meal',
-                meal.recipe?.calories || meal.calories || null,
-                toJsonOrNull(meal.recipe?.macros),
-                meal.recipe?.time || null,
-                toJsonOrNull(meal.recipe?.ingredients || meal.ingredients || null),
-                toJsonOrNull(meal.recipe?.instructions || meal.instructions || null),
-                toJsonOrNull(meal.recipe?.nutritionTips || null),
-                toJsonOrNull(meal)
-              ]
-            );
+            mDayIds.push(dayId);
+            mTypes.push(meal.type || 'meal');
+            mNames.push(meal.recipe?.name || 'Meal');
+            mCalories.push(meal.recipe?.calories || meal.calories || null);
+            mMacros.push(toJsonOrNull(meal.recipe?.macros) || '{}');
+            mTimeLabels.push(meal.recipe?.time || null);
+            mIngredients.push(toJsonOrNull(meal.recipe?.ingredients || meal.ingredients || null) || '[]');
+            mInstructions.push(toJsonOrNull(meal.recipe?.instructions || meal.instructions || null) || '[]');
+            mNutritionTips.push(toJsonOrNull(meal.recipe?.nutritionTips || null) || '[]');
+            mMetadata.push(toJsonOrNull(meal) || '{}');
           }
         }
       }
+
+      // Bulk insert meals (if any)
+      if (mDayIds.length > 0) {
+        await client.query(
+          `INSERT INTO meals(id, meal_plan_day_id, type, name, calories, macros, time_label, ingredients, instructions, nutrition_tips, metadata, created_at)
+           SELECT gen_random_uuid(), unnest($1::uuid[]), unnest($2::text[]), unnest($3::text[]), unnest($4::int[]), unnest($5::jsonb[]), unnest($6::text[]), unnest($7::jsonb[]), unnest($8::jsonb[]), unnest($9::jsonb[]), unnest($10::jsonb[]), now()`,
+          [mDayIds, mTypes, mNames, mCalories, mMacros, mTimeLabels, mIngredients, mInstructions, mNutritionTips, mMetadata]
+        );
+      }
     }
 
+    // Update user profile
     await client.query(
       `UPDATE user_profiles
        SET profile_data = jsonb_set(
