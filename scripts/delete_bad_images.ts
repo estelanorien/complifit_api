@@ -53,16 +53,17 @@ async function run() {
         console.log("Deleting bad exercise step images...");
 
         // Delete step images
+        // Delete step images
         const r1 = await client.query(`
-            DELETE FROM assets 
+            DELETE FROM cached_assets 
             WHERE asset_type = 'image' 
-            AND key LIKE 'movement_%_step_%'
+            AND (key LIKE 'movement_%_step_%' OR key LIKE 'movement_%_main')
         `);
-        console.log(`Deleted ${r1.rowCount} step images`);
+        console.log(`Deleted ${r1.rowCount} step and main images`);
 
         // Delete step metadata
         const r2 = await client.query(`
-            DELETE FROM assets 
+            DELETE FROM cached_assets 
             WHERE asset_type = 'json' 
             AND key LIKE 'movement_%_step_%_meta'
         `);
