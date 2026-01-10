@@ -852,21 +852,39 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
   // 8. Generate Image (Proxy)
   const imgProxySchema = z.object({
-    prompt: z.string()
+    prompt: z.string(),
+    referenceImage: z.string().optional() // Base64 image for image-to-image consistency
   });
 
   app.post('/ai/generate/image', { preHandler: authGuard }, async (req, reply) => {
     try {
-      const { prompt } = imgProxySchema.parse(req.body);
+      const { prompt, referenceImage } = imgProxySchema.parse(req.body);
       // Use gemini-2.5-flash-image for image generation
       const model = 'models/gemini-2.5-flash-image';
+
+      // Build parts array - text prompt first, then optional reference image
+      const parts: any[] = [{ text: prompt }];
+
+      if (referenceImage) {
+        // Extract base64 data from data URL if present
+        const base64Data = referenceImage.includes(',')
+          ? referenceImage.split(',')[1]
+          : referenceImage;
+        parts.push({
+          inlineData: {
+            mimeType: 'image/png',
+            data: base64Data
+          }
+        });
+      }
+
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': aiConfig.geminiApiKey
         },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        body: JSON.stringify({ contents: [{ parts }] })
       });
 
       if (!res.ok) {
@@ -890,12 +908,12 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       }
       const data: any = await res.json();
 
-      const parts = data?.candidates?.[0]?.content?.parts || [];
-      const inline = parts.find((p: any) => p.inlineData?.data);
+      const responseParts = data?.candidates?.[0]?.content?.parts || [];
+      const inline = responseParts.find((p: any) => p.inlineData?.data);
       if (inline?.inlineData?.data) {
         return reply.send({ image: `data:image/png;base64,${inline.inlineData.data}` });
       }
-      return reply.send({ error: 'No image returned', raw: parts });
+      return reply.send({ error: 'No image returned', raw: responseParts });
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
