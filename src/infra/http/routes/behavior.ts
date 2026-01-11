@@ -139,6 +139,84 @@ export async function behaviorRoutes(app: FastifyInstance) {
       createdAt: rows[0].created_at
     });
   });
+  // ... existing code ...
+
+  const createPledgeSchema = z.object({
+    type: z.enum(['iron_contract', 'public_vow', 'momentum']),
+    goalType: z.enum(['log_streak', 'workout_frequency', 'no_sugar', 'sleep_early', 'habit_log']),
+    stakeAmount: z.number().min(0),
+    targetValue: z.number().min(1),
+    startDate: z.string().datetime().optional(), // ISO string
+    metadata: z.any().optional()
+  });
+
+  const resolvePledgeSchema = z.object({
+    result: z.enum(['success', 'failed'])
+  });
+
+  app.post('/behavior/pledges', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    const body = createPledgeSchema.parse(req.body);
+
+    const { rows } = await pool.query(
+      `INSERT INTO user_pledges(user_id, type, goal_type, stake_amount, target_value, current_value, start_date, status, metadata)
+       VALUES($1, $2, $3, $4, $5, 0, COALESCE($6, now()), 'active', $7)
+       RETURNING *`,
+      [
+        user.userId,
+        body.type,
+        body.goalType,
+        body.stakeAmount,
+        body.targetValue,
+        body.startDate || null,
+        body.metadata ? JSON.stringify(body.metadata) : '{}'
+      ]
+    );
+
+    // Initial log?
+    return reply.send(rows[0]);
+  });
+
+  app.get('/behavior/pledges/active', { preHandler: authGuard }, async (req) => {
+    const user = (req as any).user;
+    const { rows } = await pool.query(
+      `SELECT * FROM user_pledges 
+       WHERE user_id = $1 AND status = 'active'
+       ORDER BY start_date DESC`,
+      [user.userId]
+    );
+    return rows.map((r: any) => ({
+      id: r.id,
+      userId: r.user_id,
+      type: r.type,
+      goalType: r.goal_type,
+      stakeAmount: r.stake_amount,
+      targetValue: r.target_value,
+      currentValue: r.current_value,
+      startDate: r.start_date,
+      status: r.status,
+      metadata: r.metadata,
+      contractAddress: r.contract_address
+    }));
+  });
+
+  app.post('/behavior/pledges/:id/resolve', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    const { id } = req.params as any;
+    const body = resolvePledgeSchema.parse(req.body);
+
+    const { rows } = await pool.query(
+      `UPDATE user_pledges
+       SET status = $1, end_date = now()
+       WHERE id = $2 AND user_id = $3
+       RETURNING *`,
+      [body.result, id, user.userId]
+    );
+
+    if (rows.length === 0) return reply.status(404).send({ error: 'Pledge not found' });
+
+    return reply.send(rows[0]);
+  });
 }
 
 
