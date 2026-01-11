@@ -42,7 +42,7 @@ export const saveTrainingProgram = async (
               ex.sets || '',
               ex.reps || '',
               ex.notes || ex.drillContext || '',
-              ex.targetMuscles || null,
+              Array.isArray(ex.targetMuscles) ? ex.targetMuscles : (ex.targetMuscles ? [ex.targetMuscles] : null),
               ex.equipment || null,
               ex.difficulty || null,
               JSON.stringify(ex)
@@ -58,16 +58,16 @@ export const saveTrainingProgram = async (
     `SELECT profile_data FROM user_profiles WHERE user_id = $1`,
     [userId]
   );
-  
+
   const currentProfileData = profileRows.length > 0 ? (profileRows[0].profile_data || {}) : {};
-  
+
   // Update only training program related fields, preserve everything else
   const updatedProfileData = {
     ...currentProfileData,
     currentTrainingProgram: trainingPlan,
     trainingProgramStartDate: startDate || new Date().toISOString().split('T')[0]
   };
-  
+
   await client.query(
     `UPDATE user_profiles
      SET profile_data = $1::jsonb,

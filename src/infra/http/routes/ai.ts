@@ -130,6 +130,19 @@ export async function aiRoutes(app: FastifyInstance) {
     const parts: any[] = [];
 
     if (imageBase64) {
+      // CHECK PRO TIER
+      const user = (req as any).user;
+      const { rows } = await pool.query('SELECT subscription_tier FROM profiles WHERE user_id = $1', [user.userId]);
+      const tier = rows[0]?.subscription_tier || 'free';
+
+      if (tier !== 'pro') {
+        return reply.status(403).send({
+          error: 'Subscription Required',
+          message: 'Photo logging is a Pro feature. Upgrade to unlock!',
+          isProContent: true
+        });
+      }
+
       // IMAGE-FIRST ANALYSIS: Prioritize visual recognition and detect NON-FOOD images
       prompt = `
       FOOD IMAGE ANALYSIS - CRITICAL TASK.
