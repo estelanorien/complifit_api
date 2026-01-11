@@ -23,6 +23,7 @@ import { rehabRoutes } from './routes/rehab';
 import { coachRoutes } from './routes/coach';
 import { behaviorRoutes } from './routes/behavior';
 import { inventoryRoutes } from './routes/inventory';
+import { subscriptionRoutes } from './routes/subscription';
 import { timelineRoutes } from './routes/timeline';
 import { negotiationRoutes } from './routes/negotiations';
 import { lookupRoutes } from './routes/lookups';
@@ -159,6 +160,7 @@ export function buildServer() {
   app.register(locationRoutes, { prefix: '/api' });
   app.register(gamificationRoutes, { prefix: '/api' });
   app.register(notificationRoutes, { prefix: '/api' });
+  app.register(subscriptionRoutes, { prefix: '/api' });
 
   return app;
 }

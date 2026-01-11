@@ -142,4 +142,55 @@ export async function socialRoutes(app: FastifyInstance) {
 
     return reply.send({ success: true });
   });
+
+  // ========== FRIEND GRAPH ==========
+  const followSchema = z.object({
+    targetId: z.string()
+  });
+
+  app.post('/social/follow', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    const { targetId } = followSchema.parse(req.body);
+
+    if (user.userId === targetId) {
+      return reply.status(400).send({ error: "Cannot follow yourself" });
+    }
+
+    await pool.query(
+      `INSERT INTO friendships (follower_id, following_id, status)
+       VALUES ($1, $2, 'accepted')
+       ON CONFLICT (follower_id, following_id) DO NOTHING`,
+      [user.userId, targetId]
+    );
+    return reply.send({ success: true });
+  });
+
+  app.get('/social/squad', { preHandler: authGuard }, async (req) => {
+    const user = (req as any).user;
+    const { rows } = await pool.query(
+      `SELECT u.id, u.username, u.email, up.profile_data->>'avatar' as avatar, f.created_at
+       FROM friendships f
+       JOIN users u ON f.following_id = u.id
+       LEFT JOIN user_profiles up ON u.id = up.user_id
+       WHERE f.follower_id = $1 AND f.status = 'accepted'
+       ORDER BY f.created_at DESC`,
+      [user.userId]
+    );
+    return rows;
+  });
+
+  // Search Users
+  app.get('/social/users/search', { preHandler: authGuard }, async (req) => {
+    const { q } = req.query as any;
+    if (!q || q.length < 3) return [];
+
+    const { rows } = await pool.query(
+      `SELECT id, username, email, profile_data->>'avatar' as avatar 
+       FROM users 
+       WHERE username ILIKE $1 OR email ILIKE $1 
+       LIMIT 10`,
+      [`%${q}%`]
+    );
+    return rows;
+  });
 }
