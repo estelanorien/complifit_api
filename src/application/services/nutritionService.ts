@@ -26,6 +26,22 @@ const normalizeIngredients = (ingredients: any[]): string[] => {
   });
 };
 
+const normalizeInstructions = (instructions: any[]): any[] => {
+  if (!Array.isArray(instructions)) return [];
+  return instructions.map((item) => {
+    if (typeof item === 'string') {
+      return { simple: item, detailed: item };
+    }
+    if (typeof item === 'object' && item !== null) {
+      return {
+        simple: item.simple || item.text || item.instruction || 'Enjoy.',
+        detailed: item.detailed || item.text || item.instruction || 'Enjoy your meal.'
+      };
+    }
+    return { simple: String(item), detailed: String(item) };
+  });
+};
+
 type MealPlanMeal = {
   type: string;
   recipe: {
@@ -33,8 +49,9 @@ type MealPlanMeal = {
     calories: number;
     time?: string;
     ingredients?: string[];
-    instructions?: string[];
+    instructions?: any[];
     macros?: any;
+    nutritionTips?: string[];
     prepTips?: string[];
     benefits?: string[];
   };
@@ -164,7 +181,7 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
 
     const { text } = await aiService.generateText({
       prompt: promptSections.join('\n'),
-      model: 'models/gemini-3-flash-preview'
+      model: 'models/gemini-2.5-flash'
     });
 
     const parsed = JSON.parse(cleanGeminiJson(text) || '{}');
