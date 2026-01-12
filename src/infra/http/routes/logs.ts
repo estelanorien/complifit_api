@@ -50,6 +50,13 @@ const extraExerciseSchema = z.object({
   estimatedCalories: z.number().optional()
 });
 
+const weightSchema = z.object({
+  id: z.string().optional(),
+  weight: z.number(),
+  unit: z.string().default('kg'),
+  date: z.string()
+});
+
 export async function logsRoutes(app: FastifyInstance) {
   // FOOD LOG
   app.get('/logs/food', { preHandler: authGuard }, async (req) => {
@@ -305,7 +312,7 @@ export async function logsRoutes(app: FastifyInstance) {
 
     try {
       const data = schema.parse(req.body);
-      
+
       await pool.query(
         `INSERT INTO day_conclusions(user_id, date, total_calories_consumed, total_calories_burned, net_balance, 
           meals_completed, workouts_completed, streak_count, xp_earned, coins_earned, summary_data, created_at)
@@ -321,7 +328,7 @@ export async function logsRoutes(app: FastifyInstance) {
           coins_earned = EXCLUDED.coins_earned,
           summary_data = EXCLUDED.summary_data`,
         [user.userId, data.date, data.totalCaloriesConsumed, data.totalCaloriesBurned, data.netBalance,
-         data.mealsCompleted, data.workoutsCompleted, data.streakCount, data.xpEarned, data.coinsEarned, JSON.stringify(data.summaryData || {})]
+        data.mealsCompleted, data.workoutsCompleted, data.streakCount, data.xpEarned, data.coinsEarned, JSON.stringify(data.summaryData || {})]
       );
 
       return reply.send({ success: true });
@@ -369,7 +376,7 @@ export async function logsRoutes(app: FastifyInstance) {
   // Get current streak count from database
   app.get('/logs/streak-count', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as any).user;
-    
+
     try {
       const { rows } = await pool.query(
         `SELECT COUNT(*) as count FROM day_conclusions 
@@ -377,12 +384,56 @@ export async function logsRoutes(app: FastifyInstance) {
          ORDER BY date DESC`,
         [user.userId]
       );
-      
+
       return reply.send({ streakCount: parseInt(rows[0]?.count || '0') });
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error({ error: 'Streak count fetch failed', e, requestId: (req as any).requestId });
       return reply.status(500).send({ error: isProduction ? 'Failed to fetch streak count' : (e.message || 'Streak count fetch failed') });
+    }
+  });
+
+  // WEIGHT LOG
+  app.get('/logs/weight', { preHandler: authGuard }, async (req) => {
+    const user = (req as any).user;
+    const { rows } = await pool.query(
+      `SELECT id, weight, unit, date FROM weight_logs WHERE user_id = $1 ORDER BY date DESC, created_at DESC LIMIT 100`,
+      [user.userId]
+    );
+    return rows.map(r => ({
+      id: r.id,
+      weight: parseFloat(r.weight),
+      unit: r.unit,
+      date: r.date
+    }));
+  });
+
+  app.post('/logs/weight', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    const items = z.array(weightSchema).parse(req.body);
+    const client = await pool.connect();
+    try {
+      await client.query('SET statement_timeout = 30000');
+      await client.query('BEGIN');
+      // For weight, we might want to keep history but allow updates for same day?
+      // For now, consistent with other logs: delete and re-insert (syncing full log)
+      await client.query('DELETE FROM weight_logs WHERE user_id = $1', [user.userId]);
+      for (const item of items) {
+        const safeId = isValidUuid(item.id) ? item.id : null;
+        await client.query(
+          `INSERT INTO weight_logs(id, user_id, weight, unit, date)
+           VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5)`,
+          [safeId, user.userId, item.weight, item.unit, item.date]
+        );
+      }
+      await client.query('COMMIT');
+      return reply.send({ success: true });
+    } catch (e: any) {
+      await client.query('ROLLBACK');
+      req.log.error({ error: 'Weight log save failed', e });
+      return reply.status(500).send({ error: 'Failed to save weight log' });
+    } finally {
+      client.release();
     }
   });
 }

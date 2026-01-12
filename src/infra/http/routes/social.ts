@@ -179,6 +179,46 @@ export async function socialRoutes(app: FastifyInstance) {
     return rows;
   });
 
+  // Match Contacts (Privacy Preserved)
+  const matchContactsSchema = z.object({
+    hashes: z.array(z.string())
+  });
+
+  app.post('/social/match-contacts', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    const { hashes } = matchContactsSchema.parse(req.body);
+
+    if (hashes.length === 0) return [];
+    if (hashes.length > 2000) return reply.status(400).send({ error: "Too many contacts" });
+
+    // 1. Find users with matching phone hashes
+    const { rows: matches } = await pool.query(
+      `SELECT up.user_id as id, up.profile_data->>'name' as name, up.profile_data->>'avatar' as avatar, up.phone_hash
+       FROM user_profiles up
+       WHERE up.phone_hash = ANY($1)
+         AND up.user_id != $2`,
+      [hashes, user.userId]
+    );
+
+    if (matches.length === 0) return [];
+
+    // 2. Check friendship status
+    // Optimization: Get all my followings in one go
+    const { rows: following } = await pool.query(
+      `SELECT following_id FROM friendships WHERE follower_id = $1`,
+      [user.userId]
+    );
+    const followingSet = new Set(following.map(f => f.following_id));
+
+    // 3. Map status
+    const results = matches.map(m => ({
+      ...m,
+      isFriend: followingSet.has(m.id)
+    }));
+
+    return results;
+  });
+
   // Search Users
   app.get('/social/users/search', { preHandler: authGuard }, async (req) => {
     const { q } = req.query as any;
