@@ -251,34 +251,44 @@ export async function adminRoutes(app: FastifyInstance) {
         return words.join('_');
       };
 
-      const exerciseSet = new Set<string>();
-      const mealSet = new Set<string>();
+      const exerciseMap = new Map<string, any>();
+      const mealMap = new Map<string, any>();
 
-      // 1. Get unique exercise names from training_exercises table
+      // 1. Get unique exercise names from training_exercises table with METADATA
       try {
         const exerciseRows = await pool.query(
-          `SELECT DISTINCT name
+          `SELECT DISTINCT ON (name) name, metadata
            FROM training_exercises
            WHERE name IS NOT NULL AND name != ''
-           ORDER BY name`
+           ORDER BY name, created_at DESC`
         );
         exerciseRows.rows.forEach((row: any) => {
-          if (row.name) exerciseSet.add(row.name);
+          if (row.name) {
+            exerciseMap.set(row.name, {
+              name: row.name,
+              metadata: row.metadata
+            });
+          }
         });
       } catch (e: any) {
         req.log?.warn({ error: 'Failed to fetch from training_exercises', message: e.message });
       }
 
-      // 2. Get unique meal names from meals table
+      // 2. Get unique meal names from meals table with INSTRUCTIONS
       try {
         const mealRows = await pool.query(
-          `SELECT DISTINCT name
+          `SELECT DISTINCT ON (name) name, instructions
            FROM meals
            WHERE name IS NOT NULL AND name != ''
-           ORDER BY name`
+           ORDER BY name, created_at DESC`
         );
         mealRows.rows.forEach((row: any) => {
-          if (row.name) mealSet.add(row.name);
+          if (row.name) {
+            mealMap.set(row.name, {
+              name: row.name,
+              instructions: row.instructions
+            });
+          }
         });
       } catch (e: any) {
         req.log?.warn({ error: 'Failed to fetch from meals', message: e.message });
@@ -298,7 +308,13 @@ export async function adminRoutes(app: FastifyInstance) {
             for (const day of profile.currentTrainingProgram.schedule) {
               if (Array.isArray(day.exercises)) {
                 for (const ex of day.exercises) {
-                  if (ex.name) exerciseSet.add(ex.name);
+                  if (ex.name && !exerciseMap.has(ex.name)) {
+                    // Fallback: Use profile data if DB didn't have it
+                    exerciseMap.set(ex.name, {
+                      name: ex.name,
+                      metadata: { instructions: ex.instructions } // Map standard instructions to metadata structure
+                    });
+                  }
                 }
               }
             }
@@ -310,7 +326,12 @@ export async function adminRoutes(app: FastifyInstance) {
               if (Array.isArray(day.meals)) {
                 for (const meal of day.meals) {
                   const mealName = meal.recipe?.name || meal.name;
-                  if (mealName) mealSet.add(mealName);
+                  if (mealName && !mealMap.has(mealName)) {
+                    mealMap.set(mealName, {
+                      name: mealName,
+                      instructions: meal.recipe?.instructions || meal.instructions
+                    });
+                  }
                 }
               }
             }
@@ -320,15 +341,25 @@ export async function adminRoutes(app: FastifyInstance) {
         req.log?.warn({ error: 'Failed to fetch from user_profiles', message: e.message });
       }
 
-      // Convert sets to arrays and create response
-      const exercises = Array.from(exerciseSet).map((name) => {
-        const movementId = normalizeToMovementId(name);
-        return { id: movementId, name, movementId };
+      // Convert maps to arrays and create response
+      const exercises = Array.from(exerciseMap.values()).map((ex) => {
+        const movementId = normalizeToMovementId(ex.name);
+        return {
+          id: movementId,
+          name: ex.name,
+          movementId,
+          metadata: ex.metadata
+        };
       }).sort((a, b) => a.name.localeCompare(b.name));
 
-      const meals = Array.from(mealSet).map((name) => {
-        const movementId = normalizeToMovementId(name);
-        return { id: movementId, name, movementId };
+      const meals = Array.from(mealMap.values()).map((m) => {
+        const movementId = normalizeToMovementId(m.name);
+        return {
+          id: movementId,
+          name: m.name,
+          movementId,
+          instructions: m.instructions
+        };
       }).sort((a, b) => a.name.localeCompare(b.name));
 
       return { exercises, meals };
