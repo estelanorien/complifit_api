@@ -94,115 +94,122 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
     glp1Mode: profile?.glp1Mode
   };
 
-  const promptSections: string[] = [];
-  promptSections.push(`You are a clinical dietitian. Build a ${days}-day meal plan in English.`);
-  promptSections.push(`USER PROFILE: ${JSON.stringify(profileSummary)}`);
-  promptSections.push(`EXCLUDES: ${JSON.stringify(excludes || [])}`);
-  promptSections.push(`STAPLES: ${JSON.stringify(staples || [])}`);
-  if (prioritizeSuperfoods) promptSections.push(`PRIORITIZE SUPERFOODS and anti-inflammatory ingredients.`);
-  if (varietyMode) promptSections.push(`VARIETY MODE: ${varietyMode}. ${varietyInput || ''}`);
-  if (previousPlan) promptSections.push(`PREVIOUS PLAN SUMMARY: ${JSON.stringify(previousPlan?.days?.slice(0, 2) || [])}`);
+  // --- BATCH GENERATION LOGIC ---
+  const BATCH_SIZE = 7;
 
-  if (profile?.glp1Mode) {
-    promptSections.push(`GLP-1 OPTIMIZATION PROTOCOL (Ozempic/Wegovy):
-1. PROTEIN SPARING: Prioritize high-protein (min 30g/meal) to prevent lean tissue loss.
-2. VOLUME: Smaller, nutrient-dense portions due to delayed gastric emptying.
-3. HYDRATION: Emphasize electrolytes and water-rich whole foods.
-4. NAUSEA MANAGEMENT: Limit greasy/high-fat items that trigger side effects.`);
-  }
+  // Helper to generate a chunk of the plan
+  const generateBatch = async (
+    startDayInfo: number,
+    chunkDays: number,
+    currentPreviousPlan?: any
+  ): Promise<MealPlan> => {
+    const promptSections: string[] = [];
+    promptSections.push(`You are a clinical dietitian. Build a ${chunkDays}-day meal plan in English.`);
+    promptSections.push(`This is Part ${Math.ceil(startDayInfo / BATCH_SIZE)} of a larger plan. Start labelling from "Day ${startDayInfo}".`);
+    promptSections.push(`USER PROFILE: ${JSON.stringify(profileSummary)}`);
+    promptSections.push(`EXCLUDES: ${JSON.stringify(excludes || [])}`);
+    promptSections.push(`STAPLES: ${JSON.stringify(staples || [])}`);
+    if (prioritizeSuperfoods) promptSections.push(`PRIORITIZE SUPERFOODS and anti-inflammatory ingredients.`);
+    if (varietyMode) promptSections.push(`VARIETY MODE: ${varietyMode}. ${varietyInput || ''}`);
+    if (currentPreviousPlan) promptSections.push(`PREVIOUS PLAN SUMMARY: ${JSON.stringify(currentPreviousPlan?.days?.slice(-2) || [])}`); // Use end of previous chunk
 
-  promptSections.push(`
-Return JSON exactly as:
-{
-  "name": "Plan name",
-  "overview": "Short summary",
-  "days": [
+    if (profile?.glp1Mode) {
+      promptSections.push(`GLP-1 OPTIMIZATION PROTOCOL (Ozempic/Wegovy):
+    1. PROTEIN SPARING: Prioritize high-protein (min 30g/meal) to prevent lean tissue loss.
+    2. VOLUME: Smaller, nutrient-dense portions due to delayed gastric emptying.
+    3. HYDRATION: Emphasize electrolytes and water-rich whole foods.
+    4. NAUSEA MANAGEMENT: Limit greasy/high-fat items that trigger side effects.`);
+    }
+
+    promptSections.push(`
+    Return JSON exactly as:
     {
-      "day": "Day 1",
-      "targetCalories": 2200,
-      "meals": [
+      "name": "Part ${Math.ceil(startDayInfo / BATCH_SIZE)}",
+      "overview": "Short summary",
+      "days": [
         {
-          "type": "breakfast",
-          "recipe": {
-            "name": "Meal",
-            "calories": 500,
-            "time": "15 min",
-            "ingredients": ["item"],
-            "instructions": [
-              {
-                "simple": "Quick 1-sentence instruction (max 15 words, imperative mood)",
-                "detailed": "Detailed step-by-step instruction with chef tips, timing, and technique notes (2-3 sentences)"
-              }
-            ],
-            "macros": { "protein": 30, "carbs": 50, "fat": 15 },
-            "nutritionTips": [
-              "Scientific tip for maximizing nutrients from this meal (e.g., 'Crush garlic 10 minutes before cooking to activate allicin')",
-              "Part-specific tip (e.g., 'Eat broccoli stems too - they contain more fiber than florets')"
-            ]
-          },
-          "macronutrientFocus": "High Protein"
+          "day": "Day ${startDayInfo}",
+          "targetCalories": 2200,
+          "meals": [
+            {
+              "type": "breakfast",
+              "recipe": {
+                "name": "Meal",
+                "calories": 500,
+                "time": "15 min",
+                "ingredients": ["item"],
+                "instructions": [
+                  {
+                    "simple": "Quick 1-sentence instruction (max 15 words, imperative mood)",
+                    "detailed": "Detailed step-by-step instruction with chef tips, timing, and technique notes (2-3 sentences)"
+                  }
+                ],
+                "macros": { "protein": 30, "carbs": 50, "fat": 15 },
+                "nutritionTips": [
+                  "Scientific tip with rationale"
+                ]
+              },
+              "macronutrientFocus": "High Protein"
+            }
+          ]
         }
       ]
     }
-  ]
-}
+    
+    CRITICAL INSTRUCTIONS FOR RECIPE STEPS:
+    - Each instruction MUST be an object with "simple" and "detailed" fields
+    - Use imperative mood (no "you should", just "Heat", "Add", "Cook")
+    - NO conversational fillers
+    `);
 
-CRITICAL INSTRUCTIONS FOR RECIPE STEPS:
-- Each instruction MUST be an object with "simple" and "detailed" fields
-- "simple": Quick mode - Brief, actionable instruction (max 15 words). Example: "Heat oil in pan, add onions, cook 5 min"
-- "detailed": Chef mode - Detailed instruction with technique, timing, and tips (2-3 sentences). Example: "Heat 2 tbsp olive oil in a large skillet over medium heat. Add diced onions and cook, stirring occasionally, until translucent and fragrant (about 5 minutes). This builds the flavor base for the dish."
-- Use imperative mood (no "you should", just "Heat", "Add", "Cook")
-- NO conversational fillers like "Here's how", "First", "Then" - just the instruction
+    const { text } = await aiService.generateText({
+      prompt: promptSections.join('\n'),
+      model: 'models/gemini-3-flash-preview'
+    });
 
-NUTRITION TIPS (nutritionTips array):
-- Provide 2-3 evidence-based tips for maximizing nutritional benefits from this meal
-- Examples:
-  * Cooking method tips: "Steam broccoli instead of boiling to preserve 90% of vitamin C"
-  * Timing tips: "Crush garlic 10 minutes before cooking to activate allicin, a powerful antioxidant"
-  * Part-specific tips: "Eat broccoli stems - they contain 2x more fiber than florets"
-  * Combination tips: "Pair spinach with lemon juice - vitamin C increases iron absorption by 3x"
-  * Preparation tips: "Soak beans overnight to reduce phytic acid and improve mineral absorption"
-- Keep each tip concise (1 sentence, max 20 words)
-- Base tips on real nutritional science, not generic advice
-`);
+    const parsed = JSON.parse(cleanGeminiJson(text) || '{}');
+    if (!parsed || !Array.isArray(parsed.days)) {
+      throw new Error('Nutrition plan chunk parsing failed');
+    }
+    return parsed;
+  };
 
-  const { text } = await aiService.generateText({
-    prompt: promptSections.join('\n'),
-    model: 'models/gemini-3-flash-preview'
-  });
+  // Main Execution Loop
+  let finalDays: MealPlanDay[] = [];
+  let planName = "";
+  let planOverview = "";
 
-  const parsedPlan = JSON.parse(cleanGeminiJson(text) || '{}');
-  if (!parsedPlan || !Array.isArray(parsedPlan.days)) {
-    throw new Error('Nutrition plan parsing failed');
+  for (let i = 1; i <= days; i += BATCH_SIZE) {
+    const remaining = days - i + 1;
+    const currentChunkSize = Math.min(remaining, BATCH_SIZE);
+
+    try {
+      // Pass the previous chunk as "previousPlan" for continuity if not the first chunk
+      const prevContext = i > 1 ? { days: finalDays } : previousPlan;
+
+      const chunk = await generateBatch(i, currentChunkSize, prevContext);
+
+      if (i === 1) {
+        planName = chunk.name || `Nutrition Plan (${days} Days)`;
+        planOverview = chunk.overview || "";
+      }
+
+      if (chunk.days) {
+        finalDays = [...finalDays, ...chunk.days];
+      }
+    } catch (e) {
+      console.error(`Error generating batch starting day ${i}:`, e);
+      // Don't fail entire plan if one chunk fails, but maybe throw if empty?
+      if (finalDays.length === 0) throw e;
+    }
   }
 
-  // Normalize instructions to InstructionBlock format
-  const normalizeInstructions = (instructions: any[]): any[] => {
-    if (!Array.isArray(instructions)) {
-      return [{ simple: 'Enjoy mindfully.', detailed: 'Enjoy this meal mindfully and savor each bite.' }];
-    }
-
-    return instructions.map((inst: any) => {
-      // If already in InstructionBlock format
-      if (typeof inst === 'object' && inst !== null && inst.simple && inst.detailed) {
-        return inst;
-      }
-
-      // If it's a string, create both simple and detailed versions
-      if (typeof inst === 'string') {
-        const simple = inst.length > 80 ? inst.substring(0, 80) + '...' : inst;
-        return {
-          simple: simple,
-          detailed: inst
-        };
-      }
-
-      // Fallback
-      return {
-        simple: 'Prepare as directed.',
-        detailed: 'Follow the recipe instructions carefully.'
-      };
-    });
+  // Construct Final Plan
+  const parsedPlan: MealPlan = {
+    name: planName,
+    overview: planOverview,
+    days: finalDays,
+    varietyMode: varietyMode
   };
 
   // Check database for existing recipes before processing
