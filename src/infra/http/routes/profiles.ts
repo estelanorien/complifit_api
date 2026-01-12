@@ -48,7 +48,7 @@ export async function profileRoutes(app: FastifyInstance) {
     if (row?.gender) profileData.gender = row.gender;
     if (row?.height_cm !== null && row?.height_cm !== undefined) profileData.height = row.height_cm;
     if (row?.weight_kg !== null && row?.weight_kg !== undefined) profileData.weight = parseFloat(row.weight_kg);
-    
+
     // Sync avatar_url to profile_data (prefer column over JSONB)
     if (row?.avatar_url) {
       profileData.avatar = row.avatar_url;
@@ -74,6 +74,8 @@ export async function profileRoutes(app: FastifyInstance) {
     const height_cm = body.profile?.height ? parseInt(body.profile.height) : null;
     const weight_kg = body.profile?.weight ? parseFloat(body.profile.weight) : null;
     const avatar_url = body.profile?.avatar || null;
+    const phone_number = body.profile?.phoneNumber || null;
+    const phone_hash = body.profile?.phoneHash || null;
 
     const client = await pool.connect();
     // Prevent unhandled error event crash
@@ -89,18 +91,20 @@ export async function profileRoutes(app: FastifyInstance) {
       // Try with biometric columns first, fallback if they don't exist
       try {
         await client.query(
-          `INSERT INTO user_profiles(user_id, profile_data, health_metrics, age, gender, height_cm, weight_kg, avatar_url, updated_at)
-           VALUES($1, $2, $3, $4, $5, $6, $7, $8, now())
-           ON CONFLICT (user_id) DO UPDATE SET 
-             profile_data = EXCLUDED.profile_data, 
-             health_metrics = EXCLUDED.health_metrics,
-             age = EXCLUDED.age,
-             gender = EXCLUDED.gender,
-             height_cm = EXCLUDED.height_cm,
-             weight_kg = EXCLUDED.weight_kg,
-             avatar_url = EXCLUDED.avatar_url,
-             updated_at = now()`,
-          [user.userId, body.profile, body.metrics, age, gender, height_cm, weight_kg, avatar_url]
+          `INSERT INTO user_profiles(user_id, profile_data, health_metrics, age, gender, height_cm, weight_kg, avatar_url, phone_number, phone_hash, updated_at)
+             VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+             ON CONFLICT (user_id) DO UPDATE SET 
+               profile_data = EXCLUDED.profile_data, 
+               health_metrics = EXCLUDED.health_metrics,
+               age = EXCLUDED.age,
+               gender = EXCLUDED.gender,
+               height_cm = EXCLUDED.height_cm,
+               weight_kg = EXCLUDED.weight_kg,
+               avatar_url = EXCLUDED.avatar_url,
+               phone_number = EXCLUDED.phone_number,
+               phone_hash = EXCLUDED.phone_hash,
+               updated_at = now()`,
+          [user.userId, body.profile, body.metrics, age, gender, height_cm, weight_kg, avatar_url, phone_number, phone_hash]
         );
       } catch (e: any) {
         // If columns don't exist, use fallback query without biometric columns
