@@ -498,7 +498,7 @@ export async function plansRoutes(app: FastifyInstance) {
     3. ALLOWED FATS: Saturated only (Butter, Coconut Oil, Tallow). NO SEED OILS (No Canola, Soybean, Sunflower oil).
     4. LUNCH/DINNER: Lean Meat (Beef/Bison/Chicken) + White Rice/Potatoes + Fruit.
     5. AVOID: Polyunsaturated Fats (PUFAs), processed foods, "fortified" grains.` : ''}
-    ${dietType === 'glp_support' ? `GLP-1 SUPPORT PROTOCOL (OZEMPIC/WEGOVY OPTIMIZED):
+    ${(dietType === 'glp_support' || profile.glp1Mode) ? `GLP-1 SUPPORT PROTOCOL (OZEMPIC/WEGOVY OPTIMIZED):
     1. HIGH PROTEIN PRIORITY: Every meal MUST center around protein (30g+ minimum) to prevent muscle loss.
     2. FIBER FOCUS: High fiber vegetables/fruits in every meal to support gut motility.
     3. AVOID NAUSEA TRIGGERS: Strictly LIMIT high-fat, greasy, or deep-fried foods.

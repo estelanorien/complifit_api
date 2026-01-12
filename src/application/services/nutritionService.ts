@@ -90,7 +90,8 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
     diet: profile?.dietaryPreference,
     exclusions: profile?.excludedIngredients,
     goals: profile?.nutritionGoals || profile?.specificGoals,
-    medical: profile?.conditions
+    medical: profile?.conditions,
+    glp1Mode: profile?.glp1Mode
   };
 
   const promptSections: string[] = [];
@@ -101,6 +102,14 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
   if (prioritizeSuperfoods) promptSections.push(`PRIORITIZE SUPERFOODS and anti-inflammatory ingredients.`);
   if (varietyMode) promptSections.push(`VARIETY MODE: ${varietyMode}. ${varietyInput || ''}`);
   if (previousPlan) promptSections.push(`PREVIOUS PLAN SUMMARY: ${JSON.stringify(previousPlan?.days?.slice(0, 2) || [])}`);
+
+  if (profile?.glp1Mode) {
+    promptSections.push(`GLP-1 OPTIMIZATION PROTOCOL (Ozempic/Wegovy):
+1. PROTEIN SPARING: Prioritize high-protein (min 30g/meal) to prevent lean tissue loss.
+2. VOLUME: Smaller, nutrient-dense portions due to delayed gastric emptying.
+3. HYDRATION: Emphasize electrolytes and water-rich whole foods.
+4. NAUSEA MANAGEMENT: Limit greasy/high-fat items that trigger side effects.`);
+  }
 
   promptSections.push(`
 Return JSON exactly as:
