@@ -23,7 +23,7 @@ export class AiService {
     }
   }
 
-  async generateText({ prompt, model = 'models/gemini-3-flash-preview' }: GenerateTextParams) {
+  async generateText({ prompt, model = 'models/gemini-2.5-flash' }: GenerateTextParams) {
     const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
       method: 'POST',
       headers: {

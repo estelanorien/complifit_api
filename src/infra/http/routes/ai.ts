@@ -466,7 +466,7 @@ export async function aiRoutes(app: FastifyInstance) {
         req.log.warn({ error: e, requestId: (req as any).requestId, message: 'food-log cache lookup failed' });
       }
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -873,7 +873,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
     try {
       const { prompt, referenceImage } = imgProxySchema.parse(req.body);
       // Use gemini-2.5-flash-image for image generation
-      const model = 'models/gemini-2.5-flash-image';
+      const model = 'models/gemini-2.5-flash';
 
       // Build parts array - text prompt first, then optional reference image
       const parts: any[] = [{ text: prompt }];
@@ -1007,7 +1007,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
         }
       ];
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1361,7 +1361,7 @@ If the image is not a suitable body photo (clothed, face-only, unclear, or inapp
 Return ONLY valid JSON, no markdown.`;
 
     try {
-      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
