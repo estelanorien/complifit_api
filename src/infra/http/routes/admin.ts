@@ -200,13 +200,18 @@ export async function adminRoutes(app: FastifyInstance) {
   // User listing (basic)
   app.get('/admin/users', { preHandler: adminGuard }, async () => {
     const { rows } = await pool.query(
-      `SELECT u.id as user_id, p.profile_data
+      `SELECT u.id as user_id, u.email, u.role, p.profile_data
        FROM users u
        LEFT JOIN user_profiles p ON p.user_id = u.id
        ORDER BY u.created_at DESC
        LIMIT 200`
     );
-    return rows.map(r => ({ user_id: r.user_id, profile: r.profile_data }));
+    return rows.map(r => ({
+      user_id: r.user_id,
+      email: r.email,
+      role: r.role || 'user',
+      profile: r.profile_data
+    }));
   });
 
   // User role update
