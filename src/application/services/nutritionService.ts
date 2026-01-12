@@ -1,5 +1,6 @@
 import { AiService } from './aiService';
 import { pool } from '../../infra/db/pool';
+import { translationService } from './translationService';
 
 const aiService = new AiService();
 
@@ -93,7 +94,7 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
   };
 
   const promptSections: string[] = [];
-  promptSections.push(`You are a clinical dietitian. Build a ${days}-day meal plan in ${lang}.`);
+  promptSections.push(`You are a clinical dietitian. Build a ${days}-day meal plan in English.`);
   promptSections.push(`USER PROFILE: ${JSON.stringify(profileSummary)}`);
   promptSections.push(`EXCLUDES: ${JSON.stringify(excludes || [])}`);
   promptSections.push(`STAPLES: ${JSON.stringify(staples || [])}`);
@@ -171,13 +172,13 @@ NUTRITION TIPS (nutritionTips array):
     if (!Array.isArray(instructions)) {
       return [{ simple: 'Enjoy mindfully.', detailed: 'Enjoy this meal mindfully and savor each bite.' }];
     }
-    
+
     return instructions.map((inst: any) => {
       // If already in InstructionBlock format
       if (typeof inst === 'object' && inst !== null && inst.simple && inst.detailed) {
         return inst;
       }
-      
+
       // If it's a string, create both simple and detailed versions
       if (typeof inst === 'string') {
         const simple = inst.length > 80 ? inst.substring(0, 80) + '...' : inst;
@@ -186,7 +187,7 @@ NUTRITION TIPS (nutritionTips array):
           detailed: inst
         };
       }
-      
+
       // Fallback
       return {
         simple: 'Prepare as directed.',
@@ -206,7 +207,7 @@ NUTRITION TIPS (nutritionTips array):
          LIMIT 1`,
         [mealName]
       );
-      
+
       if (result.rows.length > 0) {
         const existing = result.rows[0];
         return {
@@ -231,37 +232,37 @@ NUTRITION TIPS (nutritionTips array):
     if (Array.isArray(day.meals)) {
       for (const meal of day.meals) {
         const mealName = meal?.recipe?.name;
-        
+
         if (mealName) {
           // Check database for existing recipe
           const existingRecipe = await getExistingRecipe(mealName);
-          
-              if (existingRecipe) {
-                // Use existing recipe from database
-                // Service doesn't have req logger, skip logging or use process.stdout
-                meal.recipe.ingredients = existingRecipe.ingredients || meal.recipe.ingredients;
-                meal.recipe.instructions = existingRecipe.instructions || meal.recipe.instructions;
-                meal.recipe.time = existingRecipe.time || meal.recipe.time;
-                meal.recipe.macros = existingRecipe.macros || meal.recipe.macros;
-                meal.recipe.nutritionTips = existingRecipe.nutritionTips || meal.recipe.nutritionTips;
-                if (existingRecipe.calories && !meal.recipe.calories) {
-                  meal.recipe.calories = existingRecipe.calories;
-                }
-              }
+
+          if (existingRecipe) {
+            // Use existing recipe from database
+            // Service doesn't have req logger, skip logging or use process.stdout
+            meal.recipe.ingredients = existingRecipe.ingredients || meal.recipe.ingredients;
+            meal.recipe.instructions = existingRecipe.instructions || meal.recipe.instructions;
+            meal.recipe.time = existingRecipe.time || meal.recipe.time;
+            meal.recipe.macros = existingRecipe.macros || meal.recipe.macros;
+            meal.recipe.nutritionTips = existingRecipe.nutritionTips || meal.recipe.nutritionTips;
+            if (existingRecipe.calories && !meal.recipe.calories) {
+              meal.recipe.calories = existingRecipe.calories;
+            }
+          }
         }
-        
+
         // Normalize ingredients
         if (meal?.recipe?.ingredients) {
           meal.recipe.ingredients = normalizeIngredients(meal.recipe.ingredients);
         }
-        
+
         // Normalize instructions
         if (meal?.recipe?.instructions) {
           meal.recipe.instructions = normalizeInstructions(meal.recipe.instructions);
         } else {
           meal.recipe.instructions = [{ simple: 'Enjoy mindfully.', detailed: 'Enjoy this meal mindfully and savor each bite.' }];
         }
-        
+
         if (!meal?.recipe?.time) {
           meal.recipe.time = '15 min';
         }
@@ -271,6 +272,57 @@ NUTRITION TIPS (nutritionTips array):
 
   parsedPlan.varietyMode = varietyMode;
   parsedPlan.name = parsedPlan.name || `${profile?.primaryGoal || 'Nutrition'} Plan`;
+
+  // --- LOCALIZATION & CACHING LAYER ---
+  if (lang && lang !== 'en') {
+    // 1. Translate Top Level Attributes
+    if (parsedPlan.name) {
+      parsedPlan.name = await translationService.translateText(parsedPlan.name, lang, 'meal_plan_name');
+    }
+    if (parsedPlan.overview) {
+      parsedPlan.overview = await translationService.translateText(parsedPlan.overview, lang, 'meal_plan_overview');
+    }
+
+    // 2. Translate Days and Meals
+    for (const day of parsedPlan.days) {
+      if (Array.isArray(day.meals)) {
+        for (const meal of day.meals) {
+          if (meal.recipe) {
+            // Translate Meal Name
+            if (meal.recipe.name) {
+              meal.recipe.name = await translationService.translateText(meal.recipe.name, lang, 'meal_name');
+            }
+
+            // Translate Ingredients
+            if (Array.isArray(meal.recipe.ingredients)) {
+              meal.recipe.ingredients = await translationService.translateList(meal.recipe.ingredients, lang, 'meal_ingredient');
+            }
+
+            // Translate Instructions
+            if (Array.isArray(meal.recipe.instructions)) {
+              for (const inst of meal.recipe.instructions) {
+                if (inst.simple) {
+                  inst.simple = await translationService.translateText(inst.simple, lang, 'meal_instruction_simple');
+                }
+                if (inst.detailed) {
+                  inst.detailed = await translationService.translateText(inst.detailed, lang, 'meal_instruction_detailed');
+                }
+              }
+            }
+
+            // Translate Nutrition Tips
+            if (Array.isArray(meal.recipe.nutritionTips)) {
+              meal.recipe.nutritionTips = await translationService.translateList(meal.recipe.nutritionTips, lang, 'nutrition_tip');
+            }
+          }
+
+          if (meal.macronutrientFocus) {
+            meal.macronutrientFocus = await translationService.translateText(meal.macronutrientFocus, lang, 'macronutrient_focus');
+          }
+        }
+      }
+    }
+  }
 
   return parsedPlan as MealPlan;
 }

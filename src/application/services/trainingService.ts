@@ -1,4 +1,5 @@
 import { AiService } from './aiService';
+import { translationService } from './translationService';
 
 const aiService = new AiService();
 
@@ -90,7 +91,7 @@ export async function generateTrainingPlan(params: GenerateTrainingPlanParams): 
   };
 
   const promptSections: string[] = [];
-  promptSections.push(`You are a senior strength coach. Build a ${duration}-day program in ${lang}.`);
+  promptSections.push(`You are a senior strength coach. Build a ${duration}-day program in English.`);
   promptSections.push(`USER PROFILE: ${JSON.stringify(profileSummary)}`);
   if (metrics) promptSections.push(`RECENT HEALTH METRICS: ${JSON.stringify(metrics)}`);
   if (varietyMode) promptSections.push(`VARIETY MODE: ${varietyMode}. ${varietyInput || ''}`);
@@ -139,6 +140,41 @@ Return JSON exactly in this structure:
   parsedPlan.varietyMode = varietyMode;
   parsedPlan.originalSchedule = JSON.parse(JSON.stringify(parsedPlan.schedule));
   parsedPlan.name = parsedPlan.name || `${profile?.primaryGoal || 'Training'} Protocol`;
+
+  // --- LOCALIZATION & CACHING LAYER ---
+  if (lang && lang !== 'en') {
+    // 1. Translate Top Level Attributes
+    if (parsedPlan.name) {
+      parsedPlan.name = await translationService.translateText(parsedPlan.name, lang, 'training_plan_name');
+    }
+    if (parsedPlan.analysis) {
+      parsedPlan.analysis = await translationService.translateText(parsedPlan.analysis, lang, 'training_plan_analysis');
+    }
+
+    // 2. Translate Schedule (Days and Exercises)
+    for (const day of parsedPlan.schedule) {
+      if (day.day) {
+        day.day = await translationService.translateText(day.day, lang, 'training_day_name');
+      }
+      if (day.focus) {
+        day.focus = await translationService.translateText(day.focus, lang, 'training_day_focus');
+      }
+
+      if (Array.isArray(day.exercises)) {
+        for (const ex of day.exercises) {
+          if (ex.name) {
+            ex.name = await translationService.translateText(ex.name, lang, 'exercise_name');
+          }
+          if (ex.notes) {
+            ex.notes = await translationService.translateText(ex.notes, lang, 'exercise_notes');
+          }
+          if (ex.drillContext) {
+            ex.drillContext = await translationService.translateText(ex.drillContext, lang, 'exercise_drill_context');
+          }
+        }
+      }
+    }
+  }
 
   return parsedPlan as TrainingPlan;
 }
