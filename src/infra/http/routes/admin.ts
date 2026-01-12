@@ -11,7 +11,8 @@ const assetGenSchema = z.object({
   prompt: z.string().min(1),
   key: z.string().optional(),
   status: z.enum(['active', 'draft', 'auto']).default('active'),
-  movementId: z.string().optional()
+  movementId: z.string().optional(),
+  imageInput: z.string().optional()
 });
 
 const seedSchema = z.object({
@@ -28,10 +29,23 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post('/admin/generate-asset', { preHandler: adminGuard }, async (req, reply) => {
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
     const body = assetGenSchema.parse(req.body || {});
-    const { mode, prompt, key, status, movementId } = body;
+    const { mode, prompt, key, status, movementId, imageInput } = body;
 
     let value: string | null = null;
     try {
+      // Helper to prepare parts
+      const parts: any[] = [{ text: prompt }];
+      if (imageInput) {
+        // Strip prefix if present (data:image/png;base64,)
+        const base64Data = imageInput.replace(/^data:image\/\w+;base64,/, "");
+        parts.push({
+          inlineData: {
+            mimeType: "image/png",
+            data: base64Data
+          }
+        });
+      }
+
       if (mode === 'image') {
         // gemini-2.5-flash-image for image generation
         const model = 'models/gemini-2.5-flash-image';
@@ -44,7 +58,7 @@ export async function adminRoutes(app: FastifyInstance) {
             'x-goog-api-key': env.geminiApiKey
           },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
+            contents: [{ parts }]
           })
         });
 
@@ -70,8 +84,8 @@ export async function adminRoutes(app: FastifyInstance) {
         }
 
         const data: any = await res.json();
-        const parts = data?.candidates?.[0]?.content?.parts || [];
-        const inline = parts.find((p: any) => p.inlineData?.data);
+        const resParts = data?.candidates?.[0]?.content?.parts || [];
+        const inline = resParts.find((p: any) => p.inlineData?.data);
         if (inline?.inlineData?.data) {
           value = `data:image/png;base64,${inline.inlineData.data}`;
         }
@@ -86,7 +100,7 @@ export async function adminRoutes(app: FastifyInstance) {
             'x-goog-api-key': env.geminiApiKey
           },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
+            contents: [{ parts: [{ text: prompt }] }] // JSON usually text-only prompt
           })
         });
 
@@ -114,7 +128,7 @@ export async function adminRoutes(app: FastifyInstance) {
               'x-goog-api-key': env.geminiApiKey
             },
             body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }]
+              contents: [{ parts }] // Send image to Veo if provided
             })
           });
 
