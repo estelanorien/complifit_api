@@ -62,7 +62,7 @@ async function main() {
     }
 
     // Critical threshold - initiate graceful shutdown
-    if (heapPercent > 93) {
+    if (heapPercent > 98) {
       app.log.error({
         message: 'CRITICAL: Memory usage above 93%, initiating graceful shutdown',
         heapPercent
