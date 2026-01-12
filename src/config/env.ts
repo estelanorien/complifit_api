@@ -16,7 +16,10 @@ const envSchema = z.object({
   GEMINI_API_KEY: z.string().min(1, 'GEMINI_API_KEY is required'),
   GOOGLE_PLACES_KEY: z.string().optional(),
   NODE_ENV: z.enum(['development', 'production', 'test']).optional().default('development'),
-  ALLOWED_ORIGINS: z.string().optional()
+  ALLOWED_ORIGINS: z.string().optional(),
+  YOUTUBE_CLIENT_ID: z.string().optional(),
+  YOUTUBE_CLIENT_SECRET: z.string().optional(),
+  YOUTUBE_REFRESH_TOKEN: z.string().optional()
 });
 
 const parseEnv = () => {
@@ -28,7 +31,10 @@ const parseEnv = () => {
       GEMINI_API_KEY: process.env.GEMINI_API_KEY,
       GOOGLE_PLACES_KEY: process.env.GOOGLE_PLACES_KEY,
       NODE_ENV: process.env.NODE_ENV,
-      ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS
+      ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS,
+      YOUTUBE_CLIENT_ID: process.env.YOUTUBE_CLIENT_ID,
+      YOUTUBE_CLIENT_SECRET: process.env.YOUTUBE_CLIENT_SECRET,
+      YOUTUBE_REFRESH_TOKEN: process.env.YOUTUBE_REFRESH_TOKEN
     });
     return parsed;
   } catch (error: any) {
@@ -49,6 +55,11 @@ export const env = {
   geminiApiKey: envVars.GEMINI_API_KEY,
   googlePlacesKey: envVars.GOOGLE_PLACES_KEY,
   nodeEnv: envVars.NODE_ENV,
-  allowedOrigins: envVars.ALLOWED_ORIGINS ? envVars.ALLOWED_ORIGINS.split(',').map(o => o.trim()) : undefined
+  allowedOrigins: envVars.ALLOWED_ORIGINS ? envVars.ALLOWED_ORIGINS.split(',').map(o => o.trim()) : undefined,
+  youtube: {
+    clientId: envVars.YOUTUBE_CLIENT_ID,
+    clientSecret: envVars.YOUTUBE_CLIENT_SECRET,
+    refreshToken: envVars.YOUTUBE_REFRESH_TOKEN
+  }
 };
 
