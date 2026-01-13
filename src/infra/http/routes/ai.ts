@@ -71,7 +71,7 @@ export async function aiRoutes(app: FastifyInstance) {
   // General Gemini proxy (server-side key)
   app.post('/ai/generate-content', { preHandler: authGuard }, async (req, reply) => {
     const body = generateSchema.parse(req.body || {});
-    const { parts, model = 'models/gemini-2.5-flash', generationConfig, tools } = body;
+    const { parts, model = 'models/gemini-1.5-flash', generationConfig, tools } = body;
 
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`, {
@@ -332,7 +332,7 @@ export async function aiRoutes(app: FastifyInstance) {
       parts.push({ text: prompt });
     }
 
-    const model = 'models/gemini-2.5-flash';
+    const model = 'models/gemini-1.5-flash';
 
     // Helper function to ensure response has all required fields
     // CRITICAL: Only use defaults if AI didn't provide values. If AI provided values, use them!
@@ -466,7 +466,7 @@ export async function aiRoutes(app: FastifyInstance) {
         req.log.warn({ error: e, requestId: (req as any).requestId, message: 'food-log cache lookup failed' });
       }
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -752,7 +752,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       }
       sys += ` Language: ${lang}. Keep responses concise.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -798,7 +798,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
         parts.push({ inlineData: { mimeType: 'image/jpeg', data: cleanerBase64 } });
       }
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -837,7 +837,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const { name, lang } = exDetailSchema.parse(req.body);
       const prompt = `Provide details for exercise: "${name}". Language: ${lang}. Return JSON: { instructions: string[], safetyTips: string[], targetMuscles: string[] }. Output JSON only.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -873,8 +873,8 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
     try {
       const { prompt, referenceImage } = imgProxySchema.parse(req.body);
 
-      // Use gemini-2.5-flash-preview-04-17 with native image generation
-      const model = 'models/gemini-2.5-flash-preview-04-17';
+      // Use gemini-1.5-flash-preview-04-17 with native image generation
+      const model = 'models/gemini-1.5-flash-preview-04-17';
 
       // Build parts array - text prompt first, then optional reference image
       const parts: any[] = [];
@@ -1115,7 +1115,7 @@ ${prompt}`;
         ? `Fitness photography: ${name} exercise, step ${index || 1}. ${instruction}. Proper form, athletic model, gym setting, cinematic lighting, 8k resolution, professional quality.`
         : `Food photography: ${name} recipe, step ${index || 1}. ${instruction}. Hyperrealistic, delicious, soft lighting, 8k resolution, professional quality.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-preview-04-17:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1170,7 +1170,7 @@ ${prompt}`;
           ? `Achievement badge icon: ${context}. Metallic, shiny, prestigious, 8k resolution, professional game asset style.`
           : `Game item icon: ${context}. Detailed, appealing, 8k resolution, professional game asset style.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-preview-04-17:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1224,7 +1224,7 @@ ${prompt}`;
       const sizeDesc = type === 'large' ? 'large portion' : 'small portion';
       const prompt = `Food photography: ${mealName}, ${sizeDesc}, ${calories} calories. Visual portion size comparison, hyperrealistic, professional quality, 8k resolution, soft lighting.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-preview-04-17:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1297,7 +1297,7 @@ ${prompt}`;
       }
       `;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1394,7 +1394,7 @@ If the image is not a suitable body photo (clothed, face-only, unclear, or inapp
 Return ONLY valid JSON, no markdown.`;
 
     try {
-      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

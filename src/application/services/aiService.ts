@@ -23,7 +23,7 @@ export class AiService {
     }
   }
 
-  async generateText({ prompt, model = 'models/gemini-2.5-flash' }: GenerateTextParams) {
+  async generateText({ prompt, model = 'models/gemini-1.5-flash' }: GenerateTextParams) {
     const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
       method: 'POST',
       headers: {
@@ -44,7 +44,7 @@ export class AiService {
     return { text };
   }
 
-  async generateImage({ prompt, model = 'models/gemini-2.5-flash-preview-04-17', referenceImage }: GenerateImageParams) {
+  async generateImage({ prompt, model = 'models/gemini-1.5-flash-preview-04-17', referenceImage }: GenerateImageParams) {
     const parts: any[] = [];
 
     // Build enhanced prompt with identity preservation for reference images

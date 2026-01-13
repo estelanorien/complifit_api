@@ -181,7 +181,7 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
 
     const { text } = await aiService.generateText({
       prompt: promptSections.join('\n'),
-      model: 'models/gemini-2.5-flash'
+      model: 'models/gemini-1.5-flash'
     });
 
     const parsed = JSON.parse(cleanGeminiJson(text) || '{}');
