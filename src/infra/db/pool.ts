@@ -172,37 +172,8 @@ const gracefulShutdown = async (signal: string) => {
   }
 };
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-// ✅ YENİ: Uncaught error handling
-process.on('uncaughtException', async (error) => {
-  process.stderr.write(
-    JSON.stringify({
-      timestamp: new Date().toISOString(),
-      level: 'fatal',
-      type: 'uncaught_exception',
-      error: error.message,
-      stack: error.stack
-    }) + '\n'
-  );
-
-  await gracefulShutdown('uncaughtException');
-});
-
-process.on('unhandledRejection', async (reason, promise) => {
-  process.stderr.write(
-    JSON.stringify({
-      timestamp: new Date().toISOString(),
-      level: 'fatal',
-      type: 'unhandled_rejection',
-      reason: reason instanceof Error ? reason.message : String(reason),
-      stack: reason instanceof Error ? reason.stack : undefined
-    }) + '\n'
-  );
-
-  await gracefulShutdown('unhandledRejection');
-});
+// Note: Signal handlers (SIGTERM, SIGINT) are handled in server.ts
+// Pool cleanup is done there via pool.end() during graceful shutdown
 
 // ✅ YENİ: Health check function
 export async function checkDatabaseHealth(): Promise<{
