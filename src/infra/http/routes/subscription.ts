@@ -18,7 +18,7 @@ export async function subscriptionRoutes(app: FastifyInstance) {
             [user.userId]
         );
 
-        return { success: true, message: 'Welcome to Vitality Pro!', tier: 'pro' };
+        return { success: true, message: 'Welcome to Complifit Pro!', tier: 'pro' };
     });
 
     // 2. Downgrade/Cancel (Mock)
