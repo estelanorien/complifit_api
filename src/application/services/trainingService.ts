@@ -116,7 +116,7 @@ Return JSON exactly in this structure:
 
   const { text } = await aiService.generateText({
     prompt: promptSections.join('\n'),
-    model: 'models/gemini-1.5-flash'
+    model: 'models/gemini-3-flash-preview'
   });
 
   const parsedPlan = JSON.parse(cleanGeminiJson(text) || '{}');

@@ -172,7 +172,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
       Language: ${lang}
       `;
 
-      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent', {
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -271,7 +271,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
       Language: ${lang}
       `;
 
-      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent', {
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
