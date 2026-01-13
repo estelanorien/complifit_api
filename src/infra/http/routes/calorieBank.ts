@@ -123,7 +123,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
   // Generate burner workout for calorie surplus
   app.post('/calorie-bank/generate-burner-workout', { preHandler: authGuard }, async (req, reply) => {
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
-    
+
     const body = z.object({
       amountToBurn: z.number().min(50).max(2000),
       profile: z.any(),
@@ -132,7 +132,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
 
     try {
       const { amountToBurn, profile, lang } = body;
-      
+
       const prompt = `
       GENERATE BURNER WORKOUT - CALORIE SURPLUS MITIGATION.
       
@@ -172,9 +172,9 @@ export async function calorieBankRoutes(app: FastifyInstance) {
       Language: ${lang}
       `;
 
-      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent', {
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': env.geminiApiKey
         },
@@ -190,14 +190,14 @@ export async function calorieBankRoutes(app: FastifyInstance) {
       if (!res.ok) {
         const errorText = await res.text();
         const isProduction = process.env.NODE_ENV === 'production';
-        throw new Error(isProduction 
-          ? `AI service error (${res.status})` 
+        throw new Error(isProduction
+          ? `AI service error (${res.status})`
           : `Gemini error ${res.status}: ${errorText}`);
       }
 
       const data: any = await res.json();
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-      
+
       let workout: any = {};
       try {
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
@@ -221,7 +221,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
   // Generate reward meal for calorie credit
   app.post('/calorie-bank/generate-reward-meal', { preHandler: authGuard }, async (req, reply) => {
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
-    
+
     const body = z.object({
       creditAmount: z.number().min(100).max(1500),
       profile: z.any(),
@@ -230,7 +230,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
 
     try {
       const { creditAmount, profile, lang } = body;
-      
+
       const prompt = `
       GENERATE REWARD MEAL - CALORIE CREDIT REDEMPTION.
       
@@ -271,9 +271,9 @@ export async function calorieBankRoutes(app: FastifyInstance) {
       Language: ${lang}
       `;
 
-      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent', {
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': env.geminiApiKey
         },
@@ -289,14 +289,14 @@ export async function calorieBankRoutes(app: FastifyInstance) {
       if (!res.ok) {
         const errorText = await res.text();
         const isProduction = process.env.NODE_ENV === 'production';
-        throw new Error(isProduction 
-          ? `AI service error (${res.status})` 
+        throw new Error(isProduction
+          ? `AI service error (${res.status})`
           : `Gemini error ${res.status}: ${errorText}`);
       }
 
       const data: any = await res.json();
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-      
+
       let meal: any = {};
       try {
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
