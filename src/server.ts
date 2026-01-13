@@ -23,9 +23,25 @@ async function main() {
   process.on('SIGTERM', () => void closeGracefully('SIGTERM'));
   process.on('SIGINT', () => void closeGracefully('SIGINT'));
 
-  // Start server first to satisfy Cloud Run startup probe
-  await app.listen({ port: env.port, host: '0.0.0.0' });
-  app.log.info(`API running on port ${env.port}`);
+  // Ensure all plugins are ready before listening
+  try {
+    console.log('[STARTUP] Waiting for Fastify plugins to load...');
+    await app.ready();
+    console.log('[STARTUP] Fastify plugins loaded successfully');
+  } catch (err) {
+    console.error('[STARTUP] Failed to load Fastify plugins:', err);
+    process.exit(1);
+  }
+
+  // Start server to satisfy Cloud Run startup probe
+  try {
+    await app.listen({ port: env.port, host: '0.0.0.0' });
+    console.log(`[STARTUP] API running on port ${env.port}`);
+    app.log.info(`API running on port ${env.port}`);
+  } catch (err) {
+    console.error('[STARTUP] Failed to start server:', err);
+    process.exit(1);
+  }
 
   // Then check DB connection
   try {
