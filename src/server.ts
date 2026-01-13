@@ -1,6 +1,7 @@
 import { buildServer } from './infra/http/server';
 import { env } from './config/env';
 import { pool } from './infra/db/pool';
+import v8 from 'v8';
 
 async function main() {
   const app = buildServer();
@@ -36,35 +37,27 @@ async function main() {
 
   // Memory monitoring and auto-cleanup
   setInterval(() => {
+    const heapStats = v8.getHeapStatistics();
     const usage = process.memoryUsage();
+
+    // Calculate percentage against ACTUAL system limit, not current allocated total
+    const heapPercent = Math.round((usage.heapUsed / heapStats.heap_size_limit) * 100);
     const heapUsedMB = Math.round(usage.heapUsed / 1024 / 1024);
-    const heapTotalMB = Math.round(usage.heapTotal / 1024 / 1024);
-    const rssMB = Math.round(usage.rss / 1024 / 1024);
-    const heapPercent = Math.round((usage.heapUsed / usage.heapTotal) * 100);
+    const heapLimitMB = Math.round(heapStats.heap_size_limit / 1024 / 1024);
 
     app.log.info({
       memory: {
-        heap: `${heapUsedMB}/${heapTotalMB} MB (${heapPercent}%)`,
-        rss: `${rssMB} MB`,
+        heap: `${heapUsedMB}/${heapLimitMB} MB (${heapPercent}%)`,
+        rss: `${Math.round(usage.rss / 1024 / 1024)} MB`,
         external: `${Math.round(usage.external / 1024 / 1024)} MB`
       },
       uptime: `${Math.round(process.uptime())}s`
     });
 
-    // Trigger manual garbage collection if available and memory is high
-    if (typeof global.gc === 'function' && heapPercent > 80) {
-      app.log.info('Triggering manual GC due to high memory usage');
-      try {
-        global.gc();
-      } catch (err) {
-        app.log.error(err, 'Error during manual GC');
-      }
-    }
-
-    // Critical threshold - initiate graceful shutdown
-    if (heapPercent > 98) {
+    // Critical threshold - initiate graceful shutdown only if REALLY hitting system limit
+    if (heapPercent > 95) {
       app.log.error({
-        message: 'CRITICAL: Memory usage above 93%, initiating graceful shutdown',
+        message: `CRITICAL: Memory usage above 95% of limit (${heapUsedMB}MB / ${heapLimitMB}MB), initiating graceful shutdown`,
         heapPercent
       });
       void closeGracefully('HIGH_MEMORY');
