@@ -25,4 +25,4 @@ EXPOSE 8080
 ENV NODE_OPTIONS="--max-old-space-size=1536"
 
 # Start application
-CMD ["node", "dist/server.js"]
+CMD ["node", "dist/server.cjs"]
