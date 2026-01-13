@@ -44,23 +44,30 @@ export class AiService {
     return { text };
   }
 
-  async generateImage({ prompt, model = 'models/gemini-2.5-flash-image', referenceImage }: GenerateImageParams) {
-    const parts: any[] = [{ text: prompt }];
+  async generateImage({ prompt, model = 'models/gemini-2.5-flash-preview-04-17', referenceImage }: GenerateImageParams) {
+    const parts: any[] = [];
+
+    // Build enhanced prompt with identity preservation for reference images
+    let enhancedPrompt = prompt;
 
     if (referenceImage) {
-      // Remove data URL prefix if present for raw data, but Gemini might expect standard base64
-      // Usually API expects: inlineData: { mimeType: 'image/jpeg', data: base64_string }
-      // We assume referenceImage input is raw base64 or handled by client. 
-      // Safe bet: stripping 'data:image/...;base64,' header if it exists.
-      const base64Data = referenceImage.replace(/^data:image\/\w+;base64,/, "");
+      enhancedPrompt = `CRITICAL IDENTITY PRESERVATION: Match the exact person from the reference image.
+Keep the SAME face, facial features, hair style, and hair color.
+Only change the body posture/position as needed for the action.
 
+${prompt}`;
+
+      // Add reference image first
+      const base64Data = referenceImage.replace(/^data:image\/\w+;base64,/, "");
       parts.push({
         inlineData: {
-          mimeType: 'image/jpeg', // Default to jpeg as widely supported
+          mimeType: 'image/png',
           data: base64Data
         }
       });
     }
+
+    parts.push({ text: enhancedPrompt });
 
     const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
       method: 'POST',
@@ -69,7 +76,11 @@ export class AiService {
         'x-goog-api-key': this.apiKey
       },
       body: JSON.stringify({
-        contents: [{ parts }]
+        contents: [{ parts }],
+        generationConfig: {
+          responseModalities: ['image', 'text'],
+          responseMimeType: 'image/png'
+        }
       })
     });
     if (!res.ok) {
