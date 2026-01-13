@@ -520,14 +520,21 @@ export async function plansRoutes(app: FastifyInstance) {
     - Use imperative mood.
     `;
 
-    const callGemini = async (prompt: string) => {
+    const callGemini = async (prompt: string, type: 'training' | 'nutrition') => {
       const res = await fetch(genEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': apiKey
         },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.7,
+            maxOutputTokens: 8192
+          }
+        })
       });
       if (!res.ok) {
         const errorText = await res.text();
@@ -555,7 +562,7 @@ export async function plansRoutes(app: FastifyInstance) {
     };
 
     try {
-      const [trainText, nutText] = await Promise.all([callGemini(trainingPrompt), callGemini(nutritionPrompt)]);
+      const [trainText, nutText] = await Promise.all([callGemini(trainingPrompt, 'training'), callGemini(nutritionPrompt, 'nutrition')]);
       const trainingPlan = JSON.parse(cleanGeminiJson(trainText) || '{}');
       const nutritionPlan = JSON.parse(cleanGeminiJson(nutText) || '{}');
 

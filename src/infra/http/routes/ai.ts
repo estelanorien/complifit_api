@@ -863,7 +863,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
     }
   });
 
-  // 8. Generate Image (Proxy)
+  // 8. Generate Image (Proxy) - Native Image Generation
   const imgProxySchema = z.object({
     prompt: z.string(),
     referenceImage: z.string().optional() // Base64 image for image-to-image consistency
@@ -872,14 +872,24 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   app.post('/ai/generate/image', { preHandler: authGuard }, async (req, reply) => {
     try {
       const { prompt, referenceImage } = imgProxySchema.parse(req.body);
-      // Use gemini-2.5-flash-image for image generation
-      const model = 'models/gemini-2.5-flash';
+
+      // Use gemini-2.5-flash-preview-04-17 with native image generation
+      const model = 'models/gemini-2.5-flash-preview-04-17';
 
       // Build parts array - text prompt first, then optional reference image
-      const parts: any[] = [{ text: prompt }];
+      const parts: any[] = [];
 
+      // Enhanced prompt for image generation with consistency instructions
+      let enhancedPrompt = prompt;
       if (referenceImage) {
-        // Extract base64 data from data URL if present
+        enhancedPrompt = `CRITICAL IDENTITY PRESERVATION: You MUST match the exact person from the reference image. 
+Keep the SAME face, facial features, hair style, and hair color. 
+Only change the body posture/position as needed for the action described.
+The person's identity must be unmistakably the same as the reference.
+
+${prompt}`;
+
+        // Add reference image first for better context
         const base64Data = referenceImage.includes(',')
           ? referenceImage.split(',')[1]
           : referenceImage;
@@ -891,13 +901,21 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
         });
       }
 
+      parts.push({ text: enhancedPrompt });
+
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': aiConfig.geminiApiKey
         },
-        body: JSON.stringify({ contents: [{ parts }] })
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: {
+            responseModalities: ['image', 'text'],
+            responseMimeType: 'image/png'
+          }
+        })
       });
 
       if (!res.ok) {
@@ -926,7 +944,10 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       if (inline?.inlineData?.data) {
         return reply.send({ image: `data:image/png;base64,${inline.inlineData.data}` });
       }
-      return reply.send({ error: 'No image returned', raw: responseParts });
+
+      // No image returned - log for debugging
+      req.log.warn({ responseParts: responseParts.map((p: any) => ({ hasText: !!p.text, hasInline: !!p.inlineData })) }, 'No image in response');
+      return reply.send({ error: 'No image returned from AI', raw: responseParts });
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
@@ -1094,14 +1115,18 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
         ? `Fitness photography: ${name} exercise, step ${index || 1}. ${instruction}. Proper form, athletic model, gym setting, cinematic lighting, 8k resolution, professional quality.`
         : `Food photography: ${name} recipe, step ${index || 1}. ${instruction}. Hyperrealistic, delicious, soft lighting, 8k resolution, professional quality.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': aiConfig.geminiApiKey
         },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseModalities: ['image', 'text'],
+            responseMimeType: 'image/png'
+          }
         })
       });
 
@@ -1145,14 +1170,18 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
           ? `Achievement badge icon: ${context}. Metallic, shiny, prestigious, 8k resolution, professional game asset style.`
           : `Game item icon: ${context}. Detailed, appealing, 8k resolution, professional game asset style.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': aiConfig.geminiApiKey
         },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseModalities: ['image', 'text'],
+            responseMimeType: 'image/png'
+          }
         })
       });
 
@@ -1195,14 +1224,18 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const sizeDesc = type === 'large' ? 'large portion' : 'small portion';
       const prompt = `Food photography: ${mealName}, ${sizeDesc}, ${calories} calories. Visual portion size comparison, hyperrealistic, professional quality, 8k resolution, soft lighting.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': aiConfig.geminiApiKey
         },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseModalities: ['image', 'text'],
+            responseMimeType: 'image/png'
+          }
         })
       });
 
