@@ -102,6 +102,7 @@ export async function healthRoutes(app: FastifyInstance) {
 
     return reply.status(statusCode).send({
       status: overallStatus,
+      version: '1.0.1-fixed-mem-check',
       timestamp: new Date().toISOString(),
       uptime: uptimeSeconds,
       checks,
