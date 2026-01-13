@@ -50,40 +50,39 @@ export async function healthRoutes(app: FastifyInstance) {
       overallStatus = 'unhealthy';
     }
 
-    // Memory check - improved thresholds
+    // Memory check - improved thresholds using v8 statistics
+    const v8 = await import('v8');
+    const heapStats = v8.getHeapStatistics();
     const memUsage = process.memoryUsage();
+
     const memUsageMB = {
       rss: Math.round(memUsage.rss / 1024 / 1024),
       heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024),
       heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024),
+      heapLimit: Math.round(heapStats.heap_size_limit / 1024 / 1024),
       external: Math.round(memUsage.external / 1024 / 1024)
     };
 
-    // Calculate heap usage percentage
-    const heapUsagePercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
+    // Calculate heap usage percentage relative to LIMIT, not current total
+    const heapUsagePercent = (memUsage.heapUsed / heapStats.heap_size_limit) * 100;
 
-    // More aggressive memory thresholds
+    // More aggressive memory thresholds against the actual limit
     if (heapUsagePercent > 90) {
       checks.memory = {
-        status: 'degraded',
-        message: `Critical memory usage: ${Math.round(heapUsagePercent)}%`
+        status: 'unhealthy',
+        message: `Critical memory usage: ${Math.round(heapUsagePercent)}% of ${memUsageMB.heapLimit}MB`
       };
-      if (overallStatus === 'healthy') overallStatus = 'degraded';
+      overallStatus = 'unhealthy';
     } else if (heapUsagePercent > 80) {
       checks.memory = {
         status: 'degraded',
-        message: `High memory usage: ${Math.round(heapUsagePercent)}%`
+        message: `High memory usage: ${Math.round(heapUsagePercent)}% of ${memUsageMB.heapLimit}MB`
       };
       if (overallStatus === 'healthy') overallStatus = 'degraded';
-    } else if (heapUsagePercent > 70) {
-      checks.memory = {
-        status: 'healthy',
-        message: `Elevated memory usage: ${Math.round(heapUsagePercent)}%`
-      };
     } else {
       checks.memory = {
         status: 'healthy',
-        message: `Heap usage: ${Math.round(heapUsagePercent)}%`
+        message: `Heap usage: ${Math.round(heapUsagePercent)}% of ${memUsageMB.heapLimit}MB`
       };
     }
 
