@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authGuard } from '../hooks/auth';
-import { pool } from '../../db/pool';
+import { authGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
 
 const foodSchema = z.object({
   id: z.string().optional(),
@@ -13,10 +13,10 @@ const foodSchema = z.object({
   fat: z.coerce.number().optional().nullable(),
   status: z.string().optional(),
   matchAccuracy: z.coerce.number().optional().nullable(),
-  timestamp: z.any().optional(),
+  timestamp: z.coerce.date().optional(),
   linkedPlanItemId: z.string().optional().nullable(),
   imageUrl: z.string().optional().nullable(),
-  metadata: z.any().optional()
+  metadata: z.record(z.any()).optional()
 });
 
 const exerciseSchema = z.object({
@@ -24,10 +24,10 @@ const exerciseSchema = z.object({
   name: z.string(),
   date: z.string(),
   time: z.string().optional(),
-  sets: z.any().optional(),
-  location: z.any().optional(),
-  estimatedCalories: z.number().optional(),
-  verification: z.any().optional(),
+  sets: z.array(z.record(z.any())).optional(),
+  location: z.string().optional(),
+  estimatedCalories: z.coerce.number().optional(),
+  verification: z.record(z.any()).optional(),
   isNegotiated: z.boolean().optional()
 });
 
@@ -44,10 +44,10 @@ const extraExerciseSchema = z.object({
   name: z.string(),
   date: z.string(),
   time: z.string().optional(),
-  sets: z.any().optional(),
-  location: z.any().optional(),
-  verification: z.any().optional(),
-  estimatedCalories: z.number().optional()
+  sets: z.array(z.record(z.any())).optional(),
+  location: z.string().optional(),
+  verification: z.record(z.any()).optional(),
+  estimatedCalories: z.coerce.number().optional()
 });
 
 const weightSchema = z.object({
@@ -91,28 +91,66 @@ export async function logsRoutes(app: FastifyInstance) {
     const items = z.array(foodSchema).parse(req.body);
     const client = await pool.connect();
     try {
-      await client.query('SET statement_timeout = 30000'); // 30 seconds timeout
+      await client.query('SET statement_timeout = 30000');
       await client.query('BEGIN');
-      await client.query('DELETE FROM food_logs_simple WHERE user_id = $1', [user.userId]);
+
+      const syncedIds: string[] = [];
+      const updatedItems = [];
+
       for (const item of items) {
-        // ID'yi tamamen backend'e bırak (frontend geçici ID'lerini asla kullanma)
-        await client.query(
-          `INSERT INTO food_logs_simple(user_id, name, calories, protein, carbs, fat, status, match_accuracy, timestamp, linked_plan_item_id, image_url, metadata)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, now()), $10, $11, $12)`,
-          [user.userId, item.name, item.calories, item.protein, item.carbs, item.fat, item.status, item.matchAccuracy, item.timestamp, item.linkedPlanItemId, item.imageUrl, item.metadata]
+        const id = isValidUuid(item.id) ? item.id : gen_random_uuid_manual();
+
+        const { rows } = await client.query(
+          `INSERT INTO food_logs_simple(id, user_id, name, calories, protein, carbs, fat, status, match_accuracy, timestamp, linked_plan_item_id, image_url, metadata)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, now()), $11, $12, $13)
+           ON CONFLICT (id) DO UPDATE SET
+             name = EXCLUDED.name,
+             calories = EXCLUDED.calories,
+             protein = EXCLUDED.protein,
+             carbs = EXCLUDED.carbs,
+             fat = EXCLUDED.fat,
+             status = EXCLUDED.status,
+             match_accuracy = EXCLUDED.match_accuracy,
+             timestamp = EXCLUDED.timestamp,
+             linked_plan_item_id = EXCLUDED.linked_plan_item_id,
+             image_url = EXCLUDED.image_url,
+             metadata = EXCLUDED.metadata
+           RETURNING id`,
+          [id, user.userId, item.name, item.calories, item.protein, item.carbs, item.fat, item.status, item.matchAccuracy, item.timestamp, item.linkedPlanItemId, item.imageUrl, item.metadata]
         );
+
+        const savedId = rows[0].id;
+        syncedIds.push(savedId);
+        updatedItems.push({ ...item, id: savedId });
       }
+
+      // Selective Delete: Remove items NOT in the incoming batch
+      if (syncedIds.length > 0) {
+        await client.query(
+          `DELETE FROM food_logs_simple WHERE user_id = $1 AND id NOT IN (SELECT unnest($2::text[]))`,
+          [user.userId, syncedIds]
+        );
+      } else {
+        await client.query('DELETE FROM food_logs_simple WHERE user_id = $1', [user.userId]);
+      }
+
       await client.query('COMMIT');
-      return reply.send({ success: true });
+      return reply.send({ success: true, items: updatedItems });
     } catch (e: any) {
       await client.query('ROLLBACK');
-      const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'Food log save failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: isProduction ? 'Failed to save food log' : (e.message || 'Food log save failed') });
+      req.log.error({ error: 'Food log sync failed', e });
+      return reply.status(500).send({ error: 'Failed to sync food log' });
     } finally {
       client.release();
     }
   });
+
+  function gen_random_uuid_manual() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+      const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
 
   // EXERCISE LOG
   app.get('/logs/exercise', { preHandler: authGuard }, async (req) => {
@@ -164,24 +202,51 @@ export async function logsRoutes(app: FastifyInstance) {
     const items = z.array(exerciseSchema).parse(req.body);
     const client = await pool.connect();
     try {
-      await client.query('SET statement_timeout = 30000'); // 30 seconds timeout
+      await client.query('SET statement_timeout = 30000');
       await client.query('BEGIN');
-      await client.query('DELETE FROM exercise_logs_simple WHERE user_id = $1', [user.userId]);
+
+      const syncedIds: string[] = [];
+      const updatedItems = [];
+
       for (const item of items) {
-        const safeId = isValidUuid(item.id) ? item.id : null;
-        await client.query(
+        const id = isValidUuid(item.id) ? item.id : gen_random_uuid_manual();
+
+        const { rows } = await client.query(
           `INSERT INTO exercise_logs_simple(id, user_id, name, date, time, sets, location, estimated_calories, verification, is_negotiated)
-           VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-          [safeId, user.userId, item.name, item.date, item.time || null, item.sets, item.location, item.estimatedCalories, item.verification, item.isNegotiated || false]
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           ON CONFLICT (id) DO UPDATE SET
+             name = EXCLUDED.name,
+             date = EXCLUDED.date,
+             time = EXCLUDED.time,
+             sets = EXCLUDED.sets,
+             location = EXCLUDED.location,
+             estimated_calories = EXCLUDED.estimated_calories,
+             verification = EXCLUDED.verification,
+             is_negotiated = EXCLUDED.is_negotiated
+           RETURNING id`,
+          [id, user.userId, item.name, item.date, item.time || null, item.sets, item.location, item.estimatedCalories, item.verification, item.isNegotiated || false]
         );
+
+        const savedId = rows[0].id;
+        syncedIds.push(savedId);
+        updatedItems.push({ ...item, id: savedId });
       }
+
+      if (syncedIds.length > 0) {
+        await client.query(
+          `DELETE FROM exercise_logs_simple WHERE user_id = $1 AND id NOT IN (SELECT unnest($2::text[]))`,
+          [user.userId, syncedIds]
+        );
+      } else {
+        await client.query('DELETE FROM exercise_logs_simple WHERE user_id = $1', [user.userId]);
+      }
+
       await client.query('COMMIT');
-      return reply.send({ success: true });
+      return reply.send({ success: true, items: updatedItems });
     } catch (e: any) {
       await client.query('ROLLBACK');
-      const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'Exercise log save failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: isProduction ? 'Failed to save exercise log' : (e.message || 'Exercise log save failed') });
+      req.log.error({ error: 'Exercise log sync failed', e });
+      return reply.status(500).send({ error: 'Failed to sync exercise log' });
     } finally {
       client.release();
     }
@@ -208,24 +273,47 @@ export async function logsRoutes(app: FastifyInstance) {
     const items = z.array(planCompletionSchema).parse(req.body);
     const client = await pool.connect();
     try {
-      await client.query('SET statement_timeout = 30000'); // 30 seconds timeout
+      await client.query('SET statement_timeout = 30000');
       await client.query('BEGIN');
-      await client.query('DELETE FROM plan_completion_logs WHERE user_id = $1', [user.userId]);
+
+      const syncedIds: string[] = [];
+      const updatedItems = [];
+
       for (const item of items) {
-        const safeId = isValidUuid(item.id) ? item.id : null;
-        await client.query(
+        const id = isValidUuid(item.id) ? item.id : gen_random_uuid_manual();
+
+        const { rows } = await client.query(
           `INSERT INTO plan_completion_logs(id, user_id, plan_id, day_index, meal_index, date)
-           VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6)`,
-          [safeId, user.userId, item.planId, item.dayIndex, item.mealIndex, item.date]
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (id) DO UPDATE SET
+             plan_id = EXCLUDED.plan_id,
+             day_index = EXCLUDED.day_index,
+             meal_index = EXCLUDED.meal_index,
+             date = EXCLUDED.date
+           RETURNING id`,
+          [id, user.userId, item.planId, item.dayIndex, item.mealIndex, item.date]
         );
+
+        const savedId = rows[0].id;
+        syncedIds.push(savedId);
+        updatedItems.push({ ...item, id: savedId });
       }
+
+      if (syncedIds.length > 0) {
+        await client.query(
+          `DELETE FROM plan_completion_logs WHERE user_id = $1 AND id NOT IN (SELECT unnest($2::text[]))`,
+          [user.userId, syncedIds]
+        );
+      } else {
+        await client.query('DELETE FROM plan_completion_logs WHERE user_id = $1', [user.userId]);
+      }
+
       await client.query('COMMIT');
-      return reply.send({ success: true });
+      return reply.send({ success: true, items: updatedItems });
     } catch (e: any) {
       await client.query('ROLLBACK');
-      const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'Plan completion log save failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: isProduction ? 'Failed to save plan completion log' : (e.message || 'Plan completion log save failed') });
+      req.log.error({ error: 'Plan completion log sync failed', e });
+      return reply.status(500).send({ error: 'Failed to sync plan completion log' });
     } finally {
       client.release();
     }
@@ -255,40 +343,50 @@ export async function logsRoutes(app: FastifyInstance) {
     const items = z.array(extraExerciseSchema).parse(req.body);
     const client = await pool.connect();
     try {
-      await client.query('SET statement_timeout = 30000'); // 30 seconds timeout
+      await client.query('SET statement_timeout = 30000');
       await client.query('BEGIN');
-      await client.query('DELETE FROM extra_exercise_logs WHERE user_id = $1', [user.userId]);
-      try {
-        for (const item of items) {
-          const safeId = isValidUuid(item.id) ? item.id : null;
-          await client.query(
-            `INSERT INTO extra_exercise_logs(id, user_id, name, date, time, sets, location, verification, estimated_calories)
-             VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9)`,
-            [safeId, user.userId, item.name, item.date, item.time || null, item.sets, item.location, item.verification, item.estimatedCalories]
-          );
-        }
-      } catch (e: any) {
-        // Fallback for deployments missing "time" column
-        if (e.message && e.message.includes('column "time"')) {
-          for (const item of items) {
-            const safeId = isValidUuid(item.id) ? item.id : null;
-            await client.query(
-              `INSERT INTO extra_exercise_logs(id, user_id, name, date, sets, location, verification, estimated_calories)
-               VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8)`,
-              [safeId, user.userId, item.name, item.date, item.sets, item.location, item.verification, item.estimatedCalories]
-            );
-          }
-        } else {
-          throw e;
-        }
+
+      const syncedIds: string[] = [];
+      const updatedItems = [];
+
+      for (const item of items) {
+        const id = isValidUuid(item.id) ? item.id : gen_random_uuid_manual();
+
+        const { rows } = await client.query(
+          `INSERT INTO extra_exercise_logs(id, user_id, name, date, time, sets, location, verification, estimated_calories)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           ON CONFLICT (id) DO UPDATE SET
+             name = EXCLUDED.name,
+             date = EXCLUDED.date,
+             time = EXCLUDED.time,
+             sets = EXCLUDED.sets,
+             location = EXCLUDED.location,
+             verification = EXCLUDED.verification,
+             estimated_calories = EXCLUDED.estimated_calories
+           RETURNING id`,
+          [id, user.userId, item.name, item.date, item.time || null, item.sets, item.location, item.verification, item.estimatedCalories]
+        );
+
+        const savedId = rows[0].id;
+        syncedIds.push(savedId);
+        updatedItems.push({ ...item, id: savedId });
       }
+
+      if (syncedIds.length > 0) {
+        await client.query(
+          `DELETE FROM extra_exercise_logs WHERE user_id = $1 AND id NOT IN (SELECT unnest($2::text[]))`,
+          [user.userId, syncedIds]
+        );
+      } else {
+        await client.query('DELETE FROM extra_exercise_logs WHERE user_id = $1', [user.userId]);
+      }
+
       await client.query('COMMIT');
-      return reply.send({ success: true });
+      return reply.send({ success: true, items: updatedItems });
     } catch (e: any) {
       await client.query('ROLLBACK');
-      const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'Extra exercise log save failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: isProduction ? 'Failed to save extra exercise log' : (e.message || 'Extra exercise log save failed') });
+      req.log.error({ error: 'Extra exercise log sync failed', e });
+      return reply.status(500).send({ error: 'Failed to sync extra exercise log' });
     } finally {
       client.release();
     }
@@ -415,23 +513,44 @@ export async function logsRoutes(app: FastifyInstance) {
     try {
       await client.query('SET statement_timeout = 30000');
       await client.query('BEGIN');
-      // For weight, we might want to keep history but allow updates for same day?
-      // For now, consistent with other logs: delete and re-insert (syncing full log)
-      await client.query('DELETE FROM weight_logs WHERE user_id = $1', [user.userId]);
+
+      const syncedIds: string[] = [];
+      const updatedItems = [];
+
       for (const item of items) {
-        const safeId = isValidUuid(item.id) ? item.id : null;
-        await client.query(
+        const id = isValidUuid(item.id) ? item.id : gen_random_uuid_manual();
+
+        const { rows } = await client.query(
           `INSERT INTO weight_logs(id, user_id, weight, unit, date)
-           VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5)`,
-          [safeId, user.userId, item.weight, item.unit, item.date]
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (id) DO UPDATE SET
+             weight = EXCLUDED.weight,
+             unit = EXCLUDED.unit,
+             date = EXCLUDED.date
+           RETURNING id`,
+          [id, user.userId, item.weight, item.unit, item.date]
         );
+
+        const savedId = rows[0].id;
+        syncedIds.push(savedId);
+        updatedItems.push({ ...item, id: savedId });
       }
+
+      if (syncedIds.length > 0) {
+        await client.query(
+          `DELETE FROM weight_logs WHERE user_id = $1 AND id NOT IN (SELECT unnest($2::text[]))`,
+          [user.userId, syncedIds]
+        );
+      } else {
+        await client.query('DELETE FROM weight_logs WHERE user_id = $1', [user.userId]);
+      }
+
       await client.query('COMMIT');
-      return reply.send({ success: true });
+      return reply.send({ success: true, items: updatedItems });
     } catch (e: any) {
       await client.query('ROLLBACK');
-      req.log.error({ error: 'Weight log save failed', e });
-      return reply.status(500).send({ error: 'Failed to save weight log' });
+      req.log.error({ error: 'Weight log sync failed', e });
+      return reply.status(500).send({ error: 'Failed to sync weight log' });
     } finally {
       client.release();
     }
