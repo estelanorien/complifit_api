@@ -30,6 +30,7 @@ import { lookupRoutes } from './routes/lookups';
 import { locationRoutes } from './routes/location';
 import { gamificationRoutes } from './routes/gamification';
 import { notificationRoutes } from './routes/notifications';
+import { socialAuthRoutes } from './routes/socialAuth';
 import { requestLogger, responseLogger, errorLogger } from './hooks/requestLogger';
 import { requestIdMiddleware } from './middleware/requestId';
 import { errorHandler } from './middleware/errors';
@@ -121,6 +122,7 @@ export function buildServer() {
   app.register(async function (app) {
     registerAuthRateLimit(app);
     app.register(authRoutes);
+    app.register(socialAuthRoutes);
   }, { prefix: '/api' });
 
   // AI routes with cost-aware rate limiting

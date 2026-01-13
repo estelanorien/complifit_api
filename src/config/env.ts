@@ -19,7 +19,19 @@ const envSchema = z.object({
   ALLOWED_ORIGINS: z.string().optional(),
   YOUTUBE_CLIENT_ID: z.string().optional(),
   YOUTUBE_CLIENT_SECRET: z.string().optional(),
-  YOUTUBE_REFRESH_TOKEN: z.string().optional()
+  YOUTUBE_REFRESH_TOKEN: z.string().optional(),
+  // Push Notifications (VAPID)
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_EMAIL: z.string().optional(),
+  // OAuth (Social Login)
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  FACEBOOK_APP_ID: z.string().optional(),
+  FACEBOOK_APP_SECRET: z.string().optional(),
+  APPLE_CLIENT_ID: z.string().optional(),
+  APPLE_TEAM_ID: z.string().optional(),
+  APPLE_KEY_ID: z.string().optional()
 });
 
 const parseEnv = () => {
@@ -34,7 +46,17 @@ const parseEnv = () => {
       ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS,
       YOUTUBE_CLIENT_ID: process.env.YOUTUBE_CLIENT_ID,
       YOUTUBE_CLIENT_SECRET: process.env.YOUTUBE_CLIENT_SECRET,
-      YOUTUBE_REFRESH_TOKEN: process.env.YOUTUBE_REFRESH_TOKEN
+      YOUTUBE_REFRESH_TOKEN: process.env.YOUTUBE_REFRESH_TOKEN,
+      VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY,
+      VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY,
+      VAPID_EMAIL: process.env.VAPID_EMAIL,
+      GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
+      FACEBOOK_APP_ID: process.env.FACEBOOK_APP_ID,
+      FACEBOOK_APP_SECRET: process.env.FACEBOOK_APP_SECRET,
+      APPLE_CLIENT_ID: process.env.APPLE_CLIENT_ID,
+      APPLE_TEAM_ID: process.env.APPLE_TEAM_ID,
+      APPLE_KEY_ID: process.env.APPLE_KEY_ID
     });
     return parsed;
   } catch (error: any) {
@@ -60,6 +82,26 @@ export const env = {
     clientId: envVars.YOUTUBE_CLIENT_ID,
     clientSecret: envVars.YOUTUBE_CLIENT_SECRET,
     refreshToken: envVars.YOUTUBE_REFRESH_TOKEN
+  },
+  vapid: {
+    publicKey: envVars.VAPID_PUBLIC_KEY,
+    privateKey: envVars.VAPID_PRIVATE_KEY,
+    email: envVars.VAPID_EMAIL
+  },
+  oauth: {
+    google: {
+      clientId: envVars.GOOGLE_CLIENT_ID,
+      clientSecret: envVars.GOOGLE_CLIENT_SECRET
+    },
+    facebook: {
+      appId: envVars.FACEBOOK_APP_ID,
+      appSecret: envVars.FACEBOOK_APP_SECRET
+    },
+    apple: {
+      clientId: envVars.APPLE_CLIENT_ID,
+      teamId: envVars.APPLE_TEAM_ID,
+      keyId: envVars.APPLE_KEY_ID
+    }
   }
 };
 

@@ -1,10 +1,11 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { adminGuard } from '../hooks/auth';
+import { adminGuard, authGuard } from '../hooks/auth';
 import { pool } from '../../db/pool';
 import fetch from 'node-fetch';
 import { env } from '../../../config/env';
 import { uploadToYouTube } from '../../../services/youtubeService';
+import bcrypt from 'bcryptjs';
 
 const assetGenSchema = z.object({
   mode: z.enum(['image', 'video', 'json']).default('image'),
@@ -367,6 +368,173 @@ export async function adminRoutes(app: FastifyInstance) {
       req.log?.error({ error: 'admin movements fetch failed', message: e.message, stack: e.stack });
       return { exercises: [], meals: [] };
     }
+  });
+
+  // ================== ADMIN USER MANAGEMENT ==================
+
+  // Admin: Reset user password
+  app.post('/admin/users/:userId/reset-password', { preHandler: [authGuard, adminGuard] }, async (req, reply) => {
+    const { userId } = req.params as { userId: string };
+    const body = z.object({
+      newPassword: z.string().min(8).regex(
+        /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/,
+        'Password must contain uppercase, lowercase, and number'
+      )
+    }).parse(req.body);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Check if user exists
+      const userCheck = await client.query('SELECT id, email FROM users WHERE id = $1', [userId]);
+      if (userCheck.rows.length === 0) {
+        return reply.status(404).send({ error: 'User not found' });
+      }
+
+      // Hash new password
+      const hash = await bcrypt.hash(body.newPassword, 10);
+
+      // Update password
+      await client.query(
+        'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+        [hash, userId]
+      );
+
+      await client.query('COMMIT');
+
+      req.log.info({
+        type: 'admin_password_reset',
+        adminId: (req as any).user.userId,
+        targetUserId: userId,
+        targetEmail: userCheck.rows[0].email
+      });
+
+      return reply.send({ success: true, message: 'Password reset successfully' });
+    } catch (e: any) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  });
+
+  // Admin: Update user profile
+  app.patch('/admin/users/:userId/profile', { preHandler: [authGuard, adminGuard] }, async (req, reply) => {
+    const { userId } = req.params as { userId: string };
+    const body = z.object({
+      email: z.string().email().optional(),
+      username: z.string().optional(),
+      role: z.enum(['admin', 'moderator', 'user', 'banned']).optional(),
+      profileData: z.record(z.any()).optional()
+    }).parse(req.body);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Check if user exists
+      const userCheck = await client.query('SELECT id FROM users WHERE id = $1', [userId]);
+      if (userCheck.rows.length === 0) {
+        return reply.status(404).send({ error: 'User not found' });
+      }
+
+      // Update users table if email/username/role provided
+      if (body.email || body.username || body.role) {
+        const updates: string[] = [];
+        const values: any[] = [];
+        let idx = 1;
+
+        if (body.email) {
+          updates.push(`email = $${idx++}`);
+          values.push(body.email.toLowerCase().trim());
+        }
+        if (body.username) {
+          updates.push(`username = $${idx++}`);
+          values.push(body.username.toLowerCase().trim());
+        }
+        if (body.role) {
+          updates.push(`role = $${idx++}`);
+          values.push(body.role);
+        }
+        updates.push(`updated_at = NOW()`);
+        values.push(userId);
+
+        await client.query(
+          `UPDATE users SET ${updates.join(', ')} WHERE id = $${idx}`,
+          values
+        );
+      }
+
+      // Update profile_data if provided
+      if (body.profileData) {
+        await client.query(
+          `UPDATE user_profiles 
+           SET profile_data = profile_data || $1::jsonb, updated_at = NOW() 
+           WHERE user_id = $2`,
+          [JSON.stringify(body.profileData), userId]
+        );
+      }
+
+      await client.query('COMMIT');
+
+      req.log.info({
+        type: 'admin_profile_update',
+        adminId: (req as any).user.userId,
+        targetUserId: userId,
+        updates: Object.keys(body)
+      });
+
+      return reply.send({ success: true, message: 'Profile updated successfully' });
+    } catch (e: any) {
+      await client.query('ROLLBACK');
+      if (e.message?.includes('duplicate key') || e.message?.includes('unique constraint')) {
+        return reply.status(409).send({ error: 'Email or username already exists' });
+      }
+      throw e;
+    } finally {
+      client.release();
+    }
+  });
+
+  // Admin: Get all users with basic info
+  app.get('/admin/users', { preHandler: [authGuard, adminGuard] }, async (req, reply) => {
+    const { limit = 50, offset = 0, search } = req.query as { limit?: number; offset?: number; search?: string };
+
+    let query = `
+      SELECT 
+        u.id as user_id, 
+        u.email, 
+        u.username,
+        u.role,
+        u.created_at,
+        p.profile_data
+      FROM users u
+      LEFT JOIN user_profiles p ON u.id = p.user_id
+    `;
+    const values: any[] = [];
+
+    if (search) {
+      query += ` WHERE u.email ILIKE $1 OR u.username ILIKE $1`;
+      values.push(`%${search}%`);
+    }
+
+    query += ` ORDER BY u.created_at DESC LIMIT $${values.length + 1} OFFSET $${values.length + 2}`;
+    values.push(limit, offset);
+
+    const res = await pool.query(query, values);
+
+    return {
+      users: res.rows.map(row => ({
+        user_id: row.user_id,
+        email: row.email,
+        username: row.username,
+        role: row.role || 'user',
+        created_at: row.created_at,
+        profile: row.profile_data
+      })),
+      count: res.rows.length
+    };
   });
 }
 
