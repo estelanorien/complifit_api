@@ -1,11 +1,11 @@
 steps:
   # Build the container image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/vitality-api', '.']
+    args: ['build', '-t', 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/vitality-api:$COMMIT_SHA', '.']
 
-  # Push the container image to Container Registry
+  # Push the container image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/vitality-api']
+    args: ['push', 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/vitality-api:$COMMIT_SHA']
 
   # Deploy container image to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -15,7 +15,7 @@ steps:
       - 'deploy'
       - 'vitality-api'
       - '--image'
-      - 'gcr.io/$PROJECT_ID/vitality-api'
+      - 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/vitality-api:$COMMIT_SHA'
       - '--region'
       - 'europe-west1'
       - '--platform'
@@ -31,8 +31,12 @@ steps:
       - '0'
       - '--max-instances'
       - '3'
-      - '--update-env-vars'
+      - '--set-env-vars'
       - 'PORT=8080,NODE_ENV=production,DATABASE_URL=postgresql://postgres:6fk23az4_F@104.199.2.9:5432/vitality_db,JWT_SECRET=969d2205e73cd824d031bd404107845ee6448d0acc7b36b8d1cb3db4ab34dc45,GEMINI_API_KEY=AIzaSyBWZmBaalzL4NCgWSJ98k56GJrAhWcWRzQ,GOOGLE_PLACES_KEY=AIzaSyANvvftQAS3IhffHLTjEahRW50E_18h-hw'
 
 images:
-  - 'gcr.io/$PROJECT_ID/vitality-api'
+  - 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/vitality-api:$COMMIT_SHA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
