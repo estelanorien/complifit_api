@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import { aiConfig } from '../../config/ai';
+import { aiConfig } from '../../config/ai.js';
 
 type GenerateTextParams = {
   prompt: string;
@@ -23,7 +23,7 @@ export class AiService {
     }
   }
 
-  async generateText({ prompt, model = 'models/gemini-1.5-flash' }: GenerateTextParams) {
+  async generateText({ prompt, model = 'models/gemini-1.5-flash', generationConfig }: GenerateTextParams & { generationConfig?: any }) {
     const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
       method: 'POST',
       headers: {
@@ -31,7 +31,8 @@ export class AiService {
         'x-goog-api-key': this.apiKey
       },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }]
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig
       })
     });
     if (!res.ok) {
