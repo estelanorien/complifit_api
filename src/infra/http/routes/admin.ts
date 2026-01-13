@@ -48,8 +48,8 @@ export async function adminRoutes(app: FastifyInstance) {
       }
 
       if (mode === 'image') {
-        // Use gemini-2.5-flash-preview-04-17 with native image generation
-        const model = 'models/gemini-2.5-flash-preview-04-17';
+        // Use gemini-1.5-flash-preview-04-17 with native image generation
+        const model = 'models/gemini-1.5-flash-preview-04-17';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
 
         const res = await fetch(genEndpoint, {
@@ -95,7 +95,7 @@ export async function adminRoutes(app: FastifyInstance) {
           value = `data:image/png;base64,${inline.inlineData.data}`;
         }
       } else if (mode === 'json') {
-        const model = 'models/gemini-2.5-flash';
+        const model = 'models/gemini-1.5-flash';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
 
         const res = await fetch(genEndpoint, {
