@@ -48,9 +48,8 @@ export async function adminRoutes(app: FastifyInstance) {
       }
 
       if (mode === 'image') {
-        // Usmodels/gemini-3-flash-preview-preview-04-17 with native image generation
-        const model = 'models/gemini-3-flash-preview-preview-04-17';
-        const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
+        const model = 'gemini-2.5-flash-image';
+        const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
         const res = await fetch(genEndpoint, {
           method: 'POST',
@@ -59,11 +58,7 @@ export async function adminRoutes(app: FastifyInstance) {
             'x-goog-api-key': env.geminiApiKey
           },
           body: JSON.stringify({
-            contents: [{ parts }],
-            generationConfig: {
-              responseModalities: ['image', 'text'],
-              responseMimeType: 'image/png'
-            }
+            contents: [{ parts }]
           })
         });
 
