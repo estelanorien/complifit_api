@@ -873,33 +873,40 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
     try {
       const { prompt, referenceImage } = imgProxySchema.parse(req.body);
 
-      // Use Imagen 4.0 for image generation
-      // The Gemini API exposes Imagen via the models/imagen-4.0-generate-001 endpoint
-      const model = 'imagen-4.0-generate-001';
+      // Use Gemini 2.5 Flash Image - supports native image generation via generateContent
+      // Reference: https://ai.google.dev/gemini-api/docs/image-generation
+      const model = 'gemini-2.5-flash-preview-05-20';
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-      // For text-to-image generation, we use the generateImages endpoint
-      // Reference: https://ai.google.dev/api/imagen
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateImages`;
+      // Build request with responseModalities for image output
+      const parts: any[] = [];
 
-      // Build enhanced prompt for better consistency
+      // Enhanced prompt for consistency
       let enhancedPrompt = prompt;
       if (referenceImage) {
-        // If reference image is provided, add consistency instructions to the text prompt
-        // Note: Imagen does not support direct image-to-image via REST, so we enhance the text prompt
-        enhancedPrompt = `CRITICAL: Create an image that matches this style and setting. ${prompt}`;
+        // Add reference image as input context
+        const base64Data = referenceImage.includes(',')
+          ? referenceImage.split(',')[1]
+          : referenceImage;
+        parts.push({
+          inlineData: {
+            mimeType: 'image/png',
+            data: base64Data
+          }
+        });
+        enhancedPrompt = `Based on the reference image, create a similar style image: ${prompt}`;
       }
 
+      parts.push({ text: enhancedPrompt });
+
       const requestBody = {
-        instances: [{ prompt: enhancedPrompt }],
-        parameters: {
-          sampleCount: 1,
-          aspectRatio: '1:1',
-          personGeneration: 'allow_adult',
-          addWatermark: false
+        contents: [{ parts }],
+        generationConfig: {
+          responseModalities: ['TEXT', 'IMAGE']
         }
       };
 
-      req.log.info({ model, promptLength: enhancedPrompt.length }, 'Calling Imagen 4.0 API');
+      req.log.info({ model, promptLength: enhancedPrompt.length }, 'Calling Gemini 2.5 Flash Image API');
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -927,28 +934,24 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
         }
 
         const isProduction = process.env.NODE_ENV === 'production';
-        req.log.error({ status: res.status, errorText }, 'Imagen API error');
-        throw new Error(isProduction ? `AI service error (${res.status})` : `Imagen error ${res.status}: ${errorText}`);
+        req.log.error({ status: res.status, errorText }, 'Gemini Image API error');
+        throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
       }
 
       const data: any = await res.json();
 
-      // Imagen returns: { predictions: [{ bytesBase64Encoded: "...", mimeType: "image/png" }] }
-      const prediction = data?.predictions?.[0];
-      if (prediction?.bytesBase64Encoded) {
-        const mimeType = prediction.mimeType || 'image/png';
-        return reply.send({ image: `data:${mimeType};base64,${prediction.bytesBase64Encoded}` });
-      }
+      // Gemini returns: { candidates: [{ content: { parts: [{ inlineData: { data, mimeType } }, { text: '...' }] } }] }
+      const responseParts = data?.candidates?.[0]?.content?.parts || [];
+      const imagePart = responseParts.find((p: any) => p.inlineData?.data);
 
-      // Alternative response format: { generatedImages: [{ image: { imageBytes: "..." } }] }
-      const genImage = data?.generatedImages?.[0]?.image?.imageBytes;
-      if (genImage) {
-        return reply.send({ image: `data:image/png;base64,${genImage}` });
+      if (imagePart?.inlineData?.data) {
+        const mimeType = imagePart.inlineData.mimeType || 'image/png';
+        return reply.send({ image: `data:${mimeType};base64,${imagePart.inlineData.data}` });
       }
 
       // No image returned - log for debugging
-      req.log.warn({ responseKeys: Object.keys(data || {}) }, 'No image in Imagen response');
-      return reply.send({ error: 'No image returned from AI', raw: data });
+      req.log.warn({ responseKeys: Object.keys(data || {}), partsCount: responseParts.length }, 'No image in Gemini response');
+      return reply.send({ error: 'No image returned from AI', raw: responseParts });
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
