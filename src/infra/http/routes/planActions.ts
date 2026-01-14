@@ -101,8 +101,33 @@ export async function planActionsRoutes(app: FastifyInstance) {
             throw new Error(`AI generation failed: ${e.message}. Please check GEMINI_API_KEY configuration.`);
         }
 
-        const trainingPlan = JSON.parse(PlanService.cleanGeminiJson(trainText.text) || '{}');
-        const nutritionPlan = JSON.parse(PlanService.cleanGeminiJson(nutText.text) || '{}');
+        // Validate AI responses
+        if (!trainText?.text) {
+            req.log.error({ error: 'Training plan response empty', requestId: (req as any).requestId });
+            throw new Error('Training plan generation returned empty response. Please try again.');
+        }
+        if (!nutText?.text) {
+            req.log.error({ error: 'Nutrition plan response empty', requestId: (req as any).requestId });
+            throw new Error('Nutrition plan generation returned empty response. Please try again.');
+        }
+
+        // Parse JSON with error handling
+        let trainingPlan, nutritionPlan;
+        try {
+            const cleanedTrainText = PlanService.cleanGeminiJson(trainText.text);
+            trainingPlan = JSON.parse(cleanedTrainText || '{}');
+        } catch (e: any) {
+            req.log.error({ error: 'Training plan JSON parse failed', rawText: trainText.text?.substring(0, 200), requestId: (req as any).requestId });
+            throw new Error('Failed to parse training plan response. Please try again.');
+        }
+
+        try {
+            const cleanedNutText = PlanService.cleanGeminiJson(nutText.text);
+            nutritionPlan = JSON.parse(cleanedNutText || '{}');
+        } catch (e: any) {
+            req.log.error({ error: 'Nutrition plan JSON parse failed', rawText: nutText.text?.substring(0, 200), requestId: (req as any).requestId });
+            throw new Error('Failed to parse nutrition plan response. Please try again.');
+        }
 
         // --- Validation & Normalization ---
         if (!Array.isArray(trainingPlan?.schedule) || trainingPlan.schedule.length === 0) {
@@ -117,14 +142,28 @@ export async function planActionsRoutes(app: FastifyInstance) {
             for (const day of nutritionPlan.days) {
                 if (Array.isArray(day.meals)) {
                     for (const meal of day.meals) {
+                        // Ensure meal.recipe exists
+                        if (!meal.recipe) {
+                            meal.recipe = {};
+                        }
+
                         const mealName = meal?.recipe?.name;
                         if (mealName) {
-                            const existing = await PlanService.getExistingRecipe(mealName);
-                            if (existing) {
-                                Object.assign(meal.recipe, existing);
+                            try {
+                                const existing = await PlanService.getExistingRecipe(mealName);
+                                if (existing) {
+                                    Object.assign(meal.recipe, existing);
+                                }
+                            } catch (e: any) {
+                                req.log.warn({ error: 'Failed to check existing recipe', mealName, requestId: (req as any).requestId });
+                                // Continue without existing recipe
                             }
                         }
-                        meal.recipe.instructions = PlanService.normalizeInstructions(meal.recipe.instructions);
+                        
+                        // Normalize instructions safely
+                        if (meal.recipe) {
+                            meal.recipe.instructions = PlanService.normalizeInstructions(meal.recipe.instructions || []);
+                        }
                     }
                 }
             }
@@ -134,20 +173,42 @@ export async function planActionsRoutes(app: FastifyInstance) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            const { trainingId, mealPlanId } = await PlanService.savePlanToDb(client, user.userId, trainingPlan, nutritionPlan, body.startDate);
+            
+            try {
+                const { trainingId, mealPlanId } = await PlanService.savePlanToDb(client, user.userId, trainingPlan, nutritionPlan, body.startDate);
 
-            // Save to archive (auto)
-            const archiveId = (await client.query('SELECT gen_random_uuid() AS id')).rows[0].id;
-            await client.query(
-                `INSERT INTO saved_smart_plans(id, user_id, name, date_created, training, nutrition, progress_day_index, summary)
-         VALUES($1, $2, $3, now(), $4, $5, 0, $6)`,
-                [archiveId, user.userId, `${trainingPlan.name || 'Smart Plan'} (Auto-Saved)`, trainingPlan, nutritionPlan, 'Generated Smart Plan']
-            );
+                // Save to archive (auto)
+                const archiveId = (await client.query('SELECT gen_random_uuid() AS id')).rows[0].id;
+                await client.query(
+                    `INSERT INTO saved_smart_plans(id, user_id, name, date_created, training, nutrition, progress_day_index, summary)
+             VALUES($1, $2, $3, now(), $4, $5, 0, $6)`,
+                    [archiveId, user.userId, `${trainingPlan.name || 'Smart Plan'} (Auto-Saved)`, trainingPlan, nutritionPlan, 'Generated Smart Plan']
+                );
 
-            await client.query('COMMIT');
-            return reply.send({ training: trainingPlan, nutrition: nutritionPlan, trainingId, mealPlanId, archiveId });
+                await client.query('COMMIT');
+                return reply.send({ training: trainingPlan, nutrition: nutritionPlan, trainingId, mealPlanId, archiveId });
+            } catch (dbError: any) {
+                await client.query('ROLLBACK');
+                req.log.error({ 
+                    error: 'Database save failed', 
+                    message: dbError.message, 
+                    code: dbError.code,
+                    requestId: (req as any).requestId 
+                });
+                
+                // Provide user-friendly error messages
+                if (dbError.code === '23505') {
+                    throw new Error('Plan already exists. Please try again.');
+                } else if (dbError.code === '23503') {
+                    throw new Error('Invalid data reference. Please contact support.');
+                } else if (dbError.code === '23502') {
+                    throw new Error('Required data is missing. Please try again.');
+                } else {
+                    throw new Error(`Failed to save plan: ${dbError.message || 'Database error'}`);
+                }
+            }
         } catch (e: any) {
-            await client.query('ROLLBACK');
+            // Re-throw if it's already a user-friendly error
             throw e;
         } finally {
             client.release();
