@@ -77,11 +77,7 @@ ${prompt}`;
         'x-goog-api-key': this.apiKey
       },
       body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig: {
-          responseModalities: ['image', 'text'],
-          responseMimeType: 'image/png'
-        }
+        contents: [{ parts }]
       })
     });
     if (!res.ok) {
