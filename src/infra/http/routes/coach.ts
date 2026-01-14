@@ -12,7 +12,7 @@ const buildGeminiPayload = (history: any[], systemText: string) => ({
   }
 });
 
-const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
+const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
 async function callGemini(payload: any) {
   // Use header-based auth instead of query param for security

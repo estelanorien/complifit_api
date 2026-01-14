@@ -14,8 +14,8 @@ if (!API_KEY) {
 }
 
 async function testImageGen() {
-    console.log("Testing gemini-2.0-flash-exp image generation...");
-    const model = 'models/gemini-2.0-flash-exp';
+    console.log("Testing gemini-2.5-flash-image image generation...");
+    const model = 'models/gemini-2.5-flash-image';
     const url = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent?key=${API_KEY}`;
 
     const body = {
