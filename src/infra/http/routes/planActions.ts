@@ -27,6 +27,12 @@ export async function planActionsRoutes(app: FastifyInstance) {
             calculatedBiometrics: z.any().optional()
         }).parse(req.body);
 
+        // Explicit API key check
+        if (!env.geminiApiKey) {
+            req.log.error({ error: 'GEMINI_API_KEY not configured', requestId: (req as any).requestId });
+            return reply.status(500).send({ error: 'GEMINI_API_KEY not configured on backend. Please contact support.' });
+        }
+
         const { profile, settings, lang, calculatedBiometrics } = body;
         const durationDays = settings.duration || 7;
 
