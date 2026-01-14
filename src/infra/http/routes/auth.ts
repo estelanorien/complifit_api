@@ -79,6 +79,39 @@ export async function authRoutes(app: FastifyInstance) {
     return { user };
   });
 
+  app.post('/auth/refresh', async (req, reply) => {
+    try {
+      const body = z.object({
+        refreshToken: z.string().optional(),
+        token: z.string().optional()
+      }).parse(req.body);
+
+      const tokenToRefresh = body.refreshToken || body.token;
+
+      if (!tokenToRefresh) {
+        throw new AuthenticationError('No token provided');
+      }
+
+      // For now, just verify the token and issue a new one
+      const { user, token } = await auth.refreshToken(tokenToRefresh);
+
+      req.log.info({
+        type: 'token_refreshed',
+        requestId: (req as any).requestId,
+        userId: user.id,
+      });
+
+      return reply.send({ user, token });
+    } catch (e: any) {
+      req.log.warn({
+        type: 'token_refresh_failed',
+        requestId: (req as any).requestId,
+        error: e.message,
+      });
+      throw new AuthenticationError('Invalid or expired token');
+    }
+  });
+
   app.post('/auth/change-password', { preHandler: authGuard }, async (req, reply) => {
     try {
       const user = (req as any).user;
