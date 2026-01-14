@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { AuthService } from '../../../application/services/authService';
-import { authGuard } from '../hooks/auth';
-import { ValidationError, ConflictError, AuthenticationError } from '../middleware/errors';
+import { AuthService } from '../../../application/services/authService.js';
+import { authGuard } from '../hooks/auth.js';
+import { ValidationError, ConflictError, AuthenticationError } from '../middleware/errors.js';
 
 const auth = new AuthService();
 

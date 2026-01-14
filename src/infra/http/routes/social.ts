@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authGuard } from '../hooks/auth';
-import { pool } from '../../db/pool';
+import { authGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
 
 const postSchema = z.object({
   caption: z.string(),
@@ -40,6 +40,13 @@ const calculateSimilarity = (userProfile: any, otherProfile: any): number => {
 };
 
 export async function socialRoutes(app: FastifyInstance) {
+  // System Messages (Announcements, etc.)
+  app.get('/social/system-messages', { preHandler: authGuard }, async (req, reply) => {
+    // Return empty list for now, or fetch from DB if table exists. 
+    // Assuming empty is safe to fix 404.
+    return [];
+  });
+
   app.get('/social/feed', { preHandler: authGuard }, async (req) => {
     const user = (req as any).user;
     const { rows } = await pool.query(
