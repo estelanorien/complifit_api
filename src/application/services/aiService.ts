@@ -45,11 +45,62 @@ export class AiService {
     return { text };
   }
 
+  /**
+   * Clean and translate image prompts to prevent text overlays
+   * Removes step numbers, UI labels, and translates to English
+   */
+  async cleanImagePrompt(prompt: string): Promise<string> {
+    try {
+      // Check if prompt contains non-ASCII characters (likely non-English)
+      const hasNonEnglish = /[^\x00-\x7F]/.test(prompt);
+
+      // Check if prompt contains step indicators or UI labels
+      const hasStepLabels = /\b(step|étape|paso|adım)\s*\d+/i.test(prompt) ||
+        /^\d+[.:)]/.test(prompt.trim());
+
+      if (!hasNonEnglish && !hasStepLabels) {
+        // Already clean English prompt, just return with safety suffix
+        return `${prompt}. CRITICAL: Absolutely no text, labels, numbers, letters, words, captions, or watermarks in the image.`;
+      }
+
+      // Use AI to translate and clean the prompt
+      const cleaningPrompt = `You are a professional image prompt translator. Your task is to:
+1. Translate the following text to English if it's in another language
+2. Remove any step numbers, UI labels, or instructional prefixes (like "Step 1:", "Étape 2:", etc.)
+3. Extract ONLY the visual scene description
+4. Keep it concise and focused on what should be visible in the photo
+
+Input prompt: ${prompt}
+
+Return ONLY the cleaned visual description in English. Do not include any explanations or notes.`;
+
+      const { text } = await this.generateText({
+        prompt: cleaningPrompt,
+        model: 'models/gemini-3-flash-preview'
+      });
+
+      const cleaned = text.trim();
+
+      // Add safety suffix to prevent text rendering
+      return `${cleaned}. CRITICAL: Absolutely no text, labels, numbers, letters, words, captions, or watermarks in the image.`;
+    } catch (e) {
+      // Fallback: Basic regex cleaning if AI translation fails
+      let cleaned = prompt;
+      // Remove step numbers
+      cleaned = cleaned.replace(/^(step|étape|paso|adım)\s*\d+[.:)]?\s*/i, '');
+      cleaned = cleaned.replace(/^\d+[.:)]\s*/, '');
+      return `${cleaned}. CRITICAL: Absolutely no text, labels, numbers, letters, words, captions, or watermarks in the image.`;
+    }
+  }
+
   async generateImage({ prompt, model = 'models/gemini-2.0-flash-exp', referenceImage }: GenerateImageParams) {
     const parts: any[] = [];
 
+    // Clean prompt to prevent text overlays
+    const cleanedPrompt = await this.cleanImagePrompt(prompt);
+
     // Build enhanced prompt with identity preservation for reference images
-    let enhancedPrompt = prompt;
+    let enhancedPrompt = cleanedPrompt;
 
     if (referenceImage) {
       enhancedPrompt = `CRITICAL IDENTITY PRESERVATION: Match the exact person from the reference image.

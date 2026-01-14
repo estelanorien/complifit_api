@@ -882,8 +882,11 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       // Build parts array
       const parts: any[] = [];
 
+      // Clean the prompt to prevent text overlays (translate to English, remove step numbers)
+      const cleanedPrompt = await ai.cleanImagePrompt(prompt);
+
       // Enhanced prompt for image generation
-      let enhancedPrompt = prompt;
+      let enhancedPrompt = cleanedPrompt;
       if (referenceImage) {
         // Add reference image as input for style matching
         const base64Data = referenceImage.includes(',')
@@ -895,7 +898,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
             data: base64Data
           }
         });
-        enhancedPrompt = `Create an image matching this reference style: ${prompt}`;
+        enhancedPrompt = `Create an image matching this reference style: ${cleanedPrompt}`;
       }
 
       parts.push({ text: enhancedPrompt });
