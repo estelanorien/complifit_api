@@ -134,4 +134,33 @@ export class AuthService {
   verifyToken(token: string): JwtPayload {
     return jwt.verify(token, env.jwtSecret) as JwtPayload;
   }
+
+  async refreshToken(token: string) {
+    // Verify the existing token
+    const payload = this.verifyToken(token);
+
+    // Fetch fresh user data
+    const { rows } = await pool.query(
+      'SELECT id, email, username FROM users WHERE id = $1',
+      [payload.userId]
+    );
+
+    if (rows.length === 0) {
+      throw new Error('User not found');
+    }
+
+    const user = rows[0];
+
+    // Issue a new token
+    const newToken = this.issueToken({ userId: user.id, email: user.email });
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        username: user.username
+      },
+      token: newToken
+    };
+  }
 }
