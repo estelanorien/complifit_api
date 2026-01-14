@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authGuard, adminGuard } from '../hooks/auth';
-import { pool } from '../../db/pool';
+import { authGuard, adminGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
 
 const reportSchema = z.object({
   targetId: z.string(),

@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import fetch from 'node-fetch';
-import { authGuard } from '../hooks/auth';
-import { env } from '../../../config/env';
+import { authGuard } from '../hooks/auth.js';
+import { env } from '../../../config/env.js';
 
 const buildGeminiPayload = (history: any[], systemText: string) => ({
   contents: history,

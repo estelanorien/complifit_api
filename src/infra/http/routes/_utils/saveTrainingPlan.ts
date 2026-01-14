@@ -1,4 +1,4 @@
-import { TrainingPlan } from '../../../../application/services/trainingService';
+import { TrainingPlan } from '../../../../application/services/trainingService.js';
 
 export const saveTrainingProgram = async (
   client: any,

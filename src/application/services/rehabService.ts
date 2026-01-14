@@ -1,4 +1,4 @@
-import { AiService } from './aiService';
+import { AiService } from './aiService.js';
 
 const aiService = new AiService();
 

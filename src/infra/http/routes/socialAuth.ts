@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { pool } from '../../db/pool';
-import { env } from '../../../config/env';
+import { pool } from '../../db/pool.js';
+import { env } from '../../../config/env.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import fetch from 'node-fetch';

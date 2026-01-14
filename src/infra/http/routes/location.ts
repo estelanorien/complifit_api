@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authGuard } from '../hooks/auth';
+import { authGuard } from '../hooks/auth.js';
 import fetch from 'node-fetch';
-import { env } from '../../../config/env';
+import { env } from '../../../config/env.js';
 
 export async function locationRoutes(app: FastifyInstance) {
   // Find nearby places (gyms, restaurants, etc.)

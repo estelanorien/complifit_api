@@ -1,9 +1,9 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authGuard } from '../hooks/auth';
-import { pool } from '../../db/pool';
+import { authGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
 import fetch from 'node-fetch';
-import { env } from '../../../config/env';
+import { env } from '../../../config/env.js';
 
 const restaurantSchema = z.object({
   id: z.string().uuid().optional(),
