@@ -873,18 +873,19 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
     try {
       const { prompt, referenceImage } = imgProxySchema.parse(req.body);
 
-      // Use Gemini 2.5 Flash Image - supports native image generation via generateContent
+      // CORRECT MODEL: gemini-2.5-flash-image (Nano Banana)
       // Reference: https://ai.google.dev/gemini-api/docs/image-generation
-      const model = 'gemini-2.5-flash-preview-05-20';
+      // This model natively outputs images via inlineData in response
+      const model = 'gemini-2.5-flash-image';
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-      // Build request with responseModalities for image output
+      // Build parts array
       const parts: any[] = [];
 
-      // Enhanced prompt for consistency
+      // Enhanced prompt for image generation
       let enhancedPrompt = prompt;
       if (referenceImage) {
-        // Add reference image as input context
+        // Add reference image as input for style matching
         const base64Data = referenceImage.includes(',')
           ? referenceImage.split(',')[1]
           : referenceImage;
@@ -894,16 +895,14 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
             data: base64Data
           }
         });
-        enhancedPrompt = `Based on the reference image, create a similar style image: ${prompt}`;
+        enhancedPrompt = `Create an image matching this reference style: ${prompt}`;
       }
 
       parts.push({ text: enhancedPrompt });
 
+      // Simple request - no responseModalities needed for this model
       const requestBody = {
-        contents: [{ parts }],
-        generationConfig: {
-          responseModalities: ['TEXT', 'IMAGE']
-        }
+        contents: [{ parts }]
       };
 
       req.log.info({ model, promptLength: enhancedPrompt.length }, 'Calling Gemini 2.5 Flash Image API');
@@ -934,23 +933,30 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
         }
 
         const isProduction = process.env.NODE_ENV === 'production';
-        req.log.error({ status: res.status, errorText }, 'Gemini Image API error');
+        req.log.error({ status: res.status, errorText, model }, 'Gemini Image API error');
         throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
       }
 
       const data: any = await res.json();
 
-      // Gemini returns: { candidates: [{ content: { parts: [{ inlineData: { data, mimeType } }, { text: '...' }] } }] }
+      // Response format: { candidates: [{ content: { parts: [{ inlineData: { data, mimeType } }] } }] }
       const responseParts = data?.candidates?.[0]?.content?.parts || [];
       const imagePart = responseParts.find((p: any) => p.inlineData?.data);
 
       if (imagePart?.inlineData?.data) {
         const mimeType = imagePart.inlineData.mimeType || 'image/png';
+        req.log.info({ model, mimeType }, 'Image generated successfully');
         return reply.send({ image: `data:${mimeType};base64,${imagePart.inlineData.data}` });
       }
 
+      // Check for text-only response (model might return text if it can't generate image)
+      const textPart = responseParts.find((p: any) => p.text);
+      if (textPart?.text) {
+        req.log.warn({ model, textResponse: textPart.text.substring(0, 200) }, 'Model returned text instead of image');
+      }
+
       // No image returned - log for debugging
-      req.log.warn({ responseKeys: Object.keys(data || {}), partsCount: responseParts.length }, 'No image in Gemini response');
+      req.log.warn({ model, responseKeys: Object.keys(data || {}), partsCount: responseParts.length }, 'No image in Gemini response');
       return reply.send({ error: 'No image returned from AI', raw: responseParts });
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
