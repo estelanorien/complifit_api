@@ -1,5 +1,5 @@
-import { AiService } from './aiService';
-import { translationService } from './translationService';
+import { AiService } from './aiService.js';
+import { translationService } from './translationService.js';
 
 const aiService = new AiService();
 
