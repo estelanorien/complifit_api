@@ -1,10 +1,11 @@
 
-import { pool } from '../infra/db/pool';
+import { pool } from '../infra/db/pool.js';
 
 async function run() {
     console.log('Starting schema fix for logs tables...');
 
     try {
+
         // 1. Convert food_logs_simple columns
         await pool.query(`ALTER TABLE food_logs_simple ALTER COLUMN id TYPE text;`);
         console.log('Fixed food_logs_simple.id');
