@@ -84,10 +84,16 @@ export async function planActionsRoutes(app: FastifyInstance) {
     `;
 
         // --- Generation ---
-        const [trainText, nutText] = await Promise.all([
-            aiService.generateText({ prompt: trainingPrompt, generationConfig: { responseMimeType: 'application/json' } }),
-            aiService.generateText({ prompt: nutritionPrompt, generationConfig: { responseMimeType: 'application/json' } })
-        ]);
+        let trainText, nutText;
+        try {
+            [trainText, nutText] = await Promise.all([
+                aiService.generateText({ prompt: trainingPrompt, generationConfig: { responseMimeType: 'application/json' } }),
+                aiService.generateText({ prompt: nutritionPrompt, generationConfig: { responseMimeType: 'application/json' } })
+            ]);
+        } catch (e: any) {
+            req.log.error({ error: 'AI generation failed', message: e.message, requestId: (req as any).requestId });
+            throw new Error(`AI generation failed: ${e.message}. Please check GEMINI_API_KEY configuration.`);
+        }
 
         const trainingPlan = JSON.parse(PlanService.cleanGeminiJson(trainText.text) || '{}');
         const nutritionPlan = JSON.parse(PlanService.cleanGeminiJson(nutText.text) || '{}');
