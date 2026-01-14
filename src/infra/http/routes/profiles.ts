@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authGuard } from '../hooks/auth';
-import { pool } from '../../db/pool';
+import { authGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
 
 const saveSchema = z.object({
   profile: z.record(z.any()),
@@ -133,6 +133,27 @@ export async function profileRoutes(app: FastifyInstance) {
     } finally {
       client.off('error', errorHandler);
       client.release();
+    }
+  });
+
+  // FCM Token (for push notifications)
+  app.post('/profiles/fcm-token', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    const { fcmToken } = req.body as { fcmToken?: string };
+
+    if (!fcmToken) {
+      return reply.status(400).send({ error: 'fcmToken is required' });
+    }
+
+    try {
+      await pool.query(
+        `UPDATE user_profiles SET fcm_token = $1, updated_at = now() WHERE user_id = $2`,
+        [fcmToken, user.userId]
+      );
+      return reply.send({ success: true });
+    } catch (e: any) {
+      req.log.error({ error: 'FCM token save failed', e });
+      return reply.status(500).send({ error: 'Failed to save FCM token' });
     }
   });
 }

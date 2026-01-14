@@ -555,5 +555,42 @@ export async function logsRoutes(app: FastifyInstance) {
       client.release();
     }
   });
+
+  // HEALTH METRICS (from Apple Health / Google Fit sync)
+  const healthMetricsSchema = z.object({
+    date: z.string(),
+    steps: z.number().default(0),
+    activeEnergyKcal: z.number().default(0),
+    sleepMinutes: z.number().default(0),
+    restingHeartRate: z.number().default(0),
+    hrv: z.number().default(0),
+    source: z.string().optional()
+  });
+
+  app.post('/logs/health-metrics', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    try {
+      const data = healthMetricsSchema.parse(req.body);
+
+      await pool.query(
+        `INSERT INTO health_metrics(user_id, date, steps, active_energy_kcal, sleep_minutes, resting_heart_rate, hrv, source, updated_at)
+         VALUES($1, $2, $3, $4, $5, $6, $7, $8, now())
+         ON CONFLICT (user_id, date) DO UPDATE SET
+           steps = EXCLUDED.steps,
+           active_energy_kcal = EXCLUDED.active_energy_kcal,
+           sleep_minutes = EXCLUDED.sleep_minutes,
+           resting_heart_rate = EXCLUDED.resting_heart_rate,
+           hrv = EXCLUDED.hrv,
+           source = EXCLUDED.source,
+           updated_at = now()`,
+        [user.userId, data.date, data.steps, data.activeEnergyKcal, data.sleepMinutes, data.restingHeartRate, data.hrv, data.source || 'unknown']
+      );
+
+      return reply.send({ success: true });
+    } catch (e: any) {
+      req.log.error({ error: 'Health metrics save failed', e });
+      return reply.status(500).send({ error: 'Failed to save health metrics' });
+    }
+  });
 }
 
