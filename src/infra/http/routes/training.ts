@@ -211,6 +211,86 @@ export async function trainingRoutes(app: FastifyInstance) {
     if (res.rowCount === 0) return reply.status(404).send({ error: 'Archive not found' });
     return reply.send({ success: true });
   });
+
+  // Alias routes for backward compatibility (/archives/training → /training/archives)
+  app.get('/archives/training', { preHandler: authGuard }, async (req) => {
+    const user = (req as any).user;
+    const { rows } = await pool.query(
+      `SELECT id, name, date_created, program, progress_day_index
+       FROM training_archives
+       WHERE user_id = $1
+       ORDER BY date_created DESC`,
+      [user.userId]
+    );
+    return rows.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      dateCreated: r.date_created,
+      timestampLabel: new Date(r.date_created).toLocaleDateString(),
+      program: r.program,
+      progressDayIndex: r.progress_day_index ?? undefined
+    }));
+  });
+
+  app.post('/archives/training', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    const body = saveArchiveSchema.parse(req.body);
+    const archiveId = (await pool.query('SELECT gen_random_uuid() AS id')).rows[0].id;
+    await pool.query(
+      `INSERT INTO training_archives(id, user_id, name, program, progress_day_index, summary)
+       VALUES($1,$2,$3,$4,$5,$6)`,
+      [
+        archiveId,
+        user.userId,
+        body.name,
+        JSON.stringify(body.program),
+        body.progressDayIndex ?? null,
+        body.summary || null
+      ]
+    );
+    return reply.send({ id: archiveId });
+  });
+
+  app.delete('/archives/training/:id', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    const id = z.string().uuid().parse((req.params as any).id);
+    const res = await pool.query(`DELETE FROM training_archives WHERE id = $1 AND user_id = $2`, [id, user.userId]);
+    if (res.rowCount === 0) return reply.status(404).send({ error: 'Archive not found' });
+    return reply.send({ success: true });
+  });
+
+  app.patch('/archives/training/:id', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    const id = z.string().uuid().parse((req.params as any).id);
+    const body = z.object({ name: z.string() }).parse(req.body);
+    const res = await pool.query(
+      `UPDATE training_archives SET name = $1 WHERE id = $2 AND user_id = $3`,
+      [body.name, id, user.userId]
+    );
+    if (res.rowCount === 0) return reply.status(404).send({ error: 'Archive not found' });
+    return reply.send({ success: true });
+  });
+
+  app.get('/archives/training/:id', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    const id = z.string().uuid().parse((req.params as any).id);
+    const { rows } = await pool.query(
+      `SELECT id, name, date_created, program, progress_day_index, summary
+       FROM training_archives
+       WHERE id = $1 AND user_id = $2`,
+      [id, user.userId]
+    );
+    if (rows.length === 0) return reply.status(404).send({ error: 'Archive not found' });
+    const r = rows[0];
+    return reply.send({
+      id: r.id,
+      name: r.name,
+      dateCreated: r.date_created,
+      program: r.program,
+      progressDayIndex: r.progress_day_index ?? undefined,
+      summary: r.summary
+    });
+  });
 }
 
 
