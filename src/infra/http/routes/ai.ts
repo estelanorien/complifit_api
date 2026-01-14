@@ -873,8 +873,8 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
     try {
       const { prompt, referenceImage } = imgProxySchema.parse(req.body);
 
-      // Use gemini-1.5-flash-preview-04-17 with native image generation
-      const model = 'models/gemini-3-flash-preview-preview-04-17';
+      // Use gemini-3-flash-preview with native image generation
+      const model = 'models/gemini-3-flash-preview';
 
       // Build parts array - text prompt first, then optional reference image
       const parts: any[] = [];
@@ -1115,7 +1115,7 @@ ${prompt}`;
         ? `Fitness photography: ${name} exercise, step ${index || 1}. ${instruction}. Proper form, athletic model, gym setting, cinematic lighting, 8k resolution, professional quality.`
         : `Food photography: ${name} recipe, step ${index || 1}. ${instruction}. Hyperrealistic, delicious, soft lighting, 8k resolution, professional quality.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview-preview-04-17:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1170,7 +1170,7 @@ ${prompt}`;
           ? `Achievement badge icon: ${context}. Metallic, shiny, prestigious, 8k resolution, professional game asset style.`
           : `Game item icon: ${context}. Detailed, appealing, 8k resolution, professional game asset style.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview-preview-04-17:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1224,7 +1224,7 @@ ${prompt}`;
       const sizeDesc = type === 'large' ? 'large portion' : 'small portion';
       const prompt = `Food photography: ${mealName}, ${sizeDesc}, ${calories} calories. Visual portion size comparison, hyperrealistic, professional quality, 8k resolution, soft lighting.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview-preview-04-17:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
