@@ -873,8 +873,8 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
     try {
       const { prompt, referenceImage } = imgProxySchema.parse(req.body);
 
-      // Use gemini-3-flash-preview with native image generation
-      const model = 'models/gemini-3-flash-preview';
+      // Use gemini-2.0-flash-exp - stable for image generation
+      const model = 'models/gemini-2.0-flash-exp';
 
       // Build parts array - text prompt first, then optional reference image
       const parts: any[] = [];
@@ -910,11 +910,8 @@ ${prompt}`;
           'x-goog-api-key': aiConfig.geminiApiKey
         },
         body: JSON.stringify({
-          contents: [{ parts }],
-          generationConfig: {
-            responseModalities: ['image', 'text'],
-            responseMimeType: 'image/png'
-          }
+          contents: [{ parts }]
+          // Note: Removed generationConfig - gemini-2.0-flash-exp doesn't support responseModalities/responseMimeType directly via REST
         })
       });
 
