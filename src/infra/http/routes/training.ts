@@ -1,9 +1,9 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authGuard } from '../hooks/auth';
-import { pool } from '../../db/pool';
-import { TrainingPlan, generateTrainingPlan } from '../../../application/services/trainingService';
-import { saveTrainingProgram } from './_utils/saveTrainingPlan';
+import { authGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
+import { TrainingPlan, generateTrainingPlan } from '../../../application/services/trainingService.js';
+import { saveTrainingProgram } from './_utils/saveTrainingPlan.js';
 
 export async function trainingRoutes(app: FastifyInstance) {
   const generateSchema = z.object({

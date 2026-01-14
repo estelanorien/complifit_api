@@ -1,6 +1,6 @@
-import { AiService } from './aiService';
-import { pool } from '../../infra/db/pool';
-import { translationService } from './translationService';
+import { AiService } from './aiService.js';
+import { pool } from '../../infra/db/pool.js';
+import { translationService } from './translationService.js';
 
 const aiService = new AiService();
 

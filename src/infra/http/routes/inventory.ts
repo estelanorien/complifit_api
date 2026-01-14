@@ -1,8 +1,8 @@
 
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { pool } from '../../db/pool';
-import { authGuard } from '../hooks/auth';
+import { pool } from '../../db/pool.js';
+import { authGuard } from '../hooks/auth.js';
 
 // Hardcoded Shop Inventory
 const SHOP_ITEMS = [

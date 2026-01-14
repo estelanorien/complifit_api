@@ -1,5 +1,5 @@
-import { pool } from '../../infra/db/pool';
-import { AiService } from './aiService';
+import { pool } from '../../infra/db/pool.js';
+import { AiService } from './aiService.js';
 
 const aiService = new AiService();
 

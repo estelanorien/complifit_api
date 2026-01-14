@@ -15,8 +15,7 @@ export function withErrorHandler(handler: (req: FastifyRequest, reply: FastifyRe
             const message = error.message || 'Internal Server Error';
 
             return reply.status(statusCode).send({
-                error: true,
-                message,
+                error: message,
                 ...(process.env.NODE_ENV !== 'production' && { stack: error.stack })
             });
         }
