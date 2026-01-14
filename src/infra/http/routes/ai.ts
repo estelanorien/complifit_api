@@ -1,11 +1,11 @@
 
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { AiService } from '../../../application/services/aiService';
-import { pool } from '../../db/pool';
-import { authGuard } from '../hooks/auth';
+import { AiService } from '../../../application/services/aiService.js';
+import { pool } from '../../db/pool.js';
+import { authGuard } from '../hooks/auth.js';
 import fetch from 'node-fetch';
-import { aiConfig } from '../../../config/ai';
+import { aiConfig } from '../../../config/ai.js';
 
 const textSchema = z.object({
   prompt: z.string().min(1),
@@ -71,7 +71,7 @@ export async function aiRoutes(app: FastifyInstance) {
   // General Gemini proxy (server-side key)
   app.post('/ai/generate-content', { preHandler: authGuard }, async (req, reply) => {
     const body = generateSchema.parse(req.body || {});
-    const { parts, model = 'models/gemini-3-flash-preview', generationConfig, tools } = body;
+    const { parts, model = 'models/gemini-2.0-flash-exp', generationConfig, tools } = body;
 
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`, {
@@ -332,7 +332,7 @@ export async function aiRoutes(app: FastifyInstance) {
       parts.push({ text: prompt });
     }
 
-    const model = 'models/gemini-3-flash-preview';
+    const model = 'models/gemini-2.0-flash-exp';
 
     // Helper function to ensure response has all required fields
     // CRITICAL: Only use defaults if AI didn't provide values. If AI provided values, use them!
@@ -466,7 +466,7 @@ export async function aiRoutes(app: FastifyInstance) {
         req.log.warn({ error: e, requestId: (req as any).requestId, message: 'food-log cache lookup failed' });
       }
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
