@@ -316,5 +316,44 @@ export async function calorieBankRoutes(app: FastifyInstance) {
       return reply.status(500).send({ error: e.message || 'Generate reward meal failed' });
     }
   });
+
+  // Get ledger entries (debts and credits)
+  app.get('/calorie-bank/ledger', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    const { status } = req.query as { status?: string };
+
+    try {
+      let query = `
+        SELECT id, source_type, source_id, amount, status, created_at, resolved_at
+        FROM ledger_entries
+        WHERE user_id = $1
+      `;
+      const params: any[] = [user.userId];
+
+      if (status) {
+        query += ` AND status = $2`;
+        params.push(status);
+      }
+
+      query += ` ORDER BY created_at DESC LIMIT 100`;
+
+      const { rows } = await pool.query(query, params);
+
+      return reply.send({
+        entries: rows.map((r: any) => ({
+          id: r.id,
+          sourceType: r.source_type,
+          sourceId: r.source_id,
+          amount: r.amount,
+          status: r.status,
+          createdAt: r.created_at,
+          resolvedAt: r.resolved_at
+        }))
+      });
+    } catch (e: any) {
+      req.log.error({ error: 'Ledger fetch failed', e, requestId: (req as any).requestId });
+      return reply.status(500).send({ error: 'Failed to fetch ledger entries' });
+    }
+  });
 }
 
