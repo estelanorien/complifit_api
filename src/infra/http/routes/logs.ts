@@ -448,7 +448,7 @@ export async function logsRoutes(app: FastifyInstance) {
       );
 
       if (rows.length === 0) {
-        return reply.status(404).send({ error: 'Day conclusion not found' });
+        return reply.send({ dayConclusion: null, message: 'No conclusion generated yet for this date' });
       }
 
       return reply.send({
