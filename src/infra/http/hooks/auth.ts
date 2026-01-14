@@ -1,6 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { AuthService } from '../../../application/services/authService';
-import { pool } from '../../db/pool';
+import { AuthService } from '../../../application/services/authService.js';
+import { pool } from '../../db/pool.js';
 
 const authService = new AuthService();
 

@@ -1,10 +1,10 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { adminGuard, authGuard } from '../hooks/auth';
-import { pool } from '../../db/pool';
-import fetch from 'node-fetch';
-import { env } from '../../../config/env';
-import { uploadToYouTube } from '../../../services/youtubeService';
+import { adminGuard, authGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
+// Native fetch used
+import { env } from '../../../config/env.js';
+import { uploadToYouTube } from '../../../services/youtubeService.js';
 import bcrypt from 'bcryptjs';
 
 const assetGenSchema = z.object({

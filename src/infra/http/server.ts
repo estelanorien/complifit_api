@@ -1,47 +1,47 @@
 import Fastify from 'fastify';
-import { healthRoutes } from './routes/health';
-import { aiRoutes } from './routes/ai';
-import { authRoutes } from './routes/auth';
-import { profileRoutes } from './routes/profiles';
-import { socialRoutes } from './routes/social';
-import { restaurantRoutes } from './routes/restaurants';
-import { logsRoutes } from './routes/logs';
+import { healthRoutes } from './routes/health.js';
+import { aiRoutes } from './routes/ai.js';
+import { authRoutes } from './routes/auth.js';
+import { profileRoutes } from './routes/profiles.js';
+import { socialRoutes } from './routes/social.js';
+import { restaurantRoutes } from './routes/restaurants.js';
+import { logsRoutes } from './routes/logs.js';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import { challengesRoutes } from './routes/challenges';
-import { messagesRoutes } from './routes/messages';
-import { moderationRoutes } from './routes/moderation';
-import { assetsRoutes } from './routes/assets';
-import { usersRoutes } from './routes/users';
-import { plansRoutes } from './routes/plans';
-import { guardianRoutes } from './routes/guardian';
-import { adminRoutes } from './routes/admin';
-import { calorieBankRoutes } from './routes/calorieBank';
-import { trainingRoutes } from './routes/training';
-import { nutritionRoutes } from './routes/nutrition';
-import { rehabRoutes } from './routes/rehab';
-import { coachRoutes } from './routes/coach';
-import { behaviorRoutes } from './routes/behavior';
-import { inventoryRoutes } from './routes/inventory';
-import { subscriptionRoutes } from './routes/subscription';
-import { timelineRoutes } from './routes/timeline';
-import { negotiationRoutes } from './routes/negotiations';
-import { lookupRoutes } from './routes/lookups';
-import { locationRoutes } from './routes/location';
-import { gamificationRoutes } from './routes/gamification';
-import { notificationRoutes } from './routes/notifications';
-import { socialAuthRoutes } from './routes/socialAuth';
-import { requestLogger, responseLogger, errorLogger } from './hooks/requestLogger';
-import { requestIdMiddleware } from './middleware/requestId';
-import { errorHandler } from './middleware/errors';
+import { challengesRoutes } from './routes/challenges.js';
+import { messagesRoutes } from './routes/messages.js';
+import { moderationRoutes } from './routes/moderation.js';
+import { assetsRoutes } from './routes/assets.js';
+import { usersRoutes } from './routes/users.js';
+import { plansRoutes } from './routes/plans.js';
+import { guardianRoutes } from './routes/guardian.js';
+import { adminRoutes } from './routes/admin.js';
+import { calorieBankRoutes } from './routes/calorieBank.js';
+import { trainingRoutes } from './routes/training.js';
+import { nutritionRoutes } from './routes/nutrition.js';
+import { rehabRoutes } from './routes/rehab.js';
+import { coachRoutes } from './routes/coach.js';
+import { behaviorRoutes } from './routes/behavior.js';
+import { inventoryRoutes } from './routes/inventory.js';
+import { subscriptionRoutes } from './routes/subscription.js';
+import { timelineRoutes } from './routes/timeline.js';
+import { negotiationRoutes } from './routes/negotiations.js';
+import { lookupRoutes } from './routes/lookups.js';
+import { locationRoutes } from './routes/location.js';
+import { gamificationRoutes } from './routes/gamification.js';
+import { notificationRoutes } from './routes/notifications.js';
+import { socialAuthRoutes } from './routes/socialAuth.js';
+import { requestLogger, responseLogger, errorLogger } from './hooks/requestLogger.js';
+import { requestIdMiddleware } from './middleware/requestId.js';
+import { errorHandler } from './middleware/errors.js';
 import {
   registerGlobalRateLimit,
   registerAuthRateLimit,
   registerAiRateLimit,
   registerAdminRateLimit
-} from './middleware/rateLimit';
+} from './middleware/rateLimit.js';
 
-import { env } from '../../config/env';
+import { env } from '../../config/env.js';
 
 export function buildServer() {
   const app = Fastify({

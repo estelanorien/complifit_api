@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { pool } from '../../infra/db/pool';
-import { env } from '../../config/env';
+import { pool } from '../../infra/db/pool.js';
+import { env } from '../../config/env.js';
 
 type JwtPayload = { userId: string; email: string };
 
