@@ -135,4 +135,34 @@ export async function inventoryRoutes(app: FastifyInstance) {
       return reply.status(500).send({ error: 'Failed to fetch transactions' });
     }
   });
+
+  // Get all shop items (catalog)
+  app.get('/inventory/items', async (req, reply) => {
+    return { items: SHOP_ITEMS };
+  });
+
+  // Get user's current inventory
+  app.get('/inventory', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+
+    try {
+      const { rows } = await pool.query(
+        `SELECT inventory, economy FROM profiles WHERE user_id = $1`,
+        [user.userId]
+      );
+
+      if (rows.length === 0) {
+        return reply.status(404).send({ error: 'Profile not found' });
+      }
+
+      const profile = rows[0];
+      return reply.send({
+        inventory: profile.inventory || [],
+        economy: profile.economy || { coins: 0, gems: 0 }
+      });
+    } catch (e: any) {
+      req.log.error({ error: 'Inventory fetch failed', e, requestId: (req as any).requestId });
+      return reply.status(500).send({ error: 'Failed to fetch inventory' });
+    }
+  });
 }
