@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import { env } from '../config/env';
+import { env } from '../config/env.js';
 import fs from 'fs';
 import fetch from 'node-fetch';
 import { Readable } from 'stream';

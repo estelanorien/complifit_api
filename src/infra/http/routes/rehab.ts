@@ -1,9 +1,9 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authGuard } from '../hooks/auth';
-import { pool } from '../../db/pool';
-import { RehabPlan, generateRehabPlan } from '../../../application/services/rehabService';
-import { saveTrainingProgram } from './_utils/saveTrainingPlan';
+import { authGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
+import { RehabPlan, generateRehabPlan } from '../../../application/services/rehabService.js';
+import { saveTrainingProgram } from './_utils/saveTrainingPlan.js';
 
 export async function rehabRoutes(app: FastifyInstance) {
   const generateSchema = z.object({

@@ -1,8 +1,8 @@
 
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { pool } from '../../db/pool';
-import { authGuard } from '../hooks/auth';
+import { pool } from '../../db/pool.js';
+import { authGuard } from '../hooks/auth.js';
 
 export async function subscriptionRoutes(app: FastifyInstance) {
     // 1. Upgrade to Pro (Mock)
