@@ -109,4 +109,30 @@ export async function inventoryRoutes(app: FastifyInstance) {
       client.release();
     }
   });
+
+  // 4. Get User's Inventory Transaction History
+  app.get('/inventory/transactions', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    const { limit = '20' } = req.query as { limit?: string };
+    const limitNum = parseInt(limit, 10) || 20;
+
+    try {
+      const result = await pool.query(
+        `SELECT 
+          transaction_type,
+          item_id,
+          quantity,
+          created_at
+         FROM inventory_transactions
+         WHERE user_id = $1
+         ORDER BY created_at DESC
+         LIMIT $2`,
+        [user.userId, limitNum]
+      );
+
+      return { transactions: result.rows };
+    } catch (err: any) {
+      return reply.status(500).send({ error: 'Failed to fetch transactions' });
+    }
+  });
 }
