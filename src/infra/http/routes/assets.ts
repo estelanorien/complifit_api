@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authGuard } from '../hooks/auth';
-import { pool } from '../../db/pool';
+import { authGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
 
 const assetSchema = z.object({
   key: z.string(),
@@ -36,10 +36,10 @@ export async function assetsRoutes(app: FastifyInstance) {
     if (rows.length === 0) {
       return reply.status(404).send(null);
     }
-    
+
     const value = rows[0].value;
     const assetType = rows[0].asset_type;
-    
+
     // If it's an image (base64 string), send it directly as text to avoid JSON serialization issues
     if (assetType === 'image' && typeof value === 'string') {
       // Ensure it has data:image prefix
@@ -47,7 +47,7 @@ export async function assetsRoutes(app: FastifyInstance) {
       reply.type('text/plain');
       return reply.send(imageValue);
     }
-    
+
     // Return as JSON string to maintain compatibility with frontend
     // Frontend expects string | null
     return reply.send(value);
@@ -90,7 +90,7 @@ export async function assetsRoutes(app: FastifyInstance) {
       `SELECT key, value FROM cached_assets WHERE key = ANY($1) AND status IN ('active','auto')`,
       [keys]
     );
-    const result: Record<string,string> = {};
+    const result: Record<string, string> = {};
     rows.forEach(r => { result[r.key] = r.value; });
     return result;
   });
@@ -153,7 +153,7 @@ export async function assetsRoutes(app: FastifyInstance) {
       [keysToTry]
     );
     if (rows.length === 0) return reply.send(null);
-    
+
     const value = rows[0].value;
     // If it's an image (base64 string), send it directly as text to avoid JSON serialization
     if (rows[0].asset_type === 'image' && typeof value === 'string' && value.startsWith('data:image')) {
