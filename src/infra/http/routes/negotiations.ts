@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authGuard } from '../hooks/auth';
-import { pool } from '../../db/pool';
+import { authGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
 
 export async function negotiationRoutes(app: FastifyInstance) {
   const listSchema = z.object({

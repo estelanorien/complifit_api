@@ -1,4 +1,4 @@
-import { AiService } from './aiService';
+import { AiService } from './aiService.js';
 
 const aiService = new AiService();
 
@@ -79,7 +79,7 @@ OUTPUT JSON:
 
   const { text } = await aiService.generateText({
     prompt: promptSections.join('\n'),
-    model: 'models/gemini-3-flash-preview'
+    model: 'models/gemini-2.0-flash'
   });
 
   const parsedPlan = JSON.parse(cleanGeminiJson(text) || '{}');

@@ -6,7 +6,7 @@ export class PlanService {
      */
     static cleanGeminiJson(text: string): string {
         if (!text) return '';
-        return text.replace(/```json\n?|```/g, '').trim();
+        return text.replace(/```json\n?|```/g, '').replace(/^[^{]*/, '').replace(/[^}]*$/, '').trim();
     }
 
     /**

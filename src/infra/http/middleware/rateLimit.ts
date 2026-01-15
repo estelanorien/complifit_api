@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
-import { env } from '../../../config/env';
+import { env } from '../../../config/env.js';
 
 /**
  * Rate limiting configuration with memory-efficient settings
