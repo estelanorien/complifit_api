@@ -4,7 +4,21 @@ import { cacheAsset } from './assetService.js'; // Assuming you have an assetSer
 
 const aiService = new AiService();
 
-type JobType = 'MEAL_PLAN' | 'IMAGE' | 'MEAL_DETAILS';
+// --- CONSTANTS (Mirrored from Frontend to ensure consistency) ---
+const VITALITY_IMAGE_STYLE = "photorealistic, 8k resolution, cinematic lighting, professional photography, soft focus background, high detail, masterpiece, no text, no watermark, no labels, no characters, no letters, no words, no UI, no buttons, no captions, clean image";
+
+const COACH_PROFILES = {
+    atlas: {
+        description: "Caucasian male, 28 years old, short faded dark-blonde hair, clean shaven. Wearing a simple grey athletic t-shirt. Friendly but professional, trustworthy.",
+        refKey: "system_coach_atlas_ref"
+    },
+    nova: {
+        description: "Caucasian female, 28 years old, long blonde hair in a high ponytail. Wearing a simple black athletic tank top. Friendly, confident smile, approachable.",
+        refKey: "system_coach_nova_ref"
+    }
+};
+
+type JobType = 'MEAL_PLAN' | 'IMAGE' | 'MEAL_DETAILS' | 'EXERCISE_GENERATION';
 
 export class JobProcessor {
     private processing = false;
@@ -125,6 +139,8 @@ export class JobProcessor {
         switch (type) {
             case 'IMAGE':
                 return this.handleImageJob(payload);
+            case 'EXERCISE_GENERATION':
+                return this.handleExerciseGeneration(payload);
             // case 'MEAL_PLAN': return this.handleMealPlanJob(payload);
             default:
                 throw new Error(`Unknown job type: ${type}`);
@@ -135,23 +151,80 @@ export class JobProcessor {
         const { prompt, cacheKey, meta } = payload;
 
         // Call existing AI service
-        const { image } = await aiService.generateImage({ prompt }); // Assuming base64 response
+        const { base64: image } = await aiService.generateImage({ prompt }); // Assuming base64 response
 
         if (!image) throw new Error('AI generation returned no image');
 
         // PERSISTENCE: Save to assets table immediately
         if (cacheKey) {
-            // We can replicate logic from 'application/services/assetService' or call it if available.
-            // Assuming we need to insert directly if we don't migrate assetService fully yet.
-            await pool.query(
-                `INSERT INTO assets(key, value, asset_type, status, meta, created_at)
-             VALUES($1, $2, 'image', 'active', $3::jsonb, now())
-             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, meta = EXCLUDED.meta, updated_at = now()`,
-                [cacheKey, image, JSON.stringify(meta || {})]
-            );
+            await this.saveAsset(cacheKey, image, meta);
         }
 
         return { assetUrl: image }; // Return same base64 for immediate UI use if needed
+    }
+
+    private async handleExerciseGeneration(payload: any): Promise<any> {
+        const { name, userProfile } = payload;
+        if (!name) throw new Error('Exercise name required');
+
+        // Logic:
+        // 1. Determine Primary Persona (based on user)
+        // 2. Generate Primary Image -> Save to `main` AND specific key
+        // 3. Generate Secondary Image -> Save to specific key only
+
+        const sex = userProfile?.biologicalSex || userProfile?.gender || 'male';
+        const primaryId = userProfile?.coachPreference || (sex === 'female' ? 'nova' : 'atlas');
+
+        const primaryCoach = COACH_PROFILES[primaryId as keyof typeof COACH_PROFILES] || COACH_PROFILES.atlas;
+        const secondaryId = primaryId === 'atlas' ? 'nova' : 'atlas';
+        const secondaryCoach = COACH_PROFILES[secondaryId as keyof typeof COACH_PROFILES];
+
+        const baseKey = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_'); // Simple normalization
+
+        // --- 1. GENERATE PRIMARY ---
+        console.log(`[JobProcessor] Generating PRIMARY (${primaryId}) for ${name}`);
+        const primaryPrompt = `Fitness photography of ${name} exercise. Proper form, athletic model (${primaryCoach.description}), gym setting. ${VITALITY_IMAGE_STYLE}. Action shot, dynamic angle. STRICTLY NO TEXT OR LABELS.`;
+
+        try {
+            const { base64: primaryImage } = await aiService.generateImage({ prompt: primaryPrompt });
+            if (!primaryImage) throw new Error('Failed to generate primary exercise image');
+
+            // Save Primary as MAIN (for immediate user availability)
+            await this.saveAsset(`movement_${baseKey}_main`, primaryImage, { prompt: primaryPrompt, source: 'exercise-job-primary', persona: primaryId });
+
+            // Save Primary with Persona Key
+            await this.saveAsset(`movement_${baseKey}_${primaryId}`, primaryImage, { prompt: primaryPrompt, source: 'exercise-job-primary', persona: primaryId });
+
+            // --- 2. GENERATE SECONDARY (Parallel or Sequential) ---
+            // User wants "make sure nova images are also created". We'll do it here to ensure it happens.
+            console.log(`[JobProcessor] Generating SECONDARY (${secondaryId}) for ${name}`);
+            const secondaryPrompt = `Fitness photography of ${name} exercise. Proper form, athletic model (${secondaryCoach.description}), gym setting. ${VITALITY_IMAGE_STYLE}. Action shot, dynamic angle. STRICTLY NO TEXT OR LABELS.`;
+
+            try {
+                const { base64: secondaryImage } = await aiService.generateImage({ prompt: secondaryPrompt });
+                if (secondaryImage) {
+                    await this.saveAsset(`movement_${baseKey}_${secondaryId}`, secondaryImage, { prompt: secondaryPrompt, source: 'exercise-job-secondary', persona: secondaryId });
+                }
+            } catch (e) {
+                console.error(`[JobProcessor] Failed to generate secondary image for ${name}`, e);
+                // Non-blocking failure for secondary
+            }
+
+            return { assetUrl: primaryImage };
+
+        } catch (e: any) {
+            console.error(`[JobProcessor] Primary generation failed:`, e);
+            throw e;
+        }
+    }
+
+    private async saveAsset(key: string, value: string, meta: any) {
+        await pool.query(
+            `INSERT INTO assets(key, value, asset_type, status, meta, created_at)
+             VALUES($1, $2, 'image', 'active', $3::jsonb, now())
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, meta = EXCLUDED.meta, updated_at = now()`,
+            [key, value, JSON.stringify(meta || {})]
+        );
     }
 }
 
