@@ -111,8 +111,8 @@ export class PlanService {
             const exSets: string[] = [];
             const exReps: string[] = [];
             const exNotes: string[] = [];
-            const exTargetMuscles: (string | null)[] = [];
-            const exEquipment: (string | null)[] = [];
+            const exTargetMuscles: (string[] | null)[] = [];
+            const exEquipment: (string[] | null)[] = [];
             const exDifficulty: (string | null)[] = [];
             const exMetadata: string[] = [];
 
@@ -126,8 +126,18 @@ export class PlanService {
                         exSets.push(ex.sets || '');
                         exReps.push(ex.reps || '');
                         exNotes.push(ex.notes || ex.drillContext || '');
-                        exTargetMuscles.push(ex.targetMuscles || null);
-                        exEquipment.push(ex.equipment || null);
+                        // Convert targetMuscles to array format (text[]) - handle both string and array
+                        exTargetMuscles.push(
+                            Array.isArray(ex.targetMuscles) 
+                                ? ex.targetMuscles 
+                                : (ex.targetMuscles ? [ex.targetMuscles] : null)
+                        );
+                        // Convert equipment to array format (text[]) - handle both string and array
+                        exEquipment.push(
+                            Array.isArray(ex.equipment) 
+                                ? ex.equipment 
+                                : (ex.equipment ? [ex.equipment] : null)
+                        );
                         exDifficulty.push(ex.difficulty || null);
                         exMetadata.push(JSON.stringify(ex));
                     }
@@ -135,11 +145,25 @@ export class PlanService {
             }
 
             if (exDayIds.length > 0) {
-                await client.query(
-                    `INSERT INTO training_exercises(id, training_day_id, name, sets, reps, notes, target_muscles, equipment, difficulty, metadata, created_at)
-           SELECT gen_random_uuid(), unnest($1::uuid[]), unnest($2::text[]), unnest($3::text[]), unnest($4::text[]), unnest($5::text[]), unnest($6::text[]), unnest($7::text[]), unnest($8::text[]), unnest($9::jsonb[]), now()`,
-                    [exDayIds, exNames, exSets, exReps, exNotes, exTargetMuscles, exEquipment, exDifficulty, exMetadata]
-                );
+                // Insert exercises one by one to properly handle array columns (target_muscles, equipment)
+                // This is necessary because PostgreSQL requires proper array type handling
+                for (let i = 0; i < exDayIds.length; i++) {
+                    await client.query(
+                        `INSERT INTO training_exercises(id, training_day_id, name, sets, reps, notes, target_muscles, equipment, difficulty, metadata, created_at)
+             VALUES(gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, now())`,
+                        [
+                            exDayIds[i],
+                            exNames[i],
+                            exSets[i],
+                            exReps[i],
+                            exNotes[i],
+                            exTargetMuscles[i], // Already converted to array or null
+                            exEquipment[i],
+                            exDifficulty[i],
+                            exMetadata[i]
+                        ]
+                    );
+                }
             }
         }
 
