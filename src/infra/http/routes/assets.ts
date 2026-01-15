@@ -27,50 +27,125 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   app.get('/assets/:key', { preHandler: authGuard }, async (req, reply) => {
-    const { key } = req.params as any;
-    const decodedKey = decodeURIComponent(key);
-    const { rows } = await pool.query(
-      `SELECT value, asset_type FROM cached_assets WHERE key=$1 AND status IN ('active','auto') LIMIT 1`,
-      [decodedKey]
-    );
-    if (rows.length === 0) {
-      return reply.status(404).send(null);
+    try {
+      const { key } = req.params as any;
+      const decodedKey = decodeURIComponent(key);
+      
+      const { rows } = await pool.query(
+        `SELECT value, asset_type FROM cached_assets WHERE key=$1 AND status IN ('active','auto') LIMIT 1`,
+        [decodedKey]
+      );
+      
+      if (rows.length === 0) {
+        return reply.status(404).send(null);
+      }
+
+      const value = rows[0].value;
+      const assetType = rows[0].asset_type;
+
+      // If it's an image (base64 string), send it directly as text to avoid JSON serialization issues
+      if (assetType === 'image' && typeof value === 'string') {
+        // Ensure it has data:image prefix
+        const imageValue = value.startsWith('data:image') ? value : `data:image/png;base64,${value}`;
+        reply.type('text/plain');
+        return reply.send(imageValue);
+      }
+
+      // Return as JSON string to maintain compatibility with frontend
+      // Frontend expects string | null
+      return reply.send(value);
+    } catch (error: any) {
+      req.log.error({ 
+        error: 'GET /assets/:key failed', 
+        key: req.params?.key,
+        message: error.message,
+        requestId: (req as any).requestId 
+      });
+      return reply.status(500).send({ error: error.message || 'Internal server error' });
     }
-
-    const value = rows[0].value;
-    const assetType = rows[0].asset_type;
-
-    // If it's an image (base64 string), send it directly as text to avoid JSON serialization issues
-    if (assetType === 'image' && typeof value === 'string') {
-      // Ensure it has data:image prefix
-      const imageValue = value.startsWith('data:image') ? value : `data:image/png;base64,${value}`;
-      reply.type('text/plain');
-      return reply.send(imageValue);
-    }
-
-    // Return as JSON string to maintain compatibility with frontend
-    // Frontend expects string | null
-    return reply.send(value);
   });
 
   app.post('/assets', { preHandler: authGuard }, async (req, reply) => {
-    const body = assetSchema.parse(req.body);
-    await pool.query(
-      `INSERT INTO cached_assets(key, value, asset_type, status)
-       VALUES($1,$2,$3,$4)
-       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, asset_type=EXCLUDED.asset_type, status=EXCLUDED.status`,
-      [body.key, body.value, body.type, body.status]
-    );
-    if (body.meta) {
-      const { prompt, mode, source, createdBy, movementId } = body.meta;
-      await pool.query(
-        `INSERT INTO cached_asset_meta(key, prompt, mode, source, created_by, movement_id)
-         VALUES($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (key) DO UPDATE SET prompt=EXCLUDED.prompt, mode=EXCLUDED.mode, source=EXCLUDED.source, created_by=EXCLUDED.created_by, movement_id=EXCLUDED.movement_id`,
-        [body.key, prompt || null, mode || null, source || null, createdBy || null, movementId || null]
-      );
+    try {
+      const body = assetSchema.parse(req.body);
+      
+      // Validate value is not empty for non-draft status
+      if (body.status !== 'draft' && (!body.value || body.value.trim() === '')) {
+        req.log.warn({ error: 'Empty value for non-draft asset', key: body.key });
+        return reply.status(400).send({ error: 'Value cannot be empty for non-draft assets' });
+      }
+
+      // Insert or update asset
+      try {
+        await pool.query(
+          `INSERT INTO cached_assets(key, value, asset_type, status)
+           VALUES($1,$2,$3,$4)
+           ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, asset_type=EXCLUDED.asset_type, status=EXCLUDED.status`,
+          [body.key, body.value, body.type, body.status]
+        );
+      } catch (dbError: any) {
+        req.log.error({ 
+          error: 'Failed to insert/update cached_assets', 
+          key: body.key,
+          dbError: dbError.message,
+          code: dbError.code,
+          requestId: (req as any).requestId 
+        });
+        
+        // Provide user-friendly error messages
+        if (dbError.code === '23505') {
+          return reply.status(409).send({ error: 'Asset key already exists' });
+        } else if (dbError.code === '23514') {
+          return reply.status(400).send({ error: `Invalid asset type or status: ${dbError.message}` });
+        } else {
+          return reply.status(500).send({ error: `Database error: ${dbError.message}` });
+        }
+      }
+
+      // Insert or update metadata if provided
+      if (body.meta) {
+        const { prompt, mode, source, createdBy, movementId } = body.meta;
+        try {
+          await pool.query(
+            `INSERT INTO cached_asset_meta(key, prompt, mode, source, created_by, movement_id)
+             VALUES($1,$2,$3,$4,$5,$6)
+             ON CONFLICT (key) DO UPDATE SET prompt=EXCLUDED.prompt, mode=EXCLUDED.mode, source=EXCLUDED.source, created_by=EXCLUDED.created_by, movement_id=EXCLUDED.movement_id`,
+            [body.key, prompt || null, mode || null, source || null, createdBy || null, movementId || null]
+          );
+        } catch (metaError: any) {
+          req.log.error({ 
+            error: 'Failed to insert/update cached_asset_meta', 
+            key: body.key,
+            metaError: metaError.message,
+            code: metaError.code,
+            requestId: (req as any).requestId 
+          });
+          // Don't fail the whole request if metadata insert fails
+          // Asset was saved successfully
+        }
+      }
+      
+      return reply.send({ success: true });
+    } catch (error: any) {
+      req.log.error({ 
+        error: 'POST /assets failed', 
+        message: error.message,
+        stack: error.stack,
+        requestId: (req as any).requestId 
+      });
+      
+      // Handle Zod validation errors
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({ 
+          error: 'Validation failed', 
+          details: error.errors 
+        });
+      }
+      
+      return reply.status(500).send({ 
+        error: error.message || 'Internal server error' 
+      });
     }
-    return reply.send({ success: true });
   });
 
   app.post('/assets/check', { preHandler: authGuard }, async (req) => {
