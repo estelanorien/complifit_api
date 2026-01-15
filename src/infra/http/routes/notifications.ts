@@ -89,18 +89,31 @@ export async function notificationRoutes(app: FastifyInstance) {
 
             if (body.userId) {
                 // Send to specific user
-                const res = await pool.query(
+                const subRes = await pool.query(
                     'SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = $1',
                     [body.userId]
                 );
-                subscriptions = res.rows;
+                subscriptions = subRes.rows;
+
+                const tokenRes = await pool.query(
+                    'SELECT fcm_token FROM user_profiles WHERE user_id = $1',
+                    [body.userId]
+                );
+                const fcmToken = tokenRes.rows[0]?.fcm_token;
+                if (fcmToken) {
+                    req.log.info({ message: 'Found FCM token for user', userId: body.userId, token: fcmToken.substring(0, 10) + '...' });
+                    // TODO: Implement actual FCM sending logic here using firebase-admin
+                }
             } else if (body.topic) {
                 // Future: topic-based subscriptions
                 return reply.status(400).send({ error: 'Topic subscriptions not yet implemented' });
             } else {
                 // Send to all (for broadcasts)
-                const res = await pool.query('SELECT id, endpoint, p256dh, auth FROM push_subscriptions LIMIT 1000');
-                subscriptions = res.rows;
+                const subRes = await pool.query('SELECT id, endpoint, p256dh, auth FROM push_subscriptions LIMIT 1000');
+                subscriptions = subRes.rows;
+
+                const tokenRes = await pool.query('SELECT user_id, fcm_token FROM user_profiles WHERE fcm_token IS NOT NULL LIMIT 1000');
+                req.log.info({ message: 'Found FCM tokens for broadcast', count: tokenRes.rows.length });
             }
 
             const payload = JSON.stringify({
