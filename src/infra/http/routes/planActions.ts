@@ -65,58 +65,125 @@ export async function planActionsRoutes(app: FastifyInstance) {
         const mealStructurePrompt = settings.mealFrequency === 'omad' ? "CONSOLIDATE ALL CALORIES INTO ONE MASSIVE DINNER." : "";
 
         const trainingPrompt = `
-      PHASE A (TRAINING - ${durationDays} DAY CYCLE).
-      Freq: ${trainingFrequency} Days/Wk.
-      Goals: ${detailedTrainingGoals}. Level: ${profile.fitnessLevel}.
-      Equipment: ${equipment.join(', ')}. Focus: [${focusAreas.join(', ')}].
-      ${memoryPrompt}
+      You are a master Bio-Planner specialized in longevity, performance, and clinical nutrition.
+      Your goal is to design a high-performance training protocol.
+
+      PROTOCOL PARAMETERS:
+      - PHASE: TRAINING (A)
+      - CYCLE DURATION: ${durationDays} DAYS (EXACTLY)
+      - FREQUENCY: ${trainingFrequency} DAYS/WEEK
+      - LEVEL: ${profile.fitnessLevel}
+      - PRIMARY GOALS: ${detailedTrainingGoals}
+      - EQUIPMENT: ${equipment.join(', ') || 'Bodyweight only'}
+      - FOCUS AREAS: [${focusAreas.join(', ')}]
+      
+      CONTRAINDICATIONS:
       ${safetyPrompt}
-      ${settings.debtStrategy === 'active' ? 'CRITICAL: Add a "Debt Burner" cardio finisher (15 mins) to EVERY workout.' : ''}
-      Return JSON: { "name": "...", "analysis": "...", "schedule": [{"day": "Day 1", "focus": "...", "exercises": [{"name": "...", "sets": "3", "reps": "10", "notes": ""}]}] }
-      Language: ${lang}
+      ${memoryPrompt}
+
+      STRATEGIC NOTES:
+      ${settings.debtStrategy === 'active' ? 'CRITICAL: Add a "Debt Burner" cardio finisher (15 mins) to EVERY workout to compensate for caloric debt.' : ''}
+
+      OUTPUT RULES:
+      1. You MUST generate EXACTLY ${durationDays} days in the "schedule" array.
+      2. If a day is a Rest Day, specify it clearly in the "focus". 
+      3. All content (names, exercises, notes) MUST be in the requested Language: ${lang}.
+      4. JSON Keys MUST stay in English as defined below.
+      5. NO placeholders or partial plans. No "..." allowed.
+
+      JSON STRUCTURE:
+      { 
+        "name": "Creative Program Name", 
+        "analysis": "Brief scientific rationale", 
+        "schedule": [
+          {"day": "Day 1", "focus": "Hypertrophy - Push", "exercises": [{"name": "Bench Press", "sets": "3", "reps": "10", "notes": "Control tempo 3-1-1"}]},
+          ... repeat for exactly ${durationDays} days ...
+        ] 
+      }
     `;
 
         const nutritionPrompt = `
-      PHASE B (NUTRITION - FULL ${durationDays} DAY PLAN).
-      Diet: ${settings.dietType || profile.dietaryPreference || 'none'}.
-      ${mealStructurePrompt}
-      ${calorieLogic}
-      ${(settings.dietType === 'shreddmax' || profile.dietaryPreference === 'shreddmax') ? `SHREDDMAX PROTOCOL:
+      You are a clinical nutritionist and performance cook.
+      Your goal is to design a bio-synchronized meal plan.
+
+      PROTOCOL PARAMETERS:
+      - PHASE: NUTRITION (B)
+      - CYCLE DURATION: ${durationDays} DAYS (EXACTLY)
+      - DIET TYPE: ${settings.dietType || profile.dietaryPreference || 'Standard Balanced'}
+      - MEAL FREQUENCY: ${settings.mealFrequency || '3 meals'}
+      - CALORIE TARGET: ${calorieLogic}
+      - EXCLUDED INGREDIENTS: ${(profile.excludedIngredients || []).join(', ') || 'None'}
+      
+      ${(settings.dietType === 'shreddmax' || profile.dietaryPreference === 'shreddmax') ? `SHREDDMAX PROTOCOL (STRICT):
         1. BREAKFAST: FRUIT ONLY until Noon. NO fats, NO proteins.
         2. POST-NOON: Low Fat, High Protein, Moderate Carb.
         3. NO SEED OILS. Only Saturated fats (Butter, Coconut Oil, Tallow).` : ''}
-      Return JSON: { "name": "...", "overview": "...", "days": [{"day": "Day 1", "meals": [{"type": "breakfast", "recipe": {"name": "...", "calories": 500, "ingredients": [], "instructions": [{"simple": "...", "detailed": "..."}]}}]}] }
-      Language: ${lang}
+
+      ${mealStructurePrompt}
+
+      OUTPUT RULES:
+      1. You MUST generate EXACTLY ${durationDays} days in the "days" array.
+      2. Every day MUST have at least 3 distinct meals (breakfast, lunch, dinner) unless OMAD is specified.
+      3. Total daily calories MUST strictly align with the target: ${target} kcal.
+      4. All content (names, overview, recipe names, instructions) MUST be in the requested Language: ${lang}.
+      5. JSON Keys MUST stay in English as defined below.
+      6. NO placeholders, "..." or "Example/Örnek" labels. Use real ingredients and real cooking steps.
+
+      JSON STRUCTURE:
+      { 
+        "name": "Creative Plan Name", 
+        "overview": "Short nutrition summary", 
+        "days": [
+          {
+            "day": "Day 1", 
+            "targetCalories": ${target},
+            "meals": [
+              {
+                "type": "breakfast", 
+                "recipe": {
+                  "name": "Real Recipe Name", 
+                  "calories": 450, 
+                  "time": "15 min",
+                  "ingredients": ["Item A", "Item B"], 
+                  "instructions": [{"simple": "Prep base", "detailed": "Wash and chop ingredients..."}]
+                }
+              },
+              ... more meals ...
+            ]
+          },
+          ... repeat for exactly ${durationDays} days ...
+        ] 
+      }
     `;
 
         // --- Generation ---
         let trainText, nutText;
         try {
-            req.log.info({ 
-                action: 'Starting AI generation', 
+            req.log.info({
+                action: 'Starting AI generation',
                 durationDays,
                 trainingFrequency,
-                requestId: (req as any).requestId 
+                requestId: (req as any).requestId
             });
-            
+
             [trainText, nutText] = await Promise.all([
                 aiService.generateText({ prompt: trainingPrompt, generationConfig: { responseMimeType: 'application/json' } }),
                 aiService.generateText({ prompt: nutritionPrompt, generationConfig: { responseMimeType: 'application/json' } })
             ]);
-            
-            req.log.info({ 
-                action: 'AI generation completed', 
+
+            req.log.info({
+                action: 'AI generation completed',
                 trainingTextLength: trainText?.text?.length || 0,
                 nutritionTextLength: nutText?.text?.length || 0,
-                requestId: (req as any).requestId 
+                requestId: (req as any).requestId
             });
         } catch (e: any) {
-            req.log.error({ 
-                error: 'AI generation failed', 
+            req.log.error({
+                error: 'AI generation failed',
                 message: e.message,
                 stack: e.stack,
                 name: e.name,
-                requestId: (req as any).requestId 
+                requestId: (req as any).requestId
             });
             throw new Error(`AI generation failed: ${e.message}. Please check GEMINI_API_KEY configuration.`);
         }
@@ -138,12 +205,12 @@ export async function planActionsRoutes(app: FastifyInstance) {
             trainingPlan = JSON.parse(cleanedTrainText || '{}');
         } catch (e: any) {
             const rawPreview = trainText.text?.substring(0, 500) || 'No text received';
-            req.log.error({ 
-                error: 'Training plan JSON parse failed', 
+            req.log.error({
+                error: 'Training plan JSON parse failed',
                 parseError: e.message,
                 rawTextPreview: rawPreview,
                 rawTextLength: trainText.text?.length || 0,
-                requestId: (req as any).requestId 
+                requestId: (req as any).requestId
             });
             throw new Error(`Failed to parse training plan: ${e.message}. Raw response preview: ${rawPreview.substring(0, 200)}`);
         }
@@ -153,36 +220,59 @@ export async function planActionsRoutes(app: FastifyInstance) {
             nutritionPlan = JSON.parse(cleanedNutText || '{}');
         } catch (e: any) {
             const rawPreview = nutText.text?.substring(0, 500) || 'No text received';
-            req.log.error({ 
-                error: 'Nutrition plan JSON parse failed', 
+            req.log.error({
+                error: 'Nutrition plan JSON parse failed',
                 parseError: e.message,
                 rawTextPreview: rawPreview,
                 rawTextLength: nutText.text?.length || 0,
-                requestId: (req as any).requestId 
+                requestId: (req as any).requestId
             });
             throw new Error(`Failed to parse nutrition plan: ${e.message}. Raw response preview: ${rawPreview.substring(0, 200)}`);
         }
 
         // --- Validation & Normalization ---
         if (!Array.isArray(trainingPlan?.schedule) || trainingPlan.schedule.length === 0) {
-            req.log.error({ 
+            req.log.error({
                 error: 'Training plan validation failed',
                 trainingPlanKeys: trainingPlan ? Object.keys(trainingPlan) : 'null',
                 scheduleType: Array.isArray(trainingPlan?.schedule) ? 'array' : typeof trainingPlan?.schedule,
                 scheduleLength: trainingPlan?.schedule?.length || 0,
-                requestId: (req as any).requestId 
+                requestId: (req as any).requestId
             });
-            throw new Error(`Training plan validation failed: schedule is ${Array.isArray(trainingPlan?.schedule) ? 'empty array' : 'missing or invalid'}. Plan keys: ${trainingPlan ? Object.keys(trainingPlan).join(', ') : 'null'}`);
+            throw new Error(`Training plan validation failed: schedule is empty or invalid.`);
         }
+
+        // Enforce minimum days for training if requested duration is significant
+        if (trainingPlan.schedule.length < Math.min(durationDays, 3)) {
+            req.log.error({
+                error: 'Training plan duration mismatch',
+                requested: durationDays,
+                received: trainingPlan.schedule.length,
+                requestId: (req as any).requestId
+            });
+            throw new Error(`AI generated an incomplete training plan (${trainingPlan.schedule.length}/${durationDays} days).`);
+        }
+
         if (!Array.isArray(nutritionPlan?.days) || nutritionPlan.days.length === 0) {
-            req.log.error({ 
+            req.log.error({
                 error: 'Nutrition plan validation failed',
                 nutritionPlanKeys: nutritionPlan ? Object.keys(nutritionPlan) : 'null',
                 daysType: Array.isArray(nutritionPlan?.days) ? 'array' : typeof nutritionPlan?.days,
                 daysLength: nutritionPlan?.days?.length || 0,
-                requestId: (req as any).requestId 
+                requestId: (req as any).requestId
             });
-            throw new Error(`Nutrition plan validation failed: days is ${Array.isArray(nutritionPlan?.days) ? 'empty array' : 'missing or invalid'}. Plan keys: ${nutritionPlan ? Object.keys(nutritionPlan).join(', ') : 'null'}`);
+            throw new Error(`Nutrition plan validation failed: days array is empty or missing.`);
+        }
+
+        // STRICT CHECK: Ensure correct number of days for nutrition
+        if (nutritionPlan.days.length < durationDays) {
+            req.log.error({
+                error: 'Nutrition plan duration mismatch',
+                requested: durationDays,
+                received: nutritionPlan.days.length,
+                requestId: (req as any).requestId
+            });
+            throw new Error(`AI generated an incomplete nutrition plan (${nutritionPlan.days.length}/${durationDays} days).`);
         }
 
         // Process each meal for recipes and normalization
