@@ -161,11 +161,22 @@ export async function guardianRoutes(app: FastifyInstance) {
       return reply.send(result);
     } catch (e: any) {
       req.log.error({ error: "Guardian analysis failed", e, requestId: (req as any).requestId });
+
+      // Improved fallback: return delete_extra type which triggers simple deletion modal
+      // This ensures users always see the Guardian Modal, even when AI analysis fails
       return reply.send({
         isSafe: true,
         impactLevel: 'low',
-        warning: "Confirm deletion?",
-        remedies: [{ id: 'err_del', type: 'none', title: 'Delete', description: '', actionLabel: 'Delete' }]
+        warning: lang === 'tr'
+          ? `"${title}" silinsin mi? (${calories} kcal)`
+          : `Delete "${title}"? (${calories} kcal)`,
+        remedies: [{
+          id: 'err_del',
+          type: 'delete_extra',
+          title: lang === 'tr' ? 'Sil' : 'Delete',
+          description: lang === 'tr' ? 'Bu öğeyi planından kaldır.' : 'Remove this item from your plan.',
+          actionLabel: lang === 'tr' ? 'Sil' : 'Delete'
+        }]
       });
     }
   });
