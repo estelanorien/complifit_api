@@ -28,10 +28,15 @@ const globalRateLimitConfig = {
   errorResponseBuilder: (req: any, context: any) => {
     return {
       error: 'Too many requests',
-      message: `Rate limit exceeded. Max ${context.max} requests per ${context.timeWindow}.`,
-      retryAfter: Math.round(context.ttl / 1000),
+      message: `Rate limit exceeded. Max ${context.max} requests per ${context.timeWindow || '1 minute'}.`,
+      retryAfter: Math.round((context.ttl || 60000) / 1000),
       requestId: (req as any).requestId || 'unknown',
     };
+  },
+
+  keyGenerator: (req: any) => {
+    // Global fallback to IP for security
+    return req.ip || req.socket.remoteAddress || 'unknown';
   },
 
   skip: (req: any) => {
@@ -68,8 +73,8 @@ const authRateLimitConfig = {
   errorResponseBuilder: (req: any, context: any) => {
     return {
       error: 'Too many authentication attempts',
-      message: `Rate limit exceeded. Max ${context.max} requests per ${context.timeWindow}. Please try again later.`,
-      retryAfter: Math.round(context.ttl / 1000),
+      message: `Rate limit exceeded. Max ${context.max} requests per ${context.timeWindow || '1 minute'}. Please try again later.`,
+      retryAfter: Math.round((context.ttl || 60000) / 1000),
       requestId: (req as any).requestId || 'unknown',
     };
   },
