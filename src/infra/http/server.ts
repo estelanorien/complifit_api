@@ -67,6 +67,7 @@ export function buildServer() {
     requestIdHeader: 'x-request-id', // Use custom header for request ID
     requestIdLogLabel: 'requestId',
     disableRequestLogging: false,
+    trustProxy: true // CRITICAL: Required for Cloud Run/Load Balancers to forward real IPs
   });
 
   // CORS configuration - production-safe
