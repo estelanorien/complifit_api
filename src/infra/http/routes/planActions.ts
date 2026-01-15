@@ -92,12 +92,32 @@ export async function planActionsRoutes(app: FastifyInstance) {
         // --- Generation ---
         let trainText, nutText;
         try {
+            req.log.info({ 
+                action: 'Starting AI generation', 
+                durationDays,
+                trainingFrequency,
+                requestId: (req as any).requestId 
+            });
+            
             [trainText, nutText] = await Promise.all([
                 aiService.generateText({ prompt: trainingPrompt, generationConfig: { responseMimeType: 'application/json' } }),
                 aiService.generateText({ prompt: nutritionPrompt, generationConfig: { responseMimeType: 'application/json' } })
             ]);
+            
+            req.log.info({ 
+                action: 'AI generation completed', 
+                trainingTextLength: trainText?.text?.length || 0,
+                nutritionTextLength: nutText?.text?.length || 0,
+                requestId: (req as any).requestId 
+            });
         } catch (e: any) {
-            req.log.error({ error: 'AI generation failed', message: e.message, requestId: (req as any).requestId });
+            req.log.error({ 
+                error: 'AI generation failed', 
+                message: e.message,
+                stack: e.stack,
+                name: e.name,
+                requestId: (req as any).requestId 
+            });
             throw new Error(`AI generation failed: ${e.message}. Please check GEMINI_API_KEY configuration.`);
         }
 
@@ -117,24 +137,52 @@ export async function planActionsRoutes(app: FastifyInstance) {
             const cleanedTrainText = PlanService.cleanGeminiJson(trainText.text);
             trainingPlan = JSON.parse(cleanedTrainText || '{}');
         } catch (e: any) {
-            req.log.error({ error: 'Training plan JSON parse failed', rawText: trainText.text?.substring(0, 200), requestId: (req as any).requestId });
-            throw new Error('Failed to parse training plan response. Please try again.');
+            const rawPreview = trainText.text?.substring(0, 500) || 'No text received';
+            req.log.error({ 
+                error: 'Training plan JSON parse failed', 
+                parseError: e.message,
+                rawTextPreview: rawPreview,
+                rawTextLength: trainText.text?.length || 0,
+                requestId: (req as any).requestId 
+            });
+            throw new Error(`Failed to parse training plan: ${e.message}. Raw response preview: ${rawPreview.substring(0, 200)}`);
         }
 
         try {
             const cleanedNutText = PlanService.cleanGeminiJson(nutText.text);
             nutritionPlan = JSON.parse(cleanedNutText || '{}');
         } catch (e: any) {
-            req.log.error({ error: 'Nutrition plan JSON parse failed', rawText: nutText.text?.substring(0, 200), requestId: (req as any).requestId });
-            throw new Error('Failed to parse nutrition plan response. Please try again.');
+            const rawPreview = nutText.text?.substring(0, 500) || 'No text received';
+            req.log.error({ 
+                error: 'Nutrition plan JSON parse failed', 
+                parseError: e.message,
+                rawTextPreview: rawPreview,
+                rawTextLength: nutText.text?.length || 0,
+                requestId: (req as any).requestId 
+            });
+            throw new Error(`Failed to parse nutrition plan: ${e.message}. Raw response preview: ${rawPreview.substring(0, 200)}`);
         }
 
         // --- Validation & Normalization ---
         if (!Array.isArray(trainingPlan?.schedule) || trainingPlan.schedule.length === 0) {
-            throw new Error('Training plan generation failed or returned empty');
+            req.log.error({ 
+                error: 'Training plan validation failed',
+                trainingPlanKeys: trainingPlan ? Object.keys(trainingPlan) : 'null',
+                scheduleType: Array.isArray(trainingPlan?.schedule) ? 'array' : typeof trainingPlan?.schedule,
+                scheduleLength: trainingPlan?.schedule?.length || 0,
+                requestId: (req as any).requestId 
+            });
+            throw new Error(`Training plan validation failed: schedule is ${Array.isArray(trainingPlan?.schedule) ? 'empty array' : 'missing or invalid'}. Plan keys: ${trainingPlan ? Object.keys(trainingPlan).join(', ') : 'null'}`);
         }
         if (!Array.isArray(nutritionPlan?.days) || nutritionPlan.days.length === 0) {
-            throw new Error('Nutrition plan generation failed or returned empty');
+            req.log.error({ 
+                error: 'Nutrition plan validation failed',
+                nutritionPlanKeys: nutritionPlan ? Object.keys(nutritionPlan) : 'null',
+                daysType: Array.isArray(nutritionPlan?.days) ? 'array' : typeof nutritionPlan?.days,
+                daysLength: nutritionPlan?.days?.length || 0,
+                requestId: (req as any).requestId 
+            });
+            throw new Error(`Nutrition plan validation failed: days is ${Array.isArray(nutritionPlan?.days) ? 'empty array' : 'missing or invalid'}. Plan keys: ${nutritionPlan ? Object.keys(nutritionPlan).join(', ') : 'null'}`);
         }
 
         // Process each meal for recipes and normalization
