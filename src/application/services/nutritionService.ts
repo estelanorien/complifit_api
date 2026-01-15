@@ -138,6 +138,22 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
     4. NAUSEA MANAGEMENT: Limit greasy/high-fat items that trigger side effects.`);
     }
 
+    // Safety Protocol (BMR & Extremes)
+    const weight = profileSummary.weight || 70;
+    const height = profileSummary.height || 170;
+    const age = profileSummary.age || 30;
+    const gender = profileSummary.gender || 'male';
+
+    // Mifflin-St Jeor Equation
+    let bmr = 10 * weight + 6.25 * height - 5 * age;
+    bmr += (gender === 'male' ? 5 : -161);
+    const minSafeCalories = Math.max(1200, Math.round(bmr));
+
+    promptSections.push(`SAFETY PROTOCOL (CRITICAL):
+    1. MINIMUM CALORIES: Do not prescribe less than ${minSafeCalories} kcal/day unless explicitly medically supervised (not the case here).
+    2. EXTREME DEFICITS: Avoid reckless caloric cuts. Ensure sustainability.
+    3. NUTRIENT DENSITY: Ensure micronutrient needs are met even in deficit.`);
+
     promptSections.push(`
     Return JSON exactly as:
     {
