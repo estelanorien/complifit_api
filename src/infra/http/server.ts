@@ -31,6 +31,7 @@ import { locationRoutes } from './routes/location.js';
 import { gamificationRoutes } from './routes/gamification.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { socialAuthRoutes } from './routes/socialAuth.js';
+import { customProgramRoutes } from './routes/customPrograms.js';
 import { requestLogger, responseLogger, errorLogger } from './hooks/requestLogger.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errors.js';
@@ -163,6 +164,7 @@ export function buildServer() {
   app.register(gamificationRoutes, { prefix: '/api' });
   app.register(notificationRoutes, { prefix: '/api' });
   app.register(subscriptionRoutes, { prefix: '/api' });
+  app.register(customProgramRoutes, { prefix: '/api' });
 
   return app;
 }
