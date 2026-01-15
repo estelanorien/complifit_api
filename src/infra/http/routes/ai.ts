@@ -332,7 +332,7 @@ export async function aiRoutes(app: FastifyInstance) {
       parts.push({ text: prompt });
     }
 
-    const model = 'models/gemini-2.0-flash';
+    const model = 'models/gemini-3-flash-preview';
 
     // Helper function to ensure response has all required fields
     // CRITICAL: Only use defaults if AI didn't provide values. If AI provided values, use them!
@@ -466,7 +466,7 @@ export async function aiRoutes(app: FastifyInstance) {
         req.log.warn({ error: e, requestId: (req as any).requestId, message: 'food-log cache lookup failed' });
       }
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -752,7 +752,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       }
       sys += ` Language: ${lang}. Keep responses concise.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

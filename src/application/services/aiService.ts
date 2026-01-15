@@ -23,7 +23,7 @@ export class AiService {
     }
   }
 
-  async generateText({ prompt, model = 'models/gemini-2.0-flash', generationConfig }: GenerateTextParams & { generationConfig?: any }) {
+  async generateText({ prompt, model = 'models/gemini-3-flash-preview', generationConfig }: GenerateTextParams & { generationConfig?: any }) {
     const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
       method: 'POST',
       headers: {
@@ -76,7 +76,7 @@ Return ONLY the cleaned visual description in English. Do not include any explan
 
       const { text } = await this.generateText({
         prompt: cleaningPrompt,
-        model: 'models/gemini-2.0-flash'
+        model: 'models/gemini-3-flash-preview'
       });
 
       const cleaned = text.trim();
