@@ -193,6 +193,15 @@ export async function errorHandler(
     });
   }
 
+  // Handle Rate Limit errors that might be missing statusCode
+  if (error.message && (error.message.includes('Rate limit') || error.message.includes('Too many requests'))) {
+    return reply.status(429).send({
+      error: error.message,
+      requestId,
+      retryAfter: 60
+    });
+  }
+
   // Unknown errors - always expose message for debugging in this phase
   return reply.status(500).send({
     error: error.message || 'Unknown error occurred',
