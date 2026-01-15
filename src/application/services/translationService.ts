@@ -65,6 +65,22 @@ ${trimmedText}`;
         // Process in parallel for speed
         return Promise.all(items.map(item => this.translateText(item, lang, category)));
     }
+
+    /**
+     * Triggers background translation for a text or list of texts into all supported languages.
+     * Fires and forgets (does not await).
+     */
+    preTranslate(content: string | string[], category?: string): void {
+        const targetLangs = ['fr', 'es', 'tr', 'ar', 'zh'];
+        const items = Array.isArray(content) ? content : [content];
+
+        for (const lang of targetLangs) {
+            for (const text of items) {
+                // translateText handles caching automatically
+                this.translateText(text, lang, category).catch(() => { });
+            }
+        }
+    }
 }
 
 export const translationService = new TranslationService();

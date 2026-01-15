@@ -43,6 +43,7 @@ export const ExerciseSchema = z.object({
     reps: z.string().optional(),
     notes: z.string().optional(),
     drillContext: z.string().optional(),
+    instructions: z.array(InstructionBlockSchema).optional(),
     targetMuscles: z.string().nullable().optional(),
     equipment: z.string().nullable().optional(),
     difficulty: z.string().nullable().optional(),
