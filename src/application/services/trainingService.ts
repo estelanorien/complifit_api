@@ -90,9 +90,30 @@ export async function generateTrainingPlan(params: GenerateTrainingPlanParams): 
     trainingStyle: profile?.trainingStyle
   };
 
+  const bmi = (profile.weight && profile.height) ? (profile.weight / ((profile.height / 100) ** 2)) : 0;
+  let safetyProtocol = "General Safety: Ensure exercises are appropriate for fitness level.";
+
+  if (bmi > 30) {
+    safetyProtocol = `SAFETY PROTOCOL (Obese BMI ${bmi.toFixed(1)}):
+      1. LOW IMPACT: Prioritize joint-friendly exercises. Minimize high-impact jumping.
+      2. STABILITY: Focus on controlled movements to protect joints.
+      3. PROGRESSION: Start with lower volume to gauge tolerance.
+      4. AVOID: Box jumps, plyometrics without modification, excessive running on hard surfaces.`;
+  } else if (bmi > 25) {
+    safetyProtocol = `SAFETY PROTOCOL (Overweight BMI ${bmi.toFixed(1)}):
+      1. JOINT PROTECTION: Monitor knee and ankle stress.
+      2. MIXED MODALITY: Combine low impact cardio with resistance training.`;
+  } else if (bmi > 0 && bmi < 18.5) {
+    safetyProtocol = `SAFETY PROTOCOL (Underweight BMI ${bmi.toFixed(1)}):
+      1. HYPERTROPHY FOCUS: Prioritize building muscle mass.
+      2. NUTRITION SYNC: Ensure training supports surplus, avoid excessive calorie-burning cardio.
+      3. STABILITY: Build core and foundational strength.`;
+  }
+
   const promptSections: string[] = [];
   promptSections.push(`You are a senior strength coach. Build a ${duration}-day program in English.`);
   promptSections.push(`USER PROFILE: ${JSON.stringify(profileSummary)}`);
+  promptSections.push(safetyProtocol);
   if (metrics) promptSections.push(`RECENT HEALTH METRICS: ${JSON.stringify(metrics)}`);
   if (varietyMode) promptSections.push(`VARIETY MODE: ${varietyMode}. ${varietyInput || ''}`);
   if (overrideStyle) promptSections.push(`FORCE TRAINING STYLE: ${overrideStyle}.`);
