@@ -16,7 +16,7 @@ const storeConfig = {
 
 // Global rate limit configuration
 const globalRateLimitConfig = {
-  max: env.nodeEnv === 'production' ? 100 : 1000,
+  max: env.nodeEnv === 'production' ? 200 : 1000,
   timeWindow: '1 minute',
 
   // ✅ CRITICAL: Add cache size limit
@@ -60,7 +60,7 @@ const globalRateLimitConfig = {
 
 // Auth endpoint rate limit (stricter for security)
 const authRateLimitConfig = {
-  max: 5,
+  max: 20,
   timeWindow: '1 minute',
 
   // ✅ Smaller cache for auth
