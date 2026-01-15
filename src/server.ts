@@ -1,6 +1,7 @@
 import { buildServer } from './infra/http/server.js';
 import { env } from './config/env.js';
 import { pool } from './infra/db/pool.js';
+import { jobProcessor } from './application/services/jobProcessor.js';
 import v8 from 'v8';
 
 async function main() {
@@ -12,6 +13,7 @@ async function main() {
 
     try {
       await app.close();
+      jobProcessor.stop();
       await pool.end();
       process.exit(0);
     } catch (err) {
@@ -28,6 +30,9 @@ async function main() {
     console.log('[STARTUP] Waiting for Fastify plugins to load...');
     await app.ready();
     console.log('[STARTUP] Fastify plugins loaded successfully');
+
+    // Start Background Workers
+    jobProcessor.start();
   } catch (err) {
     console.error('[STARTUP] Failed to load Fastify plugins:', err);
     process.exit(1);
