@@ -150,7 +150,7 @@ export async function errorHandler(
   // Handle PostgreSQL errors
   if ((error as any).code) {
     const pgError = error as any;
-    
+
     // Unique violation
     if (pgError.code === '23505') {
       return reply.status(409).send({
@@ -193,11 +193,9 @@ export async function errorHandler(
     });
   }
 
-  // Unknown errors - don't expose details in production
+  // Unknown errors - always expose message for debugging in this phase
   return reply.status(500).send({
-    error: isProduction 
-      ? 'Internal server error' 
-      : error.message || 'Unknown error occurred',
+    error: error.message || 'Unknown error occurred',
     requestId,
     ...(isProduction ? {} : { stack: error.stack }),
   });

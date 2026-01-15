@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authGuard } from '../hooks/auth';
-import { pool } from '../../db/pool';
-import { MealPlan, generateNutritionPlan } from '../../../application/services/nutritionService';
+import { authGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
+import { MealPlan, generateNutritionPlan } from '../../../application/services/nutritionService.js';
 
 const toJsonOrNull = (value: any) => {
   if (value === undefined || value === null) return null;

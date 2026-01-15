@@ -190,26 +190,21 @@ export async function planActionsRoutes(app: FastifyInstance) {
             for (const day of nutritionPlan.days) {
                 if (Array.isArray(day.meals)) {
                     for (const meal of day.meals) {
-                        // Ensure meal.recipe exists
-                        if (!meal.recipe) {
-                            meal.recipe = {};
-                        }
-
-                        const mealName = meal?.recipe?.name;
-                        if (mealName) {
-                            try {
-                                const existing = await PlanService.getExistingRecipe(mealName);
-                                if (existing) {
-                                    Object.assign(meal.recipe, existing);
+                        // Ensure meal.recipe exists before proceeding
+                        if (meal && meal.recipe) {
+                            const mealName = meal.recipe.name;
+                            if (mealName) {
+                                try {
+                                    const existing = await PlanService.getExistingRecipe(mealName);
+                                    if (existing) {
+                                        Object.assign(meal.recipe, existing);
+                                    }
+                                } catch (e: any) {
+                                    req.log.warn({ error: 'Failed to check existing recipe', mealName, requestId: (req as any).requestId });
                                 }
-                            } catch (e: any) {
-                                req.log.warn({ error: 'Failed to check existing recipe', mealName, requestId: (req as any).requestId });
-                                // Continue without existing recipe
                             }
-                        }
-                        
-                        // Normalize instructions safely
-                        if (meal.recipe) {
+
+                            // Normalize instructions safely
                             meal.recipe.instructions = PlanService.normalizeInstructions(meal.recipe.instructions || []);
                         }
                     }
@@ -221,7 +216,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            
+
             try {
                 const { trainingId, mealPlanId } = await PlanService.savePlanToDb(client, user.userId, trainingPlan, nutritionPlan, body.startDate);
 
@@ -237,13 +232,13 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 return reply.send({ training: trainingPlan, nutrition: nutritionPlan, trainingId, mealPlanId, archiveId });
             } catch (dbError: any) {
                 await client.query('ROLLBACK');
-                req.log.error({ 
-                    error: 'Database save failed', 
-                    message: dbError.message, 
+                req.log.error({
+                    error: 'Database save failed',
+                    message: dbError.message,
                     code: dbError.code,
-                    requestId: (req as any).requestId 
+                    requestId: (req as any).requestId
                 });
-                
+
                 // Provide user-friendly error messages
                 if (dbError.code === '23505') {
                     throw new Error('Plan already exists. Please try again.');

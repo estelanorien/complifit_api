@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
-import { authGuard } from '../hooks/auth';
-import { pool } from '../../db/pool';
+import { authGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
 
 export async function usersRoutes(app: FastifyInstance) {
   app.get('/users/search', { preHandler: authGuard }, async (req) => {

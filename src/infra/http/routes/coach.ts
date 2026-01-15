@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import fetch from 'node-fetch';
-import { authGuard } from '../hooks/auth';
-import { env } from '../../../config/env';
+import { authGuard } from '../hooks/auth.js';
+import { env } from '../../../config/env.js';
 
 const buildGeminiPayload = (history: any[], systemText: string) => ({
   contents: history,
@@ -12,7 +12,7 @@ const buildGeminiPayload = (history: any[], systemText: string) => ({
   }
 });
 
-const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
+const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
 async function callGemini(payload: any) {
   // Use header-based auth instead of query param for security

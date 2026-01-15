@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authGuard, adminGuard } from '../hooks/auth';
-import { pool } from '../../db/pool';
-import { env } from '../../../config/env';
+import { authGuard, adminGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
+import { env } from '../../../config/env.js';
 import webpush from 'web-push';
 
 // Configure web-push with VAPID keys if available
