@@ -1,5 +1,6 @@
 import { AiService } from './aiService.js';
 import { translationService } from './translationService.js';
+import { jobProcessor } from './jobProcessor.js';
 
 const aiService = new AiService();
 
@@ -129,11 +130,26 @@ Return JSON exactly in this structure:
       "day": "Day 1 - Push",
       "focus": "Upper Body",
       "exercises": [
-        { "name": "Exercise", "sets": "3", "reps": "12", "notes": "Coaching cues", "drillContext": "Optional" }
+        { 
+          "name": "Exercise", 
+          "sets": "3", 
+          "reps": "12", 
+          "notes": "Coaching cues", 
+          "drillContext": "Optional",
+          "instructions": [
+            {"simple": "Step 1", "detailed": "Detailed step 1..."},
+            {"simple": "Step 2", "detailed": "Detailed step 2..."}
+          ]
+        }
       ]
     }
   ]
-}`);
+}
+
+INSTRUCTION QUALITY RULES:
+1. Every exercise MUST have between 5 and 8 instructional steps in the "instructions" array.
+2. Use simple/detailed split for every step.
+`);
 
   const { text } = await aiService.generateText({
     prompt: promptSections.join('\n'),
@@ -161,6 +177,47 @@ Return JSON exactly in this structure:
   parsedPlan.varietyMode = varietyMode;
   parsedPlan.originalSchedule = JSON.parse(JSON.stringify(parsedPlan.schedule));
   parsedPlan.name = parsedPlan.name || `${profile?.primaryGoal || 'Training'} Protocol`;
+
+  // --- BACKGROUND ASSET GENERATION TRIGGER ---
+  try {
+    for (const day of parsedPlan.schedule) {
+      if (day.exercises) {
+        for (const ex of day.exercises) {
+          if (ex.name) {
+            jobProcessor.submitJob(profile.userId || 'system', 'EXERCISE_GENERATION', {
+              name: ex.name,
+              instructions: ex.instructions,
+              userProfile: profile
+            }).catch(() => { });
+          }
+        }
+      }
+    }
+  } catch (e) {
+    process.stderr.write(`[TrainingService] Asset job trigger failed: ${e}\n`);
+  }
+
+  // --- BACKGROUND PRE-TRANSLATION ---
+  // Trigger translation into all supported languages in the background
+  try {
+    if (parsedPlan.name) translationService.preTranslate(parsedPlan.name, 'training_plan_name');
+    if (parsedPlan.analysis) translationService.preTranslate(parsedPlan.analysis, 'training_plan_analysis');
+
+    for (const day of parsedPlan.schedule) {
+      if (day.day) translationService.preTranslate(day.day, 'training_day_name');
+      if (day.focus) translationService.preTranslate(day.focus, 'training_day_focus');
+
+      if (Array.isArray(day.exercises)) {
+        for (const ex of day.exercises) {
+          if (ex.name) translationService.preTranslate(ex.name, 'exercise_name');
+          if (ex.notes) translationService.preTranslate(ex.notes, 'exercise_notes');
+          if (ex.drillContext) translationService.preTranslate(ex.drillContext, 'exercise_drill_context');
+        }
+      }
+    }
+  } catch (e) {
+    process.stderr.write(`[TrainingService] Pre-translation trigger failed: ${e}\n`);
+  }
 
   // --- LOCALIZATION & CACHING LAYER ---
   if (lang && lang !== 'en') {

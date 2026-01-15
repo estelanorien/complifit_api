@@ -1,6 +1,5 @@
 import { pool } from '../../infra/db/pool.js';
 import { AiService } from './aiService.js';
-import { cacheAsset } from './assetService.js'; // Assuming you have an assetService, if not we will query DB directly
 
 const aiService = new AiService();
 
@@ -18,7 +17,7 @@ const COACH_PROFILES = {
     }
 };
 
-type JobType = 'MEAL_PLAN' | 'IMAGE' | 'MEAL_DETAILS' | 'EXERCISE_GENERATION';
+type JobType = 'MEAL_PLAN' | 'IMAGE' | 'MEAL_DETAILS' | 'EXERCISE_GENERATION' | 'MEAL_GENERATION';
 
 export class JobProcessor {
     private processing = false;
@@ -141,6 +140,8 @@ export class JobProcessor {
                 return this.handleImageJob(payload);
             case 'EXERCISE_GENERATION':
                 return this.handleExerciseGeneration(payload);
+            case 'MEAL_GENERATION':
+                return this.handleMealGeneration(payload);
             // case 'MEAL_PLAN': return this.handleMealPlanJob(payload);
             default:
                 throw new Error(`Unknown job type: ${type}`);
@@ -163,14 +164,17 @@ export class JobProcessor {
         return { assetUrl: image }; // Return same base64 for immediate UI use if needed
     }
 
-    private async handleExerciseGeneration(payload: any): Promise<any> {
-        const { name, userProfile } = payload;
-        if (!name) throw new Error('Exercise name required');
+    private normalizeKey(str: string, prefix: string): string {
+        if (!str) return `${prefix}_unknown`;
+        let clean = str.toLowerCase().trim();
+        clean = clean.replace(/[^a-z0-9]+/g, ' ');
+        const words = clean.split(' ').filter(w => w.length > 0).sort();
+        return `${prefix}_${words.join('_')}`;
+    }
 
-        // Logic:
-        // 1. Determine Primary Persona (based on user)
-        // 2. Generate Primary Image -> Save to `main` AND specific key
-        // 3. Generate Secondary Image -> Save to specific key only
+    private async handleExerciseGeneration(payload: any): Promise<any> {
+        const { name, instructions, userProfile } = payload;
+        if (!name) throw new Error('Exercise name required');
 
         const sex = userProfile?.biologicalSex || userProfile?.gender || 'male';
         const primaryId = userProfile?.coachPreference || (sex === 'female' ? 'nova' : 'atlas');
@@ -179,52 +183,181 @@ export class JobProcessor {
         const secondaryId = primaryId === 'atlas' ? 'nova' : 'atlas';
         const secondaryCoach = COACH_PROFILES[secondaryId as keyof typeof COACH_PROFILES];
 
-        const baseKey = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_'); // Simple normalization
+        const baseKey = this.normalizeKey(name, 'movement');
 
-        // --- 1. GENERATE PRIMARY ---
-        console.log(`[JobProcessor] Generating PRIMARY (${primaryId}) for ${name}`);
+        // --- 1. GENERATE PRIMARY MAIN ---
+        console.log(`[JobProcessor] Generating PRIMARY MAIN (${primaryId}) for ${name}`);
         const primaryPrompt = `Fitness photography of ${name} exercise. Proper form, athletic model (${primaryCoach.description}), gym setting. ${VITALITY_IMAGE_STYLE}. Action shot, dynamic angle. STRICTLY NO TEXT OR LABELS.`;
 
         try {
             const { base64: primaryImage } = await aiService.generateImage({ prompt: primaryPrompt });
-            if (!primaryImage) throw new Error('Failed to generate primary exercise image');
+            if (!primaryImage) throw new Error('Failed to generate primary main image');
 
-            // Save Primary as MAIN (for immediate user availability)
-            await this.saveAsset(`movement_${baseKey}_main`, primaryImage, { prompt: primaryPrompt, source: 'exercise-job-primary', persona: primaryId });
+            await this.saveAsset(`${baseKey}_main`, primaryImage, { prompt: primaryPrompt, source: 'exercise-job-primary', persona: primaryId, movementId: baseKey });
+            await this.saveAsset(`${baseKey}_${primaryId}`, primaryImage, { prompt: primaryPrompt, source: 'exercise-job-primary', persona: primaryId, movementId: baseKey });
 
-            // Save Primary with Persona Key
-            await this.saveAsset(`movement_${baseKey}_${primaryId}`, primaryImage, { prompt: primaryPrompt, source: 'exercise-job-primary', persona: primaryId });
-
-            // --- 2. GENERATE SECONDARY (Parallel or Sequential) ---
-            // User wants "make sure nova images are also created". We'll do it here to ensure it happens.
-            console.log(`[JobProcessor] Generating SECONDARY (${secondaryId}) for ${name}`);
+            // --- 2. GENERATE SECONDARY MAIN ---
+            console.log(`[JobProcessor] Generating SECONDARY MAIN (${secondaryId}) for ${name}`);
             const secondaryPrompt = `Fitness photography of ${name} exercise. Proper form, athletic model (${secondaryCoach.description}), gym setting. ${VITALITY_IMAGE_STYLE}. Action shot, dynamic angle. STRICTLY NO TEXT OR LABELS.`;
 
+            let secondaryMainImage: string | undefined;
             try {
-                const { base64: secondaryImage } = await aiService.generateImage({ prompt: secondaryPrompt });
-                if (secondaryImage) {
-                    await this.saveAsset(`movement_${baseKey}_${secondaryId}`, secondaryImage, { prompt: secondaryPrompt, source: 'exercise-job-secondary', persona: secondaryId });
+                const { base64: sImg } = await aiService.generateImage({ prompt: secondaryPrompt });
+                secondaryMainImage = sImg;
+                if (secondaryMainImage) {
+                    await this.saveAsset(`${baseKey}_${secondaryId}`, secondaryMainImage, { prompt: secondaryPrompt, source: 'exercise-job-secondary', persona: secondaryId, movementId: baseKey });
                 }
             } catch (e) {
-                console.error(`[JobProcessor] Failed to generate secondary image for ${name}`, e);
-                // Non-blocking failure for secondary
+                console.error(`[JobProcessor] SECONDARY MAIN generation failed for ${name}`, e);
+            }
+
+            // --- 3. GENERATE STEP IMAGES (Both Personas) ---
+            if (Array.isArray(instructions) && instructions.length > 0) {
+                console.log(`[JobProcessor] Generating ${instructions.length} STEPS for ${name} (Both personas)`);
+
+                for (let i = 0; i < instructions.length; i++) {
+                    const step = instructions[i];
+                    const stepIndex = i + 1;
+                    const instructionText = step.detailed || step.simple;
+
+                    // A. Primary Step
+                    const pStepKey = `${baseKey}_${primaryId}_step_${stepIndex}`;
+                    const pStepPrompt = `IMPORTANT: Match person (${primaryCoach.description}). Action: ${instructionText}. Fitness photo of ${name} step ${stepIndex}. ${VITALITY_IMAGE_STYLE}. No text.`;
+
+                    try {
+                        const { base64: pStepImg } = await aiService.generateImage({
+                            prompt: pStepPrompt,
+                            referenceImage: primaryImage // Use main image as reference for consistency
+                        });
+                        if (pStepImg) {
+                            await this.saveAsset(pStepKey, pStepImg, { prompt: pStepPrompt, source: 'exercise-job-step', persona: primaryId, step: stepIndex, movementId: baseKey });
+                            // Also save as generic step if it's the primary persona
+                            await this.saveAsset(`${baseKey}_step_${stepIndex}`, pStepImg, { prompt: pStepPrompt, source: 'exercise-job-step', persona: primaryId, step: stepIndex, movementId: baseKey });
+                        }
+                    } catch (e) {
+                        console.error(`[JobProcessor] Primary step ${stepIndex} failed for ${name}`, e);
+                    }
+
+                    // B. Secondary Step
+                    if (secondaryMainImage) {
+                        const sStepKey = `${baseKey}_${secondaryId}_step_${stepIndex}`;
+                        const sStepPrompt = `IMPORTANT: Match person (${secondaryCoach.description}). Action: ${instructionText}. Fitness photo of ${name} step ${stepIndex}. ${VITALITY_IMAGE_STYLE}. No text.`;
+
+                        try {
+                            const { base64: sStepImg } = await aiService.generateImage({
+                                prompt: sStepPrompt,
+                                referenceImage: secondaryMainImage
+                            });
+                            if (sStepImg) {
+                                await this.saveAsset(sStepKey, sStepImg, { prompt: sStepPrompt, source: 'exercise-job-step', persona: secondaryId, step: stepIndex, movementId: baseKey });
+                            }
+                        } catch (e) {
+                            console.error(`[JobProcessor] Secondary step ${stepIndex} failed for ${name}`, e);
+                        }
+                    }
+                }
             }
 
             return { assetUrl: primaryImage };
 
         } catch (e: any) {
-            console.error(`[JobProcessor] Primary generation failed:`, e);
+            console.error(`[JobProcessor] handleExerciseGeneration failed:`, e);
+            throw e;
+        }
+    }
+
+    private async handleMealGeneration(payload: any): Promise<any> {
+        const { name, instructions, ingredients } = payload;
+        if (!name) throw new Error('Meal name required');
+
+        const baseKey = this.normalizeKey(name, 'meal');
+        const ingredientText = Array.isArray(ingredients) ? ingredients.join(', ') : '';
+
+        // --- 1. GENERATE MAIN ---
+        console.log(`[JobProcessor] Generating MAIN image for meal: ${name}`);
+        const mainPrompt = `Gourmet food photography of ${name}. Ingredients: ${ingredientText}. Plated beautifully, professional lighting. ${VITALITY_IMAGE_STYLE}. STRICTLY NO TEXT OR LABELS.`;
+
+        try {
+            const { base64: mainImage } = await aiService.generateImage({ prompt: mainPrompt });
+            if (!mainImage) throw new Error('Failed to generate main meal image');
+
+            await this.saveAsset(`${baseKey}_main`, mainImage, { prompt: mainPrompt, source: 'meal-job-main', movementId: baseKey });
+            // Legacy/Generic key support
+            await this.saveAsset(baseKey, mainImage, { prompt: mainPrompt, source: 'meal-job-main', movementId: baseKey });
+
+            // --- 2. GENERATE STEPS ---
+            if (Array.isArray(instructions) && instructions.length > 0) {
+                console.log(`[JobProcessor] Generating ${instructions.length} steps for meal: ${name}`);
+                for (let i = 0; i < instructions.length; i++) {
+                    const step = instructions[i];
+                    const stepIndex = i; // MealItem uses 0-indexed for recipes
+                    const stepText = step.detailed || step.simple;
+
+                    const stepKey = `${baseKey}_step_${stepIndex}`;
+                    const stepPrompt = `Food preparation step: ${stepText}. Close-up, professional food photography style. ${VITALITY_IMAGE_STYLE}. No text.`;
+
+                    try {
+                        const { base64: stepImg } = await aiService.generateImage({
+                            prompt: stepPrompt,
+                            referenceImage: mainImage // Use main meal as reference
+                        });
+                        if (stepImg) {
+                            await this.saveAsset(stepKey, stepImg, { prompt: stepPrompt, source: 'meal-job-step', step: stepIndex, movementId: baseKey });
+                        }
+                    } catch (e) {
+                        console.error(`[JobProcessor] Meal step ${stepIndex} failed for ${name}`, e);
+                    }
+                }
+            }
+
+            return { assetUrl: mainImage };
+
+        } catch (e: any) {
+            console.error(`[JobProcessor] handleMealGeneration failed:`, e);
             throw e;
         }
     }
 
     private async saveAsset(key: string, value: string, meta: any) {
-        await pool.query(
-            `INSERT INTO assets(key, value, asset_type, status, meta, created_at)
-             VALUES($1, $2, 'image', 'active', $3::jsonb, now())
-             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, meta = EXCLUDED.meta, updated_at = now()`,
-            [key, value, JSON.stringify(meta || {})]
-        );
+        try {
+            // Ensure value has proper format for storage if it's a raw base64
+            let processedValue = value;
+            if (processedValue && !processedValue.startsWith('data:image')) {
+                processedValue = `data:image/png;base64,${processedValue}`;
+            }
+
+            // 1. Save to cached_assets
+            await pool.query(
+                `INSERT INTO cached_assets(key, value, asset_type, status)
+                 VALUES($1, $2, 'image', 'active')
+                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, status = 'active'`,
+                [key, processedValue]
+            );
+
+            // 2. Save to cached_asset_meta
+            await pool.query(
+                `INSERT INTO cached_asset_meta(key, prompt, source, mode, movement_id, persona, step_index)
+                 VALUES($1, $2, $3, $4, $5, $6, $7)
+                 ON CONFLICT (key) DO UPDATE SET 
+                    prompt = EXCLUDED.prompt, 
+                    source = EXCLUDED.source, 
+                    mode = EXCLUDED.mode, 
+                    movement_id = EXCLUDED.movement_id,
+                    persona = EXCLUDED.persona,
+                    step_index = EXCLUDED.step_index`,
+                [
+                    key,
+                    meta.prompt || null,
+                    meta.source || 'auto-gen',
+                    meta.persona || meta.mode || null,
+                    meta.movementId || (key.startsWith('movement_') ? key.split('_').slice(0, 2).join('_') : null), // Best effort movement_id: movement_name
+                    meta.persona || null,
+                    meta.step !== undefined ? meta.step : null
+                ]
+            );
+        } catch (e) {
+            console.error(`[JobProcessor] Failed to save asset ${key}:`, e);
+        }
     }
 }
 

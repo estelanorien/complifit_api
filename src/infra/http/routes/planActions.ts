@@ -4,6 +4,7 @@ import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
 import { AiService } from '../../../application/services/aiService.js';
 import { PlanService } from '../../../application/services/planService.js';
+import { jobProcessor } from '../../../application/services/jobProcessor.js';
 import { withErrorHandler } from './_utils/errorHandler.js';
 import { env } from '../../../config/env.js';
 import {
@@ -96,10 +97,29 @@ export async function planActionsRoutes(app: FastifyInstance) {
         "name": "Creative Program Name", 
         "analysis": "Brief scientific rationale", 
         "schedule": [
-          {"day": "Day 1", "focus": "Hypertrophy - Push", "exercises": [{"name": "Bench Press", "sets": "3", "reps": "10", "notes": "Control tempo 3-1-1"}]},
+          {
+            "day": "Day 1", 
+            "focus": "Hypertrophy - Push", 
+            "exercises": [
+              {
+                "name": "Bench Press", 
+                "sets": "3", 
+                "reps": "10", 
+                "notes": "Control tempo 3-1-1",
+                "instructions": [
+                  {"simple": "Step 1 summary", "detailed": "Detailed description of Step 1 with form cues."},
+                  {"simple": "Step 2 summary", "detailed": "Detailed description of Step 2..."}
+                ]
+              }
+            ]
+          },
           ... repeat for exactly ${durationDays} days ...
         ] 
       }
+
+      INSTRUCTION QUALITY RULES:
+      1. Every exercise MUST have between 5 and 8 instructional steps in the "instructions" array.
+      2. Use simple/detailed split for every step.
     `;
 
         const nutritionPrompt = `
@@ -145,7 +165,13 @@ export async function planActionsRoutes(app: FastifyInstance) {
                   "calories": 450, 
                   "time": "15 min",
                   "ingredients": ["Item A", "Item B"], 
-                  "instructions": [{"simple": "Prep base", "detailed": "Wash and chop ingredients..."}]
+                  "instructions": [
+                    {"simple": "Prep base", "detailed": "Wash and chop ingredients..."},
+                    {"simple": "Step 2", "detailed": "Detailed cooking step..."},
+                    {"simple": "Step 3", "detailed": "Next step..."},
+                    {"simple": "Step 4", "detailed": "Next step..."},
+                    {"simple": "Step 5", "detailed": "Final plating..."}
+                  ]
                 }
               },
               ... more meals ...
@@ -154,6 +180,10 @@ export async function planActionsRoutes(app: FastifyInstance) {
           ... repeat for exactly ${durationDays} days ...
         ] 
       }
+
+      INSTRUCTION QUALITY RULES:
+      1. Every recipe MUST have between 5 and 8 instructional steps in the "instructions" array.
+      2. NEVER use single-step instructions. Break the process down into logical phases.
     `;
 
         // --- Generation ---
@@ -319,6 +349,48 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 );
 
                 await client.query('COMMIT');
+
+                // --- BACKGROUND ASSET GENERATION TRIGGER ---
+                // We queue these jobs after COMMIT so they don't block the response and 
+                // we're sure the plan is saved.
+                try {
+                    // 1. Queue Exercise Jobs (Atlas & Nova for each movement)
+                    if (trainingPlan.schedule) {
+                        for (const day of trainingPlan.schedule) {
+                            if (day.exercises) {
+                                for (const ex of day.exercises) {
+                                    if (ex.name) {
+                                        await jobProcessor.submitJob(user.userId, 'EXERCISE_GENERATION', {
+                                            name: ex.name,
+                                            instructions: ex.instructions,
+                                            userProfile: profile
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Queue Meal Jobs
+                    if (nutritionPlan.days) {
+                        for (const day of nutritionPlan.days) {
+                            if (day.meals) {
+                                for (const meal of day.meals) {
+                                    if (meal.recipe && meal.recipe.name) {
+                                        await jobProcessor.submitJob(user.userId, 'MEAL_GENERATION', {
+                                            name: meal.recipe.name,
+                                            instructions: meal.recipe.instructions,
+                                            ingredients: meal.recipe.ingredients
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (jobErr) {
+                    req.log.warn({ error: 'Failed to queue background jobs', jobErr, requestId: (req as any).requestId });
+                }
+
                 return reply.send({ training: trainingPlan, nutrition: nutritionPlan, trainingId, mealPlanId, archiveId });
             } catch (dbError: any) {
                 await client.query('ROLLBACK');
