@@ -4,6 +4,15 @@ import { AiService } from './aiService.js';
 const aiService = new AiService();
 
 export class TranslationService {
+    private getContentHash(text: string): string {
+        if (!text) return '0';
+        let hash = 5381;
+        for (let i = 0; i < text.length; i++) {
+            hash = (hash * 33) ^ text.charCodeAt(i);
+        }
+        return (hash >>> 0).toString(36);
+    }
+
     /**
      * Translates a single string and caches it.
      */
@@ -15,9 +24,10 @@ export class TranslationService {
 
         try {
             // 1. Check if we have a match in the translation cache
+            const contentHash = this.getContentHash(trimmedText);
             const { rows } = await pool.query(
-                'SELECT translated_text FROM content_translations WHERE original_text = $1 AND language = $2',
-                [trimmedText, lang]
+                'SELECT translated_text FROM content_translations WHERE (content_hash = $1 OR original_text = $2) AND language = $3 LIMIT 1',
+                [contentHash, trimmedText, lang]
             );
 
             if (rows.length > 0) {
@@ -42,8 +52,8 @@ ${trimmedText}`;
 
             // 3. Persist to cache (fire and forget to not block response)
             pool.query(
-                'INSERT INTO content_translations (original_text, language, translated_text, category) VALUES ($1, $2, $3, $4) ON CONFLICT (original_text, language) DO NOTHING',
-                [trimmedText, lang, cleanTranslated, category || 'general']
+                'INSERT INTO content_translations (original_text, language, translated_text, category, content_hash) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (original_text, language) DO NOTHING',
+                [trimmedText, lang, cleanTranslated, category || 'general', contentHash]
             ).catch(err => {
                 // Log to stderr for cloud environment visibility
                 process.stderr.write(`[TranslationService] Caching failed: ${err.message}\n`);

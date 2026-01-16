@@ -1,3 +1,4 @@
+import { pool } from '../../infra/db/pool.js';
 import { AiService } from './aiService.js';
 import { translationService } from './translationService.js';
 import { jobProcessor } from './jobProcessor.js';
@@ -157,7 +158,7 @@ export async function generateTrainingPlan(params: GenerateTrainingPlanParams): 
   1. TONE: Professional, authoritative, encouraging. Use active voice ("Press", "Pull", "Hold").
   2. DETAIL LEVEL: "detailed" steps must be 2-3 sentences long, creating a visual mental image of the movement.
   3. SAFETY: Always include specific cues about joint alignment and breathing.
-  4. STEP COUNT: Every exercise MUST have 5-8 distinct steps. Fewer than 5 steps is a FAILURE.
+  4. STEP COUNT: Every exercise MUST have 7-10 distinct steps. Fewer than 7 steps is a FAILURE.
 
   JSON STRUCTURE & CONSTRAINTS:
   Return JSON exactly in this structure. Constraints are CRITICAL:
@@ -181,7 +182,7 @@ export async function generateTrainingPlan(params: GenerateTrainingPlanParams): 
                 "simple": "Active voice summary (max 10 words)", 
                 "detailed": "Detailed execution instruction. Focus on form, breathing, and muscle engagement. (2-3 sentences)"
               },
-              // ... MUST HAVE 5-8 STEPS ...
+              // ... MUST HAVE 7-10 STEPS ...
             ]
           }
         ]
@@ -190,7 +191,7 @@ export async function generateTrainingPlan(params: GenerateTrainingPlanParams): 
   }
 
   CRITICAL QUALITY CHECKS:
-  - Check "instructions" array length. If < 5, ADD MORE STEPS breaking down the movement.
+  - Check "instructions" array length. If < 7, ADD MORE STEPS breaking down the movement.
   - Ensure "detailed" text is actually detailed.
   `);
 
@@ -246,6 +247,22 @@ export async function generateTrainingPlan(params: GenerateTrainingPlanParams): 
   parsedPlan.varietyMode = varietyMode;
   parsedPlan.originalSchedule = JSON.parse(JSON.stringify(parsedPlan.schedule));
   parsedPlan.name = parsedPlan.name || `${profile?.primaryGoal || 'Training'} Protocol`;
+
+  // --- PROACTIVE CONTENT UPGRADE TRIGGER ---
+  if (success && parsedPlan.schedule) {
+    parsedPlan.schedule.forEach((day: any) => {
+      if (day.exercises) {
+        day.exercises.forEach((ex: any) => {
+          if (!ex.instructions || ex.instructions.length < 7) {
+            pool.query(
+              `INSERT INTO generation_jobs(type, payload, priority) VALUES($1, $2, $3) ON CONFLICT DO NOTHING`,
+              ['CONTENT_UPGRADE', JSON.stringify({ type: 'EXERCISE', name: ex.name, currentSteps: ex.instructions?.length || 0 }), 'LOW']
+            ).catch(() => { });
+          }
+        });
+      }
+    });
+  }
 
   // --- BACKGROUND ASSET GENERATION TRIGGER ---
   try {
