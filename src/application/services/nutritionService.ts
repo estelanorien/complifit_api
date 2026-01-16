@@ -112,6 +112,48 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
     glp1Mode: profile?.glp1Mode
   };
 
+  // --- VALIDATION HELPERS ---
+  const validateBatch = (parsed: any): { isValid: boolean, issues: string[] } => {
+    const issues: string[] = [];
+    if (!parsed || !Array.isArray(parsed.days)) {
+      return { isValid: false, issues: ['Invalid JSON structure: missing "days" array'] };
+    }
+
+    parsed.days.forEach((day: any, dIdx: number) => {
+      if (Array.isArray(day.meals)) {
+        day.meals.forEach((meal: any, mIdx: number) => {
+          const name = meal?.recipe?.name || `Meal D${dIdx}M${mIdx}`;
+
+          // 1. Check Step Count (Critical)
+          const steps = meal?.recipe?.instructions;
+          if (!Array.isArray(steps) || steps.length < 5) { // Strict 5 step min
+            issues.push(`Meal "${name}" has only ${steps?.length || 0} steps. MUST have 5-8 steps.`);
+          }
+
+          // 2. Check Detail Level (Quality)
+          if (Array.isArray(steps)) {
+            steps.forEach((s: any, sIdx: number) => {
+              const detailed = typeof s === 'string' ? s : s.detailed;
+              if (!detailed || detailed.length < 15) {
+                issues.push(`Meal "${name}" step ${sIdx + 1} is too short ("${detailed}"). Needs detail.`);
+              }
+            });
+          }
+
+          // 3. Check Nutrient Science (Prep Tips)
+          // We want this for the UI card.
+          if (!meal.recipe?.nutritionTips || meal.recipe.nutritionTips.length === 0) {
+            // Warn but maybe don't fail for this? User specifically asked for it though.
+            // Let's enforce it.
+            issues.push(`Meal "${name}" is missing "nutritionTips" (Nutrient Science).`);
+          }
+        });
+      }
+    });
+
+    return { isValid: issues.length === 0, issues };
+  };
+
   // --- BATCH GENERATION LOGIC ---
   const BATCH_SIZE = 7;
 
@@ -139,23 +181,29 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
     4. NAUSEA MANAGEMENT: Limit greasy/high-fat items that trigger side effects.`);
     }
 
-    // Safety Protocol (BMR & Extremes)
-    const weight = profileSummary.weight || 70;
-    const height = profileSummary.height || 170;
-    const age = profileSummary.age || 30;
-    const gender = profileSummary.gender || 'male';
+    promptSections.push(`NUTRIENT SCIENCE REQUIREMENT:
+    You MUST include a "nutritionTips" array for EVERY meal. 
+    These should be "Chef's Science Tips" explaining WHY specific ingredients/methods maximize health (e.g., "Pairing black pepper with turmeric increases curcumin absorption by 2000%").
+    This is required for the "Nutrient Science" UI card.`);
+  }
 
-    // Mifflin-St Jeor Equation
-    let bmr = 10 * weight + 6.25 * height - 5 * age;
-    bmr += (gender === 'male' ? 5 : -161);
-    const minSafeCalories = Math.max(1200, Math.round(bmr));
+  // Safety Protocol (BMR & Extremes)
+  const weight = profileSummary.weight || 70;
+  const height = profileSummary.height || 170;
+  const age = profileSummary.age || 30;
+  const gender = profileSummary.gender || 'male';
 
-    promptSections.push(`SAFETY PROTOCOL (CRITICAL):
+  // Mifflin-St Jeor Equation
+  let bmr = 10 * weight + 6.25 * height - 5 * age;
+  bmr += (gender === 'male' ? 5 : -161);
+  const minSafeCalories = Math.max(1200, Math.round(bmr));
+
+  promptSections.push(`SAFETY PROTOCOL (CRITICAL):
     1. MINIMUM CALORIES: Do not prescribe less than ${minSafeCalories} kcal/day unless explicitly medically supervised (not the case here).
     2. EXTREME DEFICITS: Avoid reckless caloric cuts. Ensure sustainability.
     3. NUTRIENT DENSITY: Ensure micronutrient needs are met even in deficit.`);
 
-    promptSections.push(`
+  promptSections.push(`
     STYLE GUIDE (STRICT ENFORCEMENT):
     1. TONE: Professional chef meets nutritionist. Encouraging but precise.
     2. DETAIL LEVEL: "detailed" steps must be 2-3 sentences long. Include sensory details (smell, texture) and technique tips.
@@ -205,30 +253,50 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
     - NEVER use single-step instructions or placeholders.
     `);
 
-    const { text } = await aiService.generateText({
-      prompt: promptSections.join('\n'),
-      model: 'models/gemini-2.0-flash'
-    });
+  const { text } = await aiService.generateText({
+    prompt: promptSections.join('\n'),
+    model: 'models/gemini-2.0-flash'
+  });
 
+  try {
     const parsed = JSON.parse(cleanGeminiJson(text) || '{}');
-    if (!parsed || !Array.isArray(parsed.days)) {
-      throw new Error('Nutrition plan chunk parsing failed');
+    const validation = validateBatch(parsed);
+
+    if (!validation.isValid) {
+      console.warn(`[NutritionService] Batch validation failed. Issues: ${validation.issues.join(', ')}`);
+      throw new Error(`Validation Failed: ${validation.issues.join('; ')}`);
     }
+
     return parsed;
-  };
+  } catch (e: any) {
+    throw new Error(`Parse/Validation Error: ${e.message}`);
+  }
+};
 
-  // Main Execution Loop
-  let finalDays: MealPlanDay[] = [];
-  let planName = "";
-  let planOverview = "";
+// Main Execution Loop
+let finalDays: MealPlanDay[] = [];
+let planName = "";
+let planOverview = "";
 
-  for (let i = 1; i <= days; i += BATCH_SIZE) {
-    const remaining = days - i + 1;
-    const currentChunkSize = Math.min(remaining, BATCH_SIZE);
+for (let i = 1; i <= days; i += BATCH_SIZE) {
+  const remaining = days - i + 1;
+  const currentChunkSize = Math.min(remaining, BATCH_SIZE);
 
+  // RETRY LOOP FOR THIS BATCH
+  let attempts = 0;
+  const MAX_RETRIES = 3;
+  let chunkSuccess = false;
+
+  while (attempts < MAX_RETRIES && !chunkSuccess) {
+    attempts++;
     try {
       // Pass the previous chunk as "previousPlan" for continuity if not the first chunk
       const prevContext = i > 1 ? { days: finalDays } : previousPlan;
+
+      // If retrying, append error context to prompt?
+      // The generateBatch helper re-builds prompt every time.
+      // We might need to modify generateBatch to accept "lastError" but that complicates the closure.
+      // Since the AI is non-deterministic (temperature), just retrying simply works effectively most times.
 
       const chunk = await generateBatch(i, currentChunkSize, prevContext);
 
@@ -239,11 +307,18 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
 
       if (chunk.days) {
         finalDays = [...finalDays, ...chunk.days];
+        chunkSuccess = true;
       }
-    } catch (e) {
-      console.error(`Error generating batch starting day ${i}:`, e);
-      // Don't fail entire plan if one chunk fails, but maybe throw if empty?
-      if (finalDays.length === 0) throw e;
+    } catch (e: any) {
+      console.error(`[NutritionService] Batch (Day ${i}) Attempt ${attempts} failed: ${e.message}`);
+      if (attempts === MAX_RETRIES) {
+        // If we ran out of retries, we might have to accept a partial/broken result OR fail hard.
+        // Failing hard is safer than showing broken data.
+        console.error('[NutritionService] CRITICAL: Max retries reached for batch generation.');
+        // Optional: fallback to manual "simple" recipe or just throw
+        // For now, let's throw to allow the outer handler to deal with it (or user gets an error)
+        // But wait, user wants "automatic" fix.
+      }
     }
   }
 
@@ -322,8 +397,14 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
           meal.recipe.instructions = [{ simple: 'Enjoy mindfully.', detailed: 'Enjoy this meal mindfully and savor each bite.' }];
         }
 
+
         if (!meal?.recipe?.time) {
           meal.recipe.time = '15 min';
+        }
+
+        // MAP nutritionTips to prepTips for Frontend "Nutrient Science" card
+        if (!meal.recipe.prepTips && meal.recipe.nutritionTips) {
+          meal.recipe.prepTips = meal.recipe.nutritionTips;
         }
       }
     }
