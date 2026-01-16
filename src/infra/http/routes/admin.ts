@@ -25,7 +25,15 @@ const roleSchema = z.object({
   newRole: z.enum(['admin', 'user', 'moderator', 'banned'])
 });
 
+import { BatchAssetService } from '../../../services/BatchAssetService.js';
+
 export async function adminRoutes(app: FastifyInstance) {
+  // Batch Trigger
+  app.post('/admin/batch/run', { preHandler: adminGuard }, async (req, reply) => {
+    const result = await BatchAssetService.runNightlyBatch();
+    return reply.send(result);
+  });
+
   // Asset generation proxy (server-side Gemini key)
   app.post('/admin/generate-asset', { preHandler: adminGuard }, async (req, reply) => {
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
