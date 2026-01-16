@@ -220,12 +220,22 @@ export class JobProcessor {
 
         const baseKey = this.normalizeKey(name, 'movement');
 
+        // PRE-FETCH COACH REFERENCES
+        const primaryRef = await this.getAsset(primaryCoach.refKey);
+        const secondaryRef = await this.getAsset(secondaryCoach.refKey);
+
+        if (primaryRef) console.log(`[JobProcessor] Using reference image for ${primaryId}`);
+        if (secondaryRef) console.log(`[JobProcessor] Using reference image for ${secondaryId}`);
+
         // --- 1. GENERATE PRIMARY MAIN ---
         console.log(`[JobProcessor] Generating PRIMARY MAIN (${primaryId}) for ${name}`);
         const primaryPrompt = `Portrait of ${primaryCoach.description} performing ${name} exercise. Proper form, gym setting. ${VITALITY_IMAGE_STYLE}. Action shot, dynamic angle. STRICTLY NO TEXT OR LABELS.`;
 
         try {
-            const { base64: primaryImage } = await aiService.generateImage({ prompt: primaryPrompt });
+            const { base64: primaryImage } = await aiService.generateImage({
+                prompt: primaryPrompt,
+                referenceImage: primaryRef || undefined // Use coach reference if available
+            });
             if (!primaryImage) throw new Error('Failed to generate primary main image');
 
             await this.saveAsset(`${baseKey}_main`, primaryImage, { prompt: primaryPrompt, source: 'exercise-job-primary', persona: primaryId, movementId: baseKey });
@@ -237,7 +247,10 @@ export class JobProcessor {
 
             let secondaryMainImage: string | undefined;
             try {
-                const { base64: sImg } = await aiService.generateImage({ prompt: secondaryPrompt });
+                const { base64: sImg } = await aiService.generateImage({
+                    prompt: secondaryPrompt,
+                    referenceImage: secondaryRef || undefined // Use coach reference if available
+                });
                 secondaryMainImage = sImg;
                 if (secondaryMainImage) {
                     await this.saveAsset(`${baseKey}_${secondaryId}`, secondaryMainImage, { prompt: secondaryPrompt, source: 'exercise-job-secondary', persona: secondaryId, movementId: baseKey });
@@ -262,7 +275,7 @@ export class JobProcessor {
                     try {
                         const { base64: pStepImg } = await aiService.generateImage({
                             prompt: pStepPrompt,
-                            referenceImage: primaryImage // Use main image as reference for consistency
+                            referenceImage: primaryImage // Use generated main image to keep outfit consistency for steps
                         });
                         if (pStepImg) {
                             await this.saveAsset(pStepKey, pStepImg, { prompt: pStepPrompt, source: 'exercise-job-step', persona: primaryId, step: stepIndex, movementId: baseKey });
@@ -281,7 +294,7 @@ export class JobProcessor {
                         try {
                             const { base64: sStepImg } = await aiService.generateImage({
                                 prompt: sStepPrompt,
-                                referenceImage: secondaryMainImage
+                                referenceImage: secondaryMainImage // Use generated main image for steps
                             });
                             if (sStepImg) {
                                 await this.saveAsset(sStepKey, sStepImg, { prompt: sStepPrompt, source: 'exercise-job-step', persona: secondaryId, step: stepIndex, movementId: baseKey });
@@ -298,6 +311,22 @@ export class JobProcessor {
         } catch (e: any) {
             console.error(`[JobProcessor] handleExerciseGeneration failed:`, e);
             throw e;
+        }
+    }
+
+    private async getAsset(key: string): Promise<string | null> {
+        try {
+            const { rows } = await pool.query(
+                `SELECT value FROM cached_assets WHERE key = $1 LIMIT 1`,
+                [key]
+            );
+            if (rows.length > 0) {
+                return rows[0].value;
+            }
+            return null;
+        } catch (e) {
+            console.error(`[JobProcessor] Failed to fetch asset ${key}:`, e);
+            return null;
         }
     }
 
