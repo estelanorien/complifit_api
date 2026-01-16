@@ -91,6 +91,38 @@ export async function generateTrainingPlan(params: GenerateTrainingPlanParams): 
     trainingStyle: profile?.trainingStyle
   };
 
+  // --- VALIDATION HELPER ---
+  const validatePlan = (plan: any): { isValid: boolean, issues: string[] } => {
+    const issues: string[] = [];
+    if (!plan || !Array.isArray(plan.schedule)) return { isValid: false, issues: ['Invalid structure'] };
+
+    plan.schedule.forEach((day: any, dIdx: number) => {
+      if (Array.isArray(day.exercises)) {
+        day.exercises.forEach((ex: any, eIdx: number) => {
+          const name = ex.name || `Ex D${dIdx}E${eIdx}`;
+          const instructions = ex.instructions;
+
+          // 1. Strict Step Count
+          if (!Array.isArray(instructions) || instructions.length < 5) {
+            issues.push(`Exercise "${name}" has only ${instructions?.length || 0} steps. MUST have 5-8.`);
+          }
+
+          // 2. Detail Check
+          if (Array.isArray(instructions)) {
+            instructions.forEach((s: any, sIdx: number) => {
+              const detailed = typeof s === 'string' ? s : s.detailed;
+              if (!detailed || detailed.length < 15) {
+                issues.push(`Exercise "${name}" step ${sIdx + 1} is too short.`);
+              }
+            });
+          }
+        });
+      }
+    });
+
+    return { isValid: issues.length === 0, issues };
+  };
+
   const bmi = (profile.weight && profile.height) ? (profile.weight / ((profile.height / 100) ** 2)) : 0;
   let safetyProtocol = "General Safety: Ensure exercises are appropriate for fitness level.";
 
@@ -162,14 +194,40 @@ export async function generateTrainingPlan(params: GenerateTrainingPlanParams): 
   - Ensure "detailed" text is actually detailed.
   `);
 
-  const { text } = await aiService.generateText({
-    prompt: promptSections.join('\n'),
-    model: 'models/gemini-2.0-flash'
-  });
+  // RETRY LOOP
+  let attempts = 0;
+  const MAX_RETRIES = 3;
+  let parsedPlan: any = null;
+  let success = false;
 
-  const parsedPlan = JSON.parse(cleanGeminiJson(text) || '{}');
-  if (!parsedPlan || !Array.isArray(parsedPlan.schedule)) {
-    throw new Error('Training plan parsing failed');
+  while (attempts < MAX_RETRIES && !success) {
+    attempts++;
+    try {
+      const { text } = await aiService.generateText({
+        prompt: promptSections.join('\n'),
+        model: 'models/gemini-2.0-flash'
+      });
+
+      parsedPlan = JSON.parse(cleanGeminiJson(text) || '{}');
+      const validation = validatePlan(parsedPlan);
+
+      if (!validation.isValid) {
+        console.warn(`[TrainingService] Validation failed (Attempt ${attempts}): ${validation.issues.join(', ')}`);
+        throw new Error(`Validation issues: ${validation.issues.join('; ')}`);
+      }
+
+      if (!parsedPlan || !Array.isArray(parsedPlan.schedule)) {
+        throw new Error('Structure check failed');
+      }
+
+      success = true;
+    } catch (e: any) {
+      console.error(`[TrainingService] Generation attempt ${attempts} failed: ${e.message}`);
+      if (attempts === MAX_RETRIES) {
+        console.error('[TrainingService] CRITICAL: Max retries reached.');
+        throw e;
+      }
+    }
   }
 
   // Estimate calories for each exercise

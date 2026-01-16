@@ -456,19 +456,60 @@ export async function planActionsRoutes(app: FastifyInstance) {
             avoidItem: z.string().optional()
         }).parse(req.body);
 
-        const prompt = `Suggest ONE alternative ${body.type} recipe (~${body.targetCalories} kcal).
-      Diet: ${body.profile?.dietaryPreference || 'none'}. Excludes: ${body.excludes.join(', ') || 'none'}.
-      Language: ${body.lang}.
-      Return JSON: { "type": "...", "recipe": { "name": "...", "calories": 500, "ingredients": [], "instructions": [{"simple": "...", "detailed": "..."}] } }`;
+        let attempts = 0;
+        const MAX_RETRIES = 3;
+        let lastError = "";
 
-        const { text } = await aiService.generateText({ prompt, generationConfig: { responseMimeType: 'application/json' } });
-        const meal = JSON.parse(PlanService.cleanGeminiJson(text) || '{}');
+        while (attempts < MAX_RETRIES) {
+            attempts++;
+            try {
+                const prompt = `Suggest ONE alternative ${body.type} recipe (~${body.targetCalories} kcal).
+              Diet: ${body.profile?.dietaryPreference || 'none'}. Excludes: ${body.excludes.join(', ') || 'none'}.
+              Language: ${body.lang}.
+              
+              CRITICAL QUALITY RULES:
+              1. MUST have 5-8 distinct cooking steps.
+              2. "detailed" instruction must be 2-3 sentences.
+              3. Include "nutritionTips" (science-based health tips).
+              
+              Return JSON: { 
+                "type": "${body.type}", 
+                "recipe": { 
+                    "name": "Creative Name", 
+                    "calories": ${body.targetCalories}, 
+                    "ingredients": ["Item 1", "Item 2"], 
+                    "instructions": [{"simple": "Action", "detailed": "Detailed step..."}],
+                    "nutritionTips": ["Tip 1", "Tip 2"]
+                } 
+              }`;
 
-        if (meal?.recipe) {
-            meal.recipe.instructions = PlanService.normalizeInstructions(meal.recipe.instructions);
+                const { text } = await aiService.generateText({ prompt, generationConfig: { responseMimeType: 'application/json' } });
+                const meal = JSON.parse(PlanService.cleanGeminiJson(text) || '{}');
+
+                if (meal?.recipe) { // Normalize
+                    meal.recipe.instructions = PlanService.normalizeInstructions(meal.recipe.instructions);
+                }
+
+                // VALIDATION
+                if (!meal?.recipe?.instructions || !Array.isArray(meal.recipe.instructions)) throw new Error("Missing instructions");
+                if (meal.recipe.instructions.length < 5) throw new Error(`Only ${meal.recipe.instructions.length} steps (min 5 required)`);
+
+                // Map nutritionTips -> prepTips for UI compatibility if needed
+                if (meal.recipe.nutritionTips && !meal.recipe.prepTips) {
+                    meal.recipe.prepTips = meal.recipe.nutritionTips;
+                }
+
+                return reply.send({ meal });
+
+            } catch (e: any) {
+                lastError = e.message;
+                req.log.warn({ msg: `Reroll attempt ${attempts} failed`, error: e.message });
+                if (attempts === MAX_RETRIES) {
+                    req.log.error({ msg: "Reroll failed after retries", error: lastError });
+                    throw new Error(`Failed to generate valid meal after ${MAX_RETRIES} attempts: ${lastError}`);
+                }
+            }
         }
-
-        return reply.send({ meal });
     }));
 
     // Reroll exercise
