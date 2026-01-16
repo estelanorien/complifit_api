@@ -156,7 +156,15 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
     3. NUTRIENT DENSITY: Ensure micronutrient needs are met even in deficit.`);
 
     promptSections.push(`
-    Return JSON exactly as:
+    STYLE GUIDE (STRICT ENFORCEMENT):
+    1. TONE: Professional chef meets nutritionist. Encouraging but precise.
+    2. DETAIL LEVEL: "detailed" steps must be 2-3 sentences long. Include sensory details (smell, texture) and technique tips.
+    3. STEP COUNT: Every recipe MUST have 5-8 distinct steps. Fewer than 5 steps is a FAILURE.
+    4. ACCURACY: Macronutrients must sum up correctly (Protein*4 + Carbs*4 + Fat*9 ~= Calories).
+
+    JSON STRUCTURE & CONSTRAINTS:
+    Return JSON exactly as below. Constraints are CRITICAL:
+
     {
       "name": "Part ${Math.ceil(startDayInfo / BATCH_SIZE)}",
       "overview": "Short summary",
@@ -168,15 +176,16 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
             {
               "type": "breakfast",
               "recipe": {
-                "name": "Meal",
+                "name": "Meal Name",
                 "calories": 500,
                 "time": "15 min",
-                "ingredients": ["item"],
+                "ingredients": ["1 cup oats", "200ml almond milk"],
                 "instructions": [
                   {
-                    "simple": "Quick 1-sentence instruction (max 15 words, imperative mood)",
-                    "detailed": "Detailed step-by-step instruction with chef tips, timing, and technique notes (2-3 sentences)"
-                  }
+                    "simple": "Active voice summary (max 10 words)",
+                    "detailed": "Detailed step: technique, timing, visual cues. (2-3 sentences)"
+                  },
+                  // ... MUST HAVE 5-8 STEPS ...
                 ],
                 "macros": { "protein": 30, "carbs": 50, "fat": 15 },
                 "nutritionTips": [
@@ -190,12 +199,10 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
       ]
     }
     
-    CRITICAL INSTRUCTIONS FOR RECIPE STEPS:
-    - Each instruction MUST be an object with "simple" and "detailed" fields
-    - Every recipe MUST have between 5 and 8 instructional steps in the "instructions" array.
+    CRITICAL QUALITY CHECKS:
+    - Check "instructions" array length. If < 5, ADD MORE STEPS (e.g., prep, cooking, plating, serving).
+    - Ensure "detailed" text explains HOW and WHY, not just WHAT.
     - NEVER use single-step instructions or placeholders.
-    - Use imperative mood (no "you should", just "Heat", "Add", "Cook")
-    - NO conversational fillers
     `);
 
     const { text } = await aiService.generateText({
