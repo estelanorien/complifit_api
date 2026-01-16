@@ -262,6 +262,10 @@ export async function generateTrainingPlan(params: GenerateTrainingPlanParams): 
         });
       }
     });
+
+    // Proactive Translation for the whole plan
+    const allExNames = parsedPlan.schedule.flatMap((d: any) => (d.exercises || []).map((ex: any) => ex.name));
+    translationService.preTranslate(allExNames, 'exercise_name');
   }
 
   // --- BACKGROUND ASSET GENERATION TRIGGER ---

@@ -1,9 +1,9 @@
 import { pool } from '../../infra/db/pool.js';
 import { AiService } from './aiService.js';
+import { translationService } from './translationService.js';
 
 const aiService = new AiService();
 
-// --- CONSTANTS (Mirrored from Frontend to ensure consistency) ---
 const VITALITY_IMAGE_STYLE = "photorealistic, 8k resolution, cinematic lighting, professional photography, soft focus background, high detail, masterpiece, no text, no watermark, no labels, no characters, no letters, no words, no UI, no buttons, no captions, clean image";
 
 const COACH_PROFILES = {
@@ -251,6 +251,9 @@ export class JobProcessor {
             await this.saveAsset(`${baseKey}_main`, primaryImage, { prompt: primaryPrompt, source: 'exercise-job-primary', persona: primaryId, movementId: baseKey });
             await this.saveAsset(`${baseKey}_${primaryId}`, primaryImage, { prompt: primaryPrompt, source: 'exercise-job-primary', persona: primaryId, movementId: baseKey });
 
+            // --- PROACTIVE LOCKING: Translation ---
+            translationService.preTranslate([name, ...(instructions || [])], 'exercise');
+
             // --- 2. GENERATE SECONDARY MAIN ---
             console.log(`[JobProcessor] Generating SECONDARY MAIN (${secondaryId}) for ${name}`);
             const secondaryPrompt = `Portrait of ${secondaryCoach.description} performing ${name} exercise. Proper form, gym setting. ${VITALITY_IMAGE_STYLE}. Action shot, dynamic angle. STRICTLY NO TEXT OR LABELS.`;
@@ -360,6 +363,14 @@ export class JobProcessor {
             // Legacy/Generic key support
             await this.saveAsset(baseKey, mainImage, { prompt: mainPrompt, source: 'meal-job-main', movementId: baseKey });
 
+            // --- PROACTIVE LOCKING: Translation ---
+            const ingredientsText = Array.isArray(payload.ingredients) ? payload.ingredients.join(', ') : (payload.ingredients || '');
+            translationService.preTranslate([name, ingredientsText], 'meal');
+            if (Array.isArray(instructions)) {
+                const stepTexts = instructions.map((s: any) => s.detailed || s.simple || s);
+                translationService.preTranslate(stepTexts, 'meal_step');
+            }
+
             // --- 2. GENERATE STEPS ---
             if (Array.isArray(instructions) && instructions.length > 0) {
                 console.log(`[JobProcessor] Generating ${instructions.length} steps for meal: ${name}`);
@@ -429,6 +440,10 @@ export class JobProcessor {
                 } else {
                     await this.handleExerciseGeneration({ name, instructions: data.instructions });
                 }
+
+                // Trigger translations for upgraded text
+                const textToTranslate = data.instructions.map((s: any) => s.detailed || s.simple || s);
+                translationService.preTranslate([name, ...textToTranslate], type === 'MEAL' ? 'meal' : 'exercise');
             }
             return { success: true };
         } catch (e) {

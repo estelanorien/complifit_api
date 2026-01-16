@@ -1,6 +1,6 @@
 import { AiService } from './aiService.js';
 import { pool } from '../../infra/db/pool.js';
-import { translationService } from './translationService.js';
+import { TranslationService, translationService } from './translationService.js';
 import { jobProcessor } from './jobProcessor.js';
 
 const aiService = new AiService();
@@ -375,7 +375,7 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
           let existingRecipe = await getExistingRecipe(mealName);
 
           // 2. Performance & Quality Check: Is it good enough? (min 5 steps)
-          const isGood = (r: any) => r && Array.isArray(r.instructions) && r.instructions.length >= 5;
+          const isGood = (r: any) => r && Array.isArray(r.instructions) && r.instructions.length >= 7;
 
           if (!isGood(existingRecipe)) {
             // SILENT AUTO-REPAIR (Backend): If bad or missing, generate it now.
@@ -403,9 +403,12 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
                 generationConfig: { responseMimeType: "application/json" }
               });
 
-              const fresh = JSON.parse(cleanGeminiJson(aiResult.text) || "{}");
+              const fresh = JSON.parse(cleanGeminiJson(aiResult.text) || '{}');
+
               if (isGood(fresh)) {
                 existingRecipe = fresh;
+                // Proactive Translation
+                translationService.preTranslate([mealName, ...(fresh.ingredients || []), ...(fresh.instructions || []).map((s: any) => s.detailed || s.simple || s)], 'meal');
               }
             } catch (e) {
               process.stderr.write(`[NutritionService] Background generation failed for ${mealName}\n`);
