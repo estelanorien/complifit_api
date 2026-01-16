@@ -395,7 +395,7 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
                 "calories": number
               }
               
-              CRITICAL: Provide EXACTLY 6-8 detailed steps. Each "detailed" step must be 2-3 sentences long with chef tips.`;
+              CRITICAL: Provide EXACTLY 8-10 detailed steps. Each "detailed" step must be 2-3 sentences long with chef tips.`;
 
               const aiResult = await aiService.generateText({
                 prompt: detailPrompt,
@@ -410,6 +410,12 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
             } catch (e) {
               process.stderr.write(`[NutritionService] Background generation failed for ${mealName}\n`);
             }
+          } else if (existingRecipe && existingRecipe.instructions && existingRecipe.instructions.length < 8) {
+            // PROACTIVE UPGRADE: If it's okay but not "Golden" yet, queue a background upgrade.
+            pool.query(
+              `INSERT INTO generation_jobs(type, payload, priority) VALUES($1, $2, $3) ON CONFLICT DO NOTHING`,
+              ['CONTENT_UPGRADE', JSON.stringify({ type: 'MEAL', name: mealName, currentSteps: existingRecipe.instructions.length }), 'LOW']
+            ).catch(() => { });
           }
 
           if (existingRecipe) {

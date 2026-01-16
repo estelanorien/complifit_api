@@ -17,7 +17,7 @@ const COACH_PROFILES = {
     }
 };
 
-type JobType = 'MEAL_PLAN' | 'IMAGE' | 'MEAL_DETAILS' | 'EXERCISE_GENERATION' | 'MEAL_GENERATION';
+type JobType = 'MEAL_PLAN' | 'IMAGE' | 'MEAL_DETAILS' | 'EXERCISE_GENERATION' | 'MEAL_GENERATION' | 'CONTENT_UPGRADE';
 
 export class JobProcessor {
     private processing = false;
@@ -177,7 +177,8 @@ export class JobProcessor {
                 return this.handleExerciseGeneration(payload);
             case 'MEAL_GENERATION':
                 return this.handleMealGeneration(payload);
-            // case 'MEAL_PLAN': return this.handleMealPlanJob(payload);
+            case 'CONTENT_UPGRADE':
+                return this.handleContentUpgrade(payload);
             default:
                 throw new Error(`Unknown job type: ${type}`);
         }
@@ -205,6 +206,15 @@ export class JobProcessor {
         clean = clean.replace(/[^a-z0-9]+/g, ' ');
         const words = clean.split(' ').filter(w => w.length > 0).sort();
         return `${prefix}_${words.join('_')}`;
+    }
+
+    private getContentHash(text: string): string {
+        if (!text) return '0';
+        let hash = 5381;
+        for (let i = 0; i < text.length; i++) {
+            hash = (hash * 33) ^ text.charCodeAt(i);
+        }
+        return (hash >>> 0).toString(36);
     }
 
     private async handleExerciseGeneration(payload: any): Promise<any> {
@@ -269,7 +279,8 @@ export class JobProcessor {
                     const instructionText = step.detailed || step.simple;
 
                     // A. Primary Step
-                    const pStepKey = `${baseKey}_${primaryId}_step_${stepIndex}`;
+                    const contentHash = this.getContentHash(instructionText);
+                    const pStepKey = `${baseKey}_${primaryId}_step_${stepIndex}_${contentHash}`;
                     const pStepPrompt = `IMPORTANT: Show ${primaryCoach.description}. Action: ${instructionText}. Fitness photo of ${name} step ${stepIndex}. ${VITALITY_IMAGE_STYLE}. No text.`;
 
                     try {
@@ -280,7 +291,7 @@ export class JobProcessor {
                         if (pStepImg) {
                             await this.saveAsset(pStepKey, pStepImg, { prompt: pStepPrompt, source: 'exercise-job-step', persona: primaryId, step: stepIndex, movementId: baseKey });
                             // Also save as generic step if it's the primary persona
-                            await this.saveAsset(`${baseKey}_step_${stepIndex}`, pStepImg, { prompt: pStepPrompt, source: 'exercise-job-step', persona: primaryId, step: stepIndex, movementId: baseKey });
+                            await this.saveAsset(`${baseKey}_step_${stepIndex}_${contentHash}`, pStepImg, { prompt: pStepPrompt, source: 'exercise-job-step', persona: primaryId, step: stepIndex, movementId: baseKey });
                         }
                     } catch (e) {
                         console.error(`[JobProcessor] Primary step ${stepIndex} failed for ${name}`, e);
@@ -288,7 +299,7 @@ export class JobProcessor {
 
                     // B. Secondary Step
                     if (secondaryMainImage) {
-                        const sStepKey = `${baseKey}_${secondaryId}_step_${stepIndex}`;
+                        const sStepKey = `${baseKey}_${secondaryId}_step_${stepIndex}_${contentHash}`;
                         const sStepPrompt = `IMPORTANT: Show ${secondaryCoach.description}. Action: ${instructionText}. Fitness photo of ${name} step ${stepIndex}. ${VITALITY_IMAGE_STYLE}. No text.`;
 
                         try {
@@ -356,8 +367,9 @@ export class JobProcessor {
                     const step = instructions[i];
                     const stepIndex = i; // MealItem uses 0-indexed for recipes
                     const stepText = step.detailed || step.simple;
+                    const contentHash = this.getContentHash(stepText);
 
-                    const stepKey = `${baseKey}_step_${stepIndex}`;
+                    const stepKey = `${baseKey}_step_${stepIndex}_${contentHash}`;
                     const stepPrompt = `Food preparation step: ${stepText}. Close-up, professional food photography style. ${VITALITY_IMAGE_STYLE}. No text.`;
 
                     try {
@@ -378,6 +390,49 @@ export class JobProcessor {
 
         } catch (e: any) {
             console.error(`[JobProcessor] handleMealGeneration failed:`, e);
+            throw e;
+        }
+    }
+
+    private async handleContentUpgrade(payload: any): Promise<any> {
+        const { type, name, currentSteps = 0 } = payload;
+        console.log(`[JobProcessor] PROACTIVE UPGRADE: Upgrading ${type} "${name}" (Current steps: ${currentSteps})`);
+
+        const prompt = type === 'MEAL'
+            ? `Upgrade this recipe into a "Golden Standard" recipe. Provide 8-10 high-quality, detailed instruction steps. Recipe: "${name}". Return JSON with "instructions" array (objects with "simple" and "detailed" strings).`
+            : `Upgrade this exercise into a "Golden Standard" movement. Provide 7-9 high-quality, detailed instruction steps. Exercise: "${name}". Return JSON with "instructions" array (objects with "simple" and "detailed" strings).`;
+
+        try {
+            const response: any = await aiService.generateText({ prompt });
+            const data = typeof response === 'string' ? JSON.parse(response.replace(/```json|```/g, '')) : response;
+
+            if (data && data.instructions && data.instructions.length >= 7) {
+                console.log(`[JobProcessor] UPGRADE SUCCESS: ${name} now has ${data.instructions.length} steps.`);
+
+                if (type === 'MEAL') {
+                    await pool.query(
+                        `UPDATE meals SET recipe = recipe || $1 WHERE name = $2`,
+                        [JSON.stringify({ instructions: data.instructions }), name]
+                    );
+                } else {
+                    await pool.query(
+                        `UPDATE exercises SET instructions = $1 WHERE name = $2`,
+                        [JSON.stringify(data.instructions), name]
+                    );
+                }
+
+                // OPTIONAL: Trigger image generation for the new steps
+                // We could submit new IMAGE jobs here, but the frontend will do it lazily
+                // or the next time it's viewed. Proactive is better though.
+                if (type === 'MEAL') {
+                    await this.handleMealGeneration({ name, instructions: data.instructions });
+                } else {
+                    await this.handleExerciseGeneration({ name, instructions: data.instructions });
+                }
+            }
+            return { success: true };
+        } catch (e) {
+            console.error(`[JobProcessor] Content Upgrade failed for ${name}:`, e);
             throw e;
         }
     }
