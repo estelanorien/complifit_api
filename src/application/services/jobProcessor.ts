@@ -41,16 +41,44 @@ export class JobProcessor {
         }
     }
 
-    async submitJob(userId: string, type: JobType, payload: any): Promise<string> {
+    /**
+     * Submit a job with deduplication and priority support.
+     * @param userId - The user requesting the job
+     * @param type - Job type (IMAGE, EXERCISE_GENERATION, etc.)
+     * @param payload - Job payload
+     * @param priority - 3=HIGH, 2=MEDIUM, 1=LOW (default)
+     * @param jobKey - Optional canonical key for deduplication (e.g., 'MAIN_IMAGE_movement_bench_press_atlas')
+     */
+    async submitJob(userId: string, type: JobType, payload: any, priority: number = 1, jobKey?: string): Promise<{ jobId: string, isNew: boolean }> {
+        // 1. Check for existing job with same key (deduplication)
+        if (jobKey) {
+            const { rows: existing } = await pool.query(
+                `SELECT id FROM generation_jobs 
+                 WHERE job_key = $1 AND status IN ('PENDING', 'PROCESSING')
+                 LIMIT 1`,
+                [jobKey]
+            );
+            if (existing.length > 0) {
+                console.log(`[JobProcessor] Dedup: Found existing job ${existing[0].id} for key ${jobKey}`);
+                return { jobId: existing[0].id, isNew: false };
+            }
+        }
+
+        // 2. Insert new job with priority and expires_at
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour TTL
         const { rows } = await pool.query(
-            `INSERT INTO generation_jobs(user_id, type, payload, status) 
-       VALUES($1, $2, $3, 'PENDING') 
-       RETURNING id`,
-            [userId, type, payload]
+            `INSERT INTO generation_jobs(user_id, type, payload, status, priority, job_key, expires_at) 
+             VALUES($1, $2, $3, 'PENDING', $4, $5, $6) 
+             RETURNING id`,
+            [userId, type, payload, priority, jobKey || null, expiresAt]
         );
-        // Trigger immediate check (optional optimization)
-        // this.processNextJob(); 
-        return rows[0].id;
+
+        console.log(`[JobProcessor] Created job ${rows[0].id} (type=${type}, priority=${priority}, key=${jobKey || 'none'})`);
+
+        // Trigger immediate processing
+        setImmediate(() => this.processNextJob());
+
+        return { jobId: rows[0].id, isNew: true };
     }
 
     async getJobStatus(jobId: string, userId: string): Promise<any> {
@@ -74,14 +102,21 @@ export class JobProcessor {
                 await client.query('BEGIN');
 
                 // 1. Claim a job with SKIP LOCKED to prevent race conditions
+                // Priority ordering: HIGH (3) > MEDIUM (2) > LOW (1)
+                // Also reclaim jobs stuck in PROCESSING for > 5 minutes (heartbeat timeout)
+                // Skip expired jobs
                 const { rows } = await client.query(`
-          SELECT id, user_id, type, payload 
-          FROM generation_jobs 
-          WHERE status = 'PENDING' 
-          ORDER BY created_at ASC 
-          LIMIT 1 
-          FOR UPDATE SKIP LOCKED
-        `);
+                    SELECT id, user_id, type, payload 
+                    FROM generation_jobs 
+                    WHERE (
+                        status = 'PENDING' 
+                        OR (status = 'PROCESSING' AND started_at < NOW() - INTERVAL '5 minutes')
+                    )
+                    AND (expires_at IS NULL OR expires_at > NOW())
+                    ORDER BY priority DESC, created_at ASC 
+                    LIMIT 1 
+                    FOR UPDATE SKIP LOCKED
+                `);
 
                 if (rows.length === 0) {
                     await client.query('ROLLBACK');
@@ -91,9 +126,9 @@ export class JobProcessor {
                 const job = rows[0];
                 console.log(`[JobProcessor] Picked up job ${job.id} (${job.type})`);
 
-                // Mark as PROCESSING
+                // Mark as PROCESSING with started_at for heartbeat timeout
                 await client.query(
-                    `UPDATE generation_jobs SET status = 'PROCESSING', updated_at = now() WHERE id = $1`,
+                    `UPDATE generation_jobs SET status = 'PROCESSING', started_at = NOW(), updated_at = NOW() WHERE id = $1`,
                     [job.id]
                 );
 
