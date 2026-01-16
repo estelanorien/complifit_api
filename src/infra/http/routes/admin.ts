@@ -219,6 +219,58 @@ export async function adminRoutes(app: FastifyInstance) {
     return reply.send({ success: true });
   });
 
+  // Get system blueprints
+  app.get('/admin/blueprints', { preHandler: adminGuard }, async (req, reply) => {
+    // In a real app this would come from a DB table 'system_settings' or 'blueprints'
+    // For now we persist to a simple JSON structure in DB or just return defaults + overrides
+    // We'll use a simple query to 'system_settings' table if it existed, otherwise mock for now
+    // Let's assume we store it in a special "system_blueprints" key in cached_asset_meta or a new table.
+    // For speed, let's mock it or use a simple KV if available.
+
+    // Checking if we have a table for this... we don't.
+    // So let's return the default logic structure that frontend expects.
+    // Frontend expects: { guidelines: MasterGuidelines, appName: ..., etc }
+
+    // We can actually store this in `cached_assets` with key `system_blueprints`!
+    try {
+      const res = await pool.query(`SELECT value FROM cached_assets WHERE key = 'system_blueprints'`);
+      if (res.rows.length > 0) {
+        return JSON.parse(res.rows[0].value);
+      }
+    } catch (e) { }
+
+    // Default
+    return {
+      appName: 'Vitality AI',
+      guidelines: {
+        styleExerciseImage: "Cinematic fitness photography. High contrast, dramatic lighting, professional gym environment, 8k resolution, highly detailed. Realistic skin textures and sweat. No text.",
+        styleMealImage: "Hyperrealistic food photography. 8k resolution, highly detailed, delicious presentation, soft studio lighting, shallow depth of field. CRITICAL: NO TEXT, NO CALORIE LABELS, NO NUTRITION INFO, NO OVERLAYS.",
+        styleExerciseVideo: "Cinematic 4k fitness shot, dark gym, moody lighting, slow motion execution.",
+        style3DAnatomyVideo: "3D anatomical render of [Subject]. Transparent biological skin, glowing emerald green muscle highlights on [Target Muscles]. Neutral studio background. Seamless loop motion. 4k resolution, high frame rate.",
+        toneCoach: "Motivational, tough but fair, safety-focused.",
+        vitalityAvatarDescription: "Athletic Mannequin figure. Faceless, featureless face. Bald head. Neutral metallic grey skin tone. Wearing solid Emerald Green athletic shorts and Slate Grey top. No text, no logos.",
+        themes: []
+      }
+    };
+  });
+
+  app.post('/admin/blueprints', { preHandler: adminGuard }, async (req, reply) => {
+    const body = req.body as any; // Allow loose typing for now
+    // Save to cached_assets
+    try {
+      await pool.query(
+        `INSERT INTO cached_assets(key, value, asset_type, status)
+             VALUES('system_blueprints', $1, 'json', 'active')
+             ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`,
+        [JSON.stringify(body)]
+      );
+      return { success: true };
+    } catch (e: any) {
+      req.log.error(e);
+      return reply.status(500).send({ error: "Failed to save blueprints" });
+    }
+  });
+
   // Note: /admin/users route is defined later with search functionality
 
   // User role update
@@ -359,6 +411,25 @@ export async function adminRoutes(app: FastifyInstance) {
     } catch (e: any) {
       req.log?.error({ error: 'admin movements fetch failed', message: e.message, stack: e.stack });
       return { exercises: [], meals: [] };
+    }
+  });
+
+  // Batch Check Asset Existence
+  app.post('/admin/assets/batch-check', { preHandler: adminGuard }, async (req, reply) => {
+    const { keys } = req.body as { keys: string[] };
+    if (!keys || keys.length === 0) return reply.send([]);
+
+    try {
+      // Optimized query with ANY
+      const res = await pool.query(
+        `SELECT key FROM cached_assets WHERE key = ANY($1)`,
+        [keys]
+      );
+      // Return array of found keys
+      return reply.send(res.rows.map(r => r.key));
+    } catch (e: any) {
+      req.log.error(e);
+      return reply.status(500).send({ error: "Batch check failed" });
     }
   });
 
