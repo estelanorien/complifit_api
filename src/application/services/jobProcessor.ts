@@ -222,7 +222,7 @@ export class JobProcessor {
 
         // --- 1. GENERATE PRIMARY MAIN ---
         console.log(`[JobProcessor] Generating PRIMARY MAIN (${primaryId}) for ${name}`);
-        const primaryPrompt = `Fitness photography of ${name} exercise. Proper form, athletic model (${primaryCoach.description}), gym setting. ${VITALITY_IMAGE_STYLE}. Action shot, dynamic angle. STRICTLY NO TEXT OR LABELS.`;
+        const primaryPrompt = `Portrait of ${primaryCoach.description} performing ${name} exercise. Proper form, gym setting. ${VITALITY_IMAGE_STYLE}. Action shot, dynamic angle. STRICTLY NO TEXT OR LABELS.`;
 
         try {
             const { base64: primaryImage } = await aiService.generateImage({ prompt: primaryPrompt });
@@ -233,7 +233,7 @@ export class JobProcessor {
 
             // --- 2. GENERATE SECONDARY MAIN ---
             console.log(`[JobProcessor] Generating SECONDARY MAIN (${secondaryId}) for ${name}`);
-            const secondaryPrompt = `Fitness photography of ${name} exercise. Proper form, athletic model (${secondaryCoach.description}), gym setting. ${VITALITY_IMAGE_STYLE}. Action shot, dynamic angle. STRICTLY NO TEXT OR LABELS.`;
+            const secondaryPrompt = `Portrait of ${secondaryCoach.description} performing ${name} exercise. Proper form, gym setting. ${VITALITY_IMAGE_STYLE}. Action shot, dynamic angle. STRICTLY NO TEXT OR LABELS.`;
 
             let secondaryMainImage: string | undefined;
             try {
@@ -257,7 +257,7 @@ export class JobProcessor {
 
                     // A. Primary Step
                     const pStepKey = `${baseKey}_${primaryId}_step_${stepIndex}`;
-                    const pStepPrompt = `IMPORTANT: Match person (${primaryCoach.description}). Action: ${instructionText}. Fitness photo of ${name} step ${stepIndex}. ${VITALITY_IMAGE_STYLE}. No text.`;
+                    const pStepPrompt = `IMPORTANT: Show ${primaryCoach.description}. Action: ${instructionText}. Fitness photo of ${name} step ${stepIndex}. ${VITALITY_IMAGE_STYLE}. No text.`;
 
                     try {
                         const { base64: pStepImg } = await aiService.generateImage({
@@ -276,7 +276,7 @@ export class JobProcessor {
                     // B. Secondary Step
                     if (secondaryMainImage) {
                         const sStepKey = `${baseKey}_${secondaryId}_step_${stepIndex}`;
-                        const sStepPrompt = `IMPORTANT: Match person (${secondaryCoach.description}). Action: ${instructionText}. Fitness photo of ${name} step ${stepIndex}. ${VITALITY_IMAGE_STYLE}. No text.`;
+                        const sStepPrompt = `IMPORTANT: Show ${secondaryCoach.description}. Action: ${instructionText}. Fitness photo of ${name} step ${stepIndex}. ${VITALITY_IMAGE_STYLE}. No text.`;
 
                         try {
                             const { base64: sStepImg } = await aiService.generateImage({
@@ -310,7 +310,7 @@ export class JobProcessor {
 
         // --- 1. GENERATE MAIN ---
         console.log(`[JobProcessor] Generating MAIN image for meal: ${name}`);
-        const mainPrompt = `Gourmet food photography of ${name}. Ingredients: ${ingredientText}. Plated beautifully, professional lighting. ${VITALITY_IMAGE_STYLE}. STRICTLY NO TEXT OR LABELS.`;
+        const mainPrompt = `Professional food photography of ${name}. Ingredients visible: ${ingredientText}. centered composition, steam rising, delicious texture, gourmet plating, dramatic side lighting, 8k resolution. STRICTLY NO TEXT, NO LABELS, NO RECIPES WRITTEN.`;
 
         try {
             const { base64: mainImage } = await aiService.generateImage({ prompt: mainPrompt });
