@@ -121,35 +121,46 @@ export async function generateTrainingPlan(params: GenerateTrainingPlanParams): 
   if (previousPlan) promptSections.push(`PREVIOUS PLAN SNAPSHOT: ${JSON.stringify(previousPlan.schedule?.slice(0, 2))}`);
   if (history && history.length) promptSections.push(`EXERCISE HISTORY (last sessions): ${JSON.stringify(history.slice(0, 5))}`);
   promptSections.push(`
-Return JSON exactly in this structure:
-{
-  "name": "Program name",
-  "analysis": "Short paragraph",
-  "schedule": [
-    {
-      "day": "Day 1 - Push",
-      "focus": "Upper Body",
-      "exercises": [
-        { 
-          "name": "Exercise", 
-          "sets": "3", 
-          "reps": "12", 
-          "notes": "Coaching cues", 
-          "drillContext": "Optional",
-          "instructions": [
-            {"simple": "Step 1", "detailed": "Detailed step 1..."},
-            {"simple": "Step 2", "detailed": "Detailed step 2..."}
-          ]
-        }
-      ]
-    }
-  ]
-}
+  STYLE GUIDE (STRICT ENFORCEMENT):
+  1. TONE: Professional, authoritative, encouraging. Use active voice ("Press", "Pull", "Hold").
+  2. DETAIL LEVEL: "detailed" steps must be 2-3 sentences long, creating a visual mental image of the movement.
+  3. SAFETY: Always include specific cues about joint alignment and breathing.
+  4. STEP COUNT: Every exercise MUST have 5-8 distinct steps. Fewer than 5 steps is a FAILURE.
 
-INSTRUCTION QUALITY RULES:
-1. Every exercise MUST have between 5 and 8 instructional steps in the "instructions" array.
-2. Use simple/detailed split for every step.
-`);
+  JSON STRUCTURE & CONSTRAINTS:
+  Return JSON exactly in this structure. Constraints are CRITICAL:
+
+  {
+    "name": "Program Name",
+    "analysis": "Short professional analysis of the plan",
+    "schedule": [
+      {
+        "day": "Day 1 - Push",
+        "focus": "Upper Body",
+        "exercises": [
+          { 
+            "name": "Exercise Name", 
+            "sets": "3", 
+            "reps": "12", 
+            "notes": "Specific cue (e.g., 'Keep elbows tucked')", 
+            "drillContext": "Optional context",
+            "instructions": [
+              {
+                "simple": "Active voice summary (max 10 words)", 
+                "detailed": "Detailed execution instruction. Focus on form, breathing, and muscle engagement. (2-3 sentences)"
+              },
+              // ... MUST HAVE 5-8 STEPS ...
+            ]
+          }
+        ]
+      }
+    ]
+  }
+
+  CRITICAL QUALITY CHECKS:
+  - Check "instructions" array length. If < 5, ADD MORE STEPS breaking down the movement.
+  - Ensure "detailed" text is actually detailed.
+  `);
 
   const { text } = await aiService.generateText({
     prompt: promptSections.join('\n'),
