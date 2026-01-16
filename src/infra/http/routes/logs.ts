@@ -471,6 +471,22 @@ export async function logsRoutes(app: FastifyInstance) {
     }
   });
 
+  app.delete('/logs/day-conclusion/:date', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as any).user;
+    const { date } = req.params as { date: string };
+
+    try {
+      await pool.query(
+        `DELETE FROM day_conclusions WHERE user_id = $1 AND date = $2`,
+        [user.userId, date]
+      );
+      return reply.send({ success: true });
+    } catch (e: any) {
+      req.log.error({ error: 'Day conclusion delete failed', e });
+      return reply.status(500).send({ error: 'Failed to delete day conclusion' });
+    }
+  });
+
   // Get current streak count from database
   app.get('/logs/streak-count', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as any).user;
