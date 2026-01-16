@@ -409,113 +409,114 @@ for (let i = 1; i <= days; i += BATCH_SIZE) {
       }
     }
   }
+}
 
-  parsedPlan.varietyMode = varietyMode;
-  parsedPlan.name = parsedPlan.name || `${profile?.primaryGoal || 'Nutrition'} Plan`;
+parsedPlan.varietyMode = varietyMode;
+parsedPlan.name = parsedPlan.name || `${profile?.primaryGoal || 'Nutrition'} Plan`;
 
-  // --- BACKGROUND ASSET GENERATION TRIGGER ---
-  try {
-    for (const day of parsedPlan.days) {
-      if (day.meals) {
-        for (const meal of day.meals) {
-          if (meal.recipe && meal.recipe.name) {
-            jobProcessor.submitJob(profile.userId || 'system', 'MEAL_GENERATION', {
-              name: meal.recipe.name,
-              instructions: meal.recipe.instructions,
-              ingredients: meal.recipe.ingredients
-            }).catch(() => { });
-          }
+// --- BACKGROUND ASSET GENERATION TRIGGER ---
+try {
+  for (const day of parsedPlan.days) {
+    if (day.meals) {
+      for (const meal of day.meals) {
+        if (meal.recipe && meal.recipe.name) {
+          jobProcessor.submitJob(profile.userId || 'system', 'MEAL_GENERATION', {
+            name: meal.recipe.name,
+            instructions: meal.recipe.instructions,
+            ingredients: meal.recipe.ingredients
+          }).catch(() => { });
         }
       }
     }
-  } catch (e) {
-    process.stderr.write(`[NutritionService] Asset job trigger failed: ${e}\n`);
   }
+} catch (e) {
+  process.stderr.write(`[NutritionService] Asset job trigger failed: ${e}\n`);
+}
 
-  // --- BACKGROUND PRE-TRANSLATION ---
-  // Trigger translation into all supported languages in the background
-  try {
-    if (parsedPlan.name) translationService.preTranslate(parsedPlan.name, 'meal_plan_name');
-    if (parsedPlan.overview) translationService.preTranslate(parsedPlan.overview, 'meal_plan_overview');
+// --- BACKGROUND PRE-TRANSLATION ---
+// Trigger translation into all supported languages in the background
+try {
+  if (parsedPlan.name) translationService.preTranslate(parsedPlan.name, 'meal_plan_name');
+  if (parsedPlan.overview) translationService.preTranslate(parsedPlan.overview, 'meal_plan_overview');
 
-    for (const day of parsedPlan.days) {
-      if (Array.isArray(day.meals)) {
-        for (const meal of day.meals) {
-          if (meal.recipe) {
-            if (meal.recipe.name) translationService.preTranslate(meal.recipe.name, 'meal_name');
-            if (Array.isArray(meal.recipe.ingredients)) translationService.preTranslate(meal.recipe.ingredients, 'meal_ingredient');
+  for (const day of parsedPlan.days) {
+    if (Array.isArray(day.meals)) {
+      for (const meal of day.meals) {
+        if (meal.recipe) {
+          if (meal.recipe.name) translationService.preTranslate(meal.recipe.name, 'meal_name');
+          if (Array.isArray(meal.recipe.ingredients)) translationService.preTranslate(meal.recipe.ingredients, 'meal_ingredient');
 
-            if (Array.isArray(meal.recipe.instructions)) {
-              const simpleInst = meal.recipe.instructions.map(i => i.simple).filter(Boolean);
-              const detailedInst = meal.recipe.instructions.map(i => i.detailed).filter(Boolean);
-              translationService.preTranslate(simpleInst, 'meal_instruction_simple');
-              translationService.preTranslate(detailedInst, 'meal_instruction_detailed');
-            }
-
-            if (Array.isArray(meal.recipe.nutritionTips)) {
-              translationService.preTranslate(meal.recipe.nutritionTips, 'nutrition_tip');
-            }
+          if (Array.isArray(meal.recipe.instructions)) {
+            const simpleInst = meal.recipe.instructions.map(i => i.simple).filter(Boolean);
+            const detailedInst = meal.recipe.instructions.map(i => i.detailed).filter(Boolean);
+            translationService.preTranslate(simpleInst, 'meal_instruction_simple');
+            translationService.preTranslate(detailedInst, 'meal_instruction_detailed');
           }
-          if (meal.macronutrientFocus) translationService.preTranslate(meal.macronutrientFocus, 'macronutrient_focus');
+
+          if (Array.isArray(meal.recipe.nutritionTips)) {
+            translationService.preTranslate(meal.recipe.nutritionTips, 'nutrition_tip');
+          }
         }
+        if (meal.macronutrientFocus) translationService.preTranslate(meal.macronutrientFocus, 'macronutrient_focus');
       }
     }
-  } catch (e) {
-    process.stderr.write(`[NutritionService] Pre-translation trigger failed: ${e}\n`);
+  }
+} catch (e) {
+  process.stderr.write(`[NutritionService] Pre-translation trigger failed: ${e}\n`);
+}
+
+// --- LOCALIZATION & CACHING LAYER ---
+if (lang && lang !== 'en') {
+  // 1. Translate Top Level Attributes
+  if (parsedPlan.name) {
+    parsedPlan.name = await translationService.translateText(parsedPlan.name, lang, 'meal_plan_name');
+  }
+  if (parsedPlan.overview) {
+    parsedPlan.overview = await translationService.translateText(parsedPlan.overview, lang, 'meal_plan_overview');
   }
 
-  // --- LOCALIZATION & CACHING LAYER ---
-  if (lang && lang !== 'en') {
-    // 1. Translate Top Level Attributes
-    if (parsedPlan.name) {
-      parsedPlan.name = await translationService.translateText(parsedPlan.name, lang, 'meal_plan_name');
-    }
-    if (parsedPlan.overview) {
-      parsedPlan.overview = await translationService.translateText(parsedPlan.overview, lang, 'meal_plan_overview');
-    }
+  // 2. Translate Days and Meals
+  for (const day of parsedPlan.days) {
+    if (Array.isArray(day.meals)) {
+      for (const meal of day.meals) {
+        if (meal.recipe) {
+          // Translate Meal Name
+          if (meal.recipe.name) {
+            meal.recipe.name = await translationService.translateText(meal.recipe.name, lang, 'meal_name');
+          }
 
-    // 2. Translate Days and Meals
-    for (const day of parsedPlan.days) {
-      if (Array.isArray(day.meals)) {
-        for (const meal of day.meals) {
-          if (meal.recipe) {
-            // Translate Meal Name
-            if (meal.recipe.name) {
-              meal.recipe.name = await translationService.translateText(meal.recipe.name, lang, 'meal_name');
-            }
+          // Translate Ingredients
+          if (Array.isArray(meal.recipe.ingredients)) {
+            meal.recipe.ingredients = await translationService.translateList(meal.recipe.ingredients, lang, 'meal_ingredient');
+          }
 
-            // Translate Ingredients
-            if (Array.isArray(meal.recipe.ingredients)) {
-              meal.recipe.ingredients = await translationService.translateList(meal.recipe.ingredients, lang, 'meal_ingredient');
-            }
-
-            // Translate Instructions
-            if (Array.isArray(meal.recipe.instructions)) {
-              for (const inst of meal.recipe.instructions) {
-                if (inst.simple) {
-                  inst.simple = await translationService.translateText(inst.simple, lang, 'meal_instruction_simple');
-                }
-                if (inst.detailed) {
-                  inst.detailed = await translationService.translateText(inst.detailed, lang, 'meal_instruction_detailed');
-                }
+          // Translate Instructions
+          if (Array.isArray(meal.recipe.instructions)) {
+            for (const inst of meal.recipe.instructions) {
+              if (inst.simple) {
+                inst.simple = await translationService.translateText(inst.simple, lang, 'meal_instruction_simple');
+              }
+              if (inst.detailed) {
+                inst.detailed = await translationService.translateText(inst.detailed, lang, 'meal_instruction_detailed');
               }
             }
-
-            // Translate Nutrition Tips
-            if (Array.isArray(meal.recipe.nutritionTips)) {
-              meal.recipe.nutritionTips = await translationService.translateList(meal.recipe.nutritionTips, lang, 'nutrition_tip');
-            }
           }
 
-          if (meal.macronutrientFocus) {
-            meal.macronutrientFocus = await translationService.translateText(meal.macronutrientFocus, lang, 'macronutrient_focus');
+          // Translate Nutrition Tips
+          if (Array.isArray(meal.recipe.nutritionTips)) {
+            meal.recipe.nutritionTips = await translationService.translateList(meal.recipe.nutritionTips, lang, 'nutrition_tip');
           }
+        }
+
+        if (meal.macronutrientFocus) {
+          meal.macronutrientFocus = await translationService.translateText(meal.macronutrientFocus, lang, 'macronutrient_focus');
         }
       }
     }
   }
+}
 
-  return parsedPlan as MealPlan;
+return parsedPlan as MealPlan;
 }
 
 
