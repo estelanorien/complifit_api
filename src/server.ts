@@ -27,24 +27,23 @@ async function main() {
 
   // Ensure all plugins are ready before listening
   try {
-    console.log('[STARTUP] Waiting for Fastify plugins to load...');
+    app.log.info('[STARTUP] Waiting for Fastify plugins to load...');
     await app.ready();
-    console.log('[STARTUP] Fastify plugins loaded successfully');
+    app.log.info('[STARTUP] Fastify plugins loaded successfully');
 
     // Start Background Workers
     jobProcessor.start();
   } catch (err) {
-    console.error('[STARTUP] Failed to load Fastify plugins:', err);
+    app.log.error(err, '[STARTUP] Failed to load Fastify plugins');
     process.exit(1);
   }
 
   // Start server to satisfy Cloud Run startup probe
   try {
     await app.listen({ port: env.port, host: '0.0.0.0' });
-    console.log(`[STARTUP] API running on port ${env.port}`);
-    app.log.info(`API running on port ${env.port}`);
+    app.log.info(`[STARTUP] API running on port ${env.port}`);
   } catch (err) {
-    console.error('[STARTUP] Failed to start server:', err);
+    app.log.error(err, '[STARTUP] Failed to start server');
     process.exit(1);
   }
 

@@ -4,6 +4,7 @@ import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
 import { RehabPlan, generateRehabPlan } from '../../../application/services/rehabService.js';
 import { saveTrainingProgram } from './_utils/saveTrainingPlan.js';
+import { TrainingPlanSchema } from '../schemas/plans.js';
 
 export async function rehabRoutes(app: FastifyInstance) {
   const generateSchema = z.object({
@@ -30,7 +31,7 @@ export async function rehabRoutes(app: FastifyInstance) {
   });
 
   const applySchema = z.object({
-    plan: z.any(),
+    plan: TrainingPlanSchema,
     startDate: z.string().optional()
   });
 

@@ -1,5 +1,6 @@
 import { AiService } from './aiService.js';
 import { pool } from '../../infra/db/pool.js';
+import { logger } from '../../infra/logger.js';
 import { TranslationService, translationService } from './translationService.js';
 import { jobProcessor } from './jobProcessor.js';
 
@@ -263,7 +264,6 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
       const validation = validateBatch(parsed);
 
       if (!validation.isValid) {
-        console.warn(`[NutritionService] Batch validation failed. Issues: ${validation.issues.join(', ')}`);
         throw new Error(`Validation Failed: ${validation.issues.join('; ')}`);
       }
 
@@ -310,11 +310,11 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
           chunkSuccess = true;
         }
       } catch (e: any) {
-        console.error(`[NutritionService] Batch (Day ${i}) Attempt ${attempts} failed: ${e.message}`);
+        logger.error(`[NutritionService] Batch (Day ${i}) Attempt ${attempts} failed`, e, { day: i, attempts, maxRetries: MAX_RETRIES });
         if (attempts === MAX_RETRIES) {
           // If we ran out of retries, we might have to accept a partial/broken result OR fail hard.
           // Failing hard is safer than showing broken data.
-          console.error('[NutritionService] CRITICAL: Max retries reached for batch generation.');
+          logger.error('[NutritionService] CRITICAL: Max retries reached for batch generation.', undefined, { day: i, attempts, maxRetries: MAX_RETRIES });
           // Optional: fallback to manual "simple" recipe or just throw
           // For now, let's throw to allow the outer handler to deal with it (or user gets an error)
           // But wait, user wants "automatic" fix.

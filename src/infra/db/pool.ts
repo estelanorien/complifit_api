@@ -21,8 +21,10 @@ export const pool = new Pool({
   query_timeout: 30000, // ✅ YENİ: 30 saniye query timeout
 
   // SSL configuration
-  ssl: env.nodeEnv === 'production' || env.databaseUrl.includes('104.199')
-    ? { rejectUnauthorized: false }
+  // In production, SSL should be enabled with proper certificate validation
+  // Set DB_SSL_REJECT_UNAUTHORIZED=false only if using self-signed certs or Cloud SQL proxy
+  ssl: env.nodeEnv === 'production' || env.databaseUrl.includes('104.199') || env.databaseUrl.includes('cloudsql')
+    ? { rejectUnauthorized: env.dbSslRejectUnauthorized }
     : undefined,
 
   // Keep alive settings

@@ -1,4 +1,5 @@
 import { pool } from '../../infra/db/pool.js';
+import { logger } from '../../infra/logger.js';
 
 export class PlanService {
     /**
@@ -64,7 +65,7 @@ export class PlanService {
             }
             return null;
         } catch (e) {
-            console.error(`[PlanService] Error checking existing recipe for ${mealName}:`, e);
+            logger.error(`[PlanService] Error checking existing recipe for ${mealName}`, e as Error);
             return null;
         }
     }

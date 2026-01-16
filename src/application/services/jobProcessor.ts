@@ -1,6 +1,7 @@
 import { pool } from '../../infra/db/pool.js';
 import { AiService } from './aiService.js';
 import { translationService } from './translationService.js';
+import { logger } from '../../infra/logger.js';
 
 const aiService = new AiService();
 
@@ -25,12 +26,12 @@ export class JobProcessor {
     private POLLING_INTERVAL = 3000; // 3 seconds
 
     constructor() {
-        console.log('[JobProcessor] Initialized');
+        logger.info('[JobProcessor] Initialized');
     }
 
     start() {
         if (this.intervalId) return;
-        console.log('[JobProcessor] Starting poller...');
+        logger.info('[JobProcessor] Starting poller...');
         this.intervalId = setInterval(() => this.processNextJob(), this.POLLING_INTERVAL);
     }
 
@@ -59,7 +60,7 @@ export class JobProcessor {
                 [jobKey]
             );
             if (existing.length > 0) {
-                console.log(`[JobProcessor] Dedup: Found existing job ${existing[0].id} for key ${jobKey}`);
+                logger.info(`[JobProcessor] Dedup: Found existing job ${existing[0].id} for key ${jobKey}`);
                 return { jobId: existing[0].id, isNew: false };
             }
         }
@@ -73,7 +74,7 @@ export class JobProcessor {
             [userId, type, payload, priority, jobKey || null, expiresAt]
         );
 
-        console.log(`[JobProcessor] Created job ${rows[0].id} (type=${type}, priority=${priority}, key=${jobKey || 'none'})`);
+        logger.info(`[JobProcessor] Created job ${rows[0].id}`, { type, priority, key: jobKey || 'none' });
 
         // Trigger immediate processing
         setImmediate(() => this.processNextJob());
@@ -124,7 +125,7 @@ export class JobProcessor {
                 }
 
                 const job = rows[0];
-                console.log(`[JobProcessor] Picked up job ${job.id} (${job.type})`);
+                logger.info(`[JobProcessor] Picked up job ${job.id}`, { jobType: job.type });
 
                 // Mark as PROCESSING with started_at for heartbeat timeout
                 await client.query(
@@ -145,10 +146,10 @@ export class JobProcessor {
                         `UPDATE generation_jobs SET status = 'COMPLETED', result = $1, updated_at = now() WHERE id = $2`,
                         [JSON.stringify(result), job.id]
                     );
-                    console.log(`[JobProcessor] Job ${job.id} COMPLETED`);
+                    logger.info(`[JobProcessor] Job ${job.id} COMPLETED`);
 
                 } catch (err: any) {
-                    console.error(`[JobProcessor] Job ${job.id} FAILED:`, err);
+                    logger.error(`[JobProcessor] Job ${job.id} FAILED`, err, { jobId: job.id, jobType: job.type });
                     await pool.query(
                         `UPDATE generation_jobs SET status = 'FAILED', error = $1, updated_at = now() WHERE id = $2`,
                         [err.message || String(err), job.id]
@@ -157,13 +158,13 @@ export class JobProcessor {
 
             } catch (err) {
                 await client.query('ROLLBACK');
-                console.error('[JobProcessor] Error in transaction:', err);
+                logger.error('[JobProcessor] Error in transaction', err as Error);
             } finally {
                 client.release();
             }
 
         } catch (e) {
-            console.error('[JobProcessor] Polling error:', e);
+            logger.error('[JobProcessor] Polling error', e as Error);
         } finally {
             this.processing = false;
         }
@@ -234,11 +235,11 @@ export class JobProcessor {
         const primaryRef = await this.getAsset(primaryCoach.refKey);
         const secondaryRef = await this.getAsset(secondaryCoach.refKey);
 
-        if (primaryRef) console.log(`[JobProcessor] Using reference image for ${primaryId}`);
-        if (secondaryRef) console.log(`[JobProcessor] Using reference image for ${secondaryId}`);
+        if (primaryRef) logger.debug(`[JobProcessor] Using reference image for ${primaryId}`);
+        if (secondaryRef) logger.debug(`[JobProcessor] Using reference image for ${secondaryId}`);
 
         // --- 1. GENERATE PRIMARY MAIN ---
-        console.log(`[JobProcessor] Generating PRIMARY MAIN (${primaryId}) for ${name}`);
+        logger.info(`[JobProcessor] Generating PRIMARY MAIN (${primaryId}) for ${name}`);
         const primaryPrompt = `Portrait of ${primaryCoach.description} performing ${name} exercise. Proper form, gym setting. ${VITALITY_IMAGE_STYLE}. Action shot, dynamic angle. STRICTLY NO TEXT OR LABELS.`;
 
         try {
@@ -255,7 +256,7 @@ export class JobProcessor {
             translationService.preTranslate([name, ...(instructions || [])], 'exercise');
 
             // --- 2. GENERATE SECONDARY MAIN ---
-            console.log(`[JobProcessor] Generating SECONDARY MAIN (${secondaryId}) for ${name}`);
+            logger.info(`[JobProcessor] Generating SECONDARY MAIN (${secondaryId}) for ${name}`);
             const secondaryPrompt = `Portrait of ${secondaryCoach.description} performing ${name} exercise. Proper form, gym setting. ${VITALITY_IMAGE_STYLE}. Action shot, dynamic angle. STRICTLY NO TEXT OR LABELS.`;
 
             let secondaryMainImage: string | undefined;
@@ -269,12 +270,12 @@ export class JobProcessor {
                     await this.saveAsset(`${baseKey}_${secondaryId}`, secondaryMainImage, { prompt: secondaryPrompt, source: 'exercise-job-secondary', persona: secondaryId, movementId: baseKey });
                 }
             } catch (e) {
-                console.error(`[JobProcessor] SECONDARY MAIN generation failed for ${name}`, e);
+                logger.error(`[JobProcessor] SECONDARY MAIN generation failed for ${name}`, e as Error);
             }
 
             // --- 3. GENERATE STEP IMAGES (Both Personas) ---
             if (Array.isArray(instructions) && instructions.length > 0) {
-                console.log(`[JobProcessor] Generating ${instructions.length} STEPS for ${name} (Both personas)`);
+                logger.info(`[JobProcessor] Generating ${instructions.length} STEPS for ${name} (Both personas)`);
 
                 for (let i = 0; i < instructions.length; i++) {
                     const step = instructions[i];
@@ -297,7 +298,7 @@ export class JobProcessor {
                             await this.saveAsset(`${baseKey}_step_${stepIndex}_${contentHash}`, pStepImg, { prompt: pStepPrompt, source: 'exercise-job-step', persona: primaryId, step: stepIndex, movementId: baseKey });
                         }
                     } catch (e) {
-                        console.error(`[JobProcessor] Primary step ${stepIndex} failed for ${name}`, e);
+                        logger.error(`[JobProcessor] Primary step ${stepIndex} failed for ${name}`, e as Error);
                     }
 
                     // B. Secondary Step
@@ -314,7 +315,7 @@ export class JobProcessor {
                                 await this.saveAsset(sStepKey, sStepImg, { prompt: sStepPrompt, source: 'exercise-job-step', persona: secondaryId, step: stepIndex, movementId: baseKey });
                             }
                         } catch (e) {
-                            console.error(`[JobProcessor] Secondary step ${stepIndex} failed for ${name}`, e);
+                            logger.error(`[JobProcessor] Secondary step ${stepIndex} failed for ${name}`, e as Error);
                         }
                     }
                 }
@@ -323,7 +324,7 @@ export class JobProcessor {
             return { assetUrl: primaryImage };
 
         } catch (e: any) {
-            console.error(`[JobProcessor] handleExerciseGeneration failed:`, e);
+            logger.error(`[JobProcessor] handleExerciseGeneration failed`, e);
             throw e;
         }
     }
@@ -339,7 +340,7 @@ export class JobProcessor {
             }
             return null;
         } catch (e) {
-            console.error(`[JobProcessor] Failed to fetch asset ${key}:`, e);
+            logger.error(`[JobProcessor] Failed to fetch asset ${key}`, e as Error);
             return null;
         }
     }
@@ -352,7 +353,7 @@ export class JobProcessor {
         const ingredientText = Array.isArray(ingredients) ? ingredients.join(', ') : '';
 
         // --- 1. GENERATE MAIN ---
-        console.log(`[JobProcessor] Generating MAIN image for meal: ${name}`);
+        logger.info(`[JobProcessor] Generating MAIN image for meal: ${name}`);
         const mainPrompt = `Professional food photography of ${name}. Ingredients visible: ${ingredientText}. centered composition, steam rising, delicious texture, gourmet plating, dramatic side lighting, 8k resolution. STRICTLY NO TEXT, NO LABELS, NO RECIPES WRITTEN.`;
 
         try {
@@ -373,7 +374,7 @@ export class JobProcessor {
 
             // --- 2. GENERATE STEPS ---
             if (Array.isArray(instructions) && instructions.length > 0) {
-                console.log(`[JobProcessor] Generating ${instructions.length} steps for meal: ${name}`);
+                logger.info(`[JobProcessor] Generating ${instructions.length} steps for meal: ${name}`);
                 for (let i = 0; i < instructions.length; i++) {
                     const step = instructions[i];
                     const stepIndex = i; // MealItem uses 0-indexed for recipes
@@ -392,7 +393,7 @@ export class JobProcessor {
                             await this.saveAsset(stepKey, stepImg, { prompt: stepPrompt, source: 'meal-job-step', step: stepIndex, movementId: baseKey });
                         }
                     } catch (e) {
-                        console.error(`[JobProcessor] Meal step ${stepIndex} failed for ${name}`, e);
+                        logger.error(`[JobProcessor] Meal step ${stepIndex} failed for ${name}`, e as Error);
                     }
                 }
             }
@@ -400,14 +401,14 @@ export class JobProcessor {
             return { assetUrl: mainImage };
 
         } catch (e: any) {
-            console.error(`[JobProcessor] handleMealGeneration failed:`, e);
+            logger.error(`[JobProcessor] handleMealGeneration failed`, e);
             throw e;
         }
     }
 
     private async handleContentUpgrade(payload: any): Promise<any> {
         const { type, name, currentSteps = 0 } = payload;
-        console.log(`[JobProcessor] PROACTIVE UPGRADE: Upgrading ${type} "${name}" (Current steps: ${currentSteps})`);
+        logger.info(`[JobProcessor] PROACTIVE UPGRADE: Upgrading ${type} "${name}"`, { currentSteps });
 
         const prompt = type === 'MEAL'
             ? `Upgrade this recipe into a "Golden Standard" recipe. Provide 8-10 high-quality, detailed instruction steps. Recipe: "${name}". Return JSON with "instructions" array (objects with "simple" and "detailed" strings).`
@@ -418,7 +419,7 @@ export class JobProcessor {
             const data = typeof response === 'string' ? JSON.parse(response.replace(/```json|```/g, '')) : response;
 
             if (data && data.instructions && data.instructions.length >= 7) {
-                console.log(`[JobProcessor] UPGRADE SUCCESS: ${name} now has ${data.instructions.length} steps.`);
+                logger.info(`[JobProcessor] UPGRADE SUCCESS: ${name} now has ${data.instructions.length} steps.`);
 
                 if (type === 'MEAL') {
                     await pool.query(
@@ -447,7 +448,7 @@ export class JobProcessor {
             }
             return { success: true };
         } catch (e) {
-            console.error(`[JobProcessor] Content Upgrade failed for ${name}:`, e);
+            logger.error(`[JobProcessor] Content Upgrade failed for ${name}`, e as Error);
             throw e;
         }
     }
@@ -490,7 +491,7 @@ export class JobProcessor {
                 ]
             );
         } catch (e) {
-            console.error(`[JobProcessor] Failed to save asset ${key}:`, e);
+            logger.error(`[JobProcessor] Failed to save asset ${key}`, e as Error);
         }
     }
 }

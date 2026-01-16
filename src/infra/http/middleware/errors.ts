@@ -202,11 +202,14 @@ export async function errorHandler(
     });
   }
 
-  // Unknown errors - always expose message for debugging in this phase
+  // Unknown errors - in production, don't expose internal error details
   return reply.status(500).send({
-    error: error.message || 'Unknown error occurred',
+    error: isProduction ? 'An internal server error occurred. Please try again later.' : (error.message || 'Unknown error occurred'),
     requestId,
-    ...(isProduction ? {} : { stack: error.stack }),
+    ...(isProduction ? {} : { 
+      stack: error.stack,
+      details: error.message 
+    }),
   });
 }
 

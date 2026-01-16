@@ -2,6 +2,7 @@ import { pool } from '../../infra/db/pool.js';
 import { AiService } from './aiService.js';
 import { translationService } from './translationService.js';
 import { jobProcessor } from './jobProcessor.js';
+import { logger } from '../../infra/logger.js';
 
 const aiService = new AiService();
 
@@ -213,7 +214,6 @@ export async function generateTrainingPlan(params: GenerateTrainingPlanParams): 
       const validation = validatePlan(parsedPlan);
 
       if (!validation.isValid) {
-        console.warn(`[TrainingService] Validation failed (Attempt ${attempts}): ${validation.issues.join(', ')}`);
         throw new Error(`Validation issues: ${validation.issues.join('; ')}`);
       }
 
@@ -223,9 +223,9 @@ export async function generateTrainingPlan(params: GenerateTrainingPlanParams): 
 
       success = true;
     } catch (e: any) {
-      console.error(`[TrainingService] Generation attempt ${attempts} failed: ${e.message}`);
+      logger.error(`[TrainingService] Generation attempt ${attempts} failed`, e, { attempts, maxRetries: MAX_RETRIES });
       if (attempts === MAX_RETRIES) {
-        console.error('[TrainingService] CRITICAL: Max retries reached.');
+        logger.error('[TrainingService] CRITICAL: Max retries reached.', undefined, { attempts, maxRetries: MAX_RETRIES });
         throw e;
       }
     }
