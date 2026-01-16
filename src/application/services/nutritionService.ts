@@ -185,25 +185,25 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
     You MUST include a "nutritionTips" array for EVERY meal. 
     These should be "Chef's Science Tips" explaining WHY specific ingredients/methods maximize health (e.g., "Pairing black pepper with turmeric increases curcumin absorption by 2000%").
     This is required for the "Nutrient Science" UI card.`);
-  }
 
-  // Safety Protocol (BMR & Extremes)
-  const weight = profileSummary.weight || 70;
-  const height = profileSummary.height || 170;
-  const age = profileSummary.age || 30;
-  const gender = profileSummary.gender || 'male';
 
-  // Mifflin-St Jeor Equation
-  let bmr = 10 * weight + 6.25 * height - 5 * age;
-  bmr += (gender === 'male' ? 5 : -161);
-  const minSafeCalories = Math.max(1200, Math.round(bmr));
+    // Safety Protocol (BMR & Extremes)
+    const weight = profileSummary.weight || 70;
+    const height = profileSummary.height || 170;
+    const age = profileSummary.age || 30;
+    const gender = profileSummary.gender || 'male';
 
-  promptSections.push(`SAFETY PROTOCOL (CRITICAL):
+    // Mifflin-St Jeor Equation
+    let bmr = 10 * weight + 6.25 * height - 5 * age;
+    bmr += (gender === 'male' ? 5 : -161);
+    const minSafeCalories = Math.max(1200, Math.round(bmr));
+
+    promptSections.push(`SAFETY PROTOCOL (CRITICAL):
     1. MINIMUM CALORIES: Do not prescribe less than ${minSafeCalories} kcal/day unless explicitly medically supervised (not the case here).
     2. EXTREME DEFICITS: Avoid reckless caloric cuts. Ensure sustainability.
     3. NUTRIENT DENSITY: Ensure micronutrient needs are met even in deficit.`);
 
-  promptSections.push(`
+    promptSections.push(`
     STYLE GUIDE (STRICT ENFORCEMENT):
     1. TONE: Professional chef meets nutritionist. Encouraging but precise.
     2. DETAIL LEVEL: "detailed" steps must be 2-3 sentences long. Include sensory details (smell, texture) and technique tips.
@@ -253,73 +253,76 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
     - NEVER use single-step instructions or placeholders.
     `);
 
-  const { text } = await aiService.generateText({
-    prompt: promptSections.join('\n'),
-    model: 'models/gemini-2.0-flash'
-  });
+    const { text } = await aiService.generateText({
+      prompt: promptSections.join('\n'),
+      model: 'models/gemini-2.0-flash'
+    });
 
-  try {
-    const parsed = JSON.parse(cleanGeminiJson(text) || '{}');
-    const validation = validateBatch(parsed);
-
-    if (!validation.isValid) {
-      console.warn(`[NutritionService] Batch validation failed. Issues: ${validation.issues.join(', ')}`);
-      throw new Error(`Validation Failed: ${validation.issues.join('; ')}`);
-    }
-
-    return parsed;
-  } catch (e: any) {
-    throw new Error(`Parse/Validation Error: ${e.message}`);
-  }
-};
-
-// Main Execution Loop
-let finalDays: MealPlanDay[] = [];
-let planName = "";
-let planOverview = "";
-
-for (let i = 1; i <= days; i += BATCH_SIZE) {
-  const remaining = days - i + 1;
-  const currentChunkSize = Math.min(remaining, BATCH_SIZE);
-
-  // RETRY LOOP FOR THIS BATCH
-  let attempts = 0;
-  const MAX_RETRIES = 3;
-  let chunkSuccess = false;
-
-  while (attempts < MAX_RETRIES && !chunkSuccess) {
-    attempts++;
     try {
-      // Pass the previous chunk as "previousPlan" for continuity if not the first chunk
-      const prevContext = i > 1 ? { days: finalDays } : previousPlan;
+      const parsed = JSON.parse(cleanGeminiJson(text) || '{}');
+      const validation = validateBatch(parsed);
 
-      // If retrying, append error context to prompt?
-      // The generateBatch helper re-builds prompt every time.
-      // We might need to modify generateBatch to accept "lastError" but that complicates the closure.
-      // Since the AI is non-deterministic (temperature), just retrying simply works effectively most times.
-
-      const chunk = await generateBatch(i, currentChunkSize, prevContext);
-
-      if (i === 1) {
-        planName = chunk.name || `Nutrition Plan (${days} Days)`;
-        planOverview = chunk.overview || "";
+      if (!validation.isValid) {
+        console.warn(`[NutritionService] Batch validation failed. Issues: ${validation.issues.join(', ')}`);
+        throw new Error(`Validation Failed: ${validation.issues.join('; ')}`);
       }
 
-      if (chunk.days) {
-        finalDays = [...finalDays, ...chunk.days];
-        chunkSuccess = true;
-      }
+      return parsed;
     } catch (e: any) {
-      console.error(`[NutritionService] Batch (Day ${i}) Attempt ${attempts} failed: ${e.message}`);
-      if (attempts === MAX_RETRIES) {
-        // If we ran out of retries, we might have to accept a partial/broken result OR fail hard.
-        // Failing hard is safer than showing broken data.
-        console.error('[NutritionService] CRITICAL: Max retries reached for batch generation.');
-        // Optional: fallback to manual "simple" recipe or just throw
-        // For now, let's throw to allow the outer handler to deal with it (or user gets an error)
-        // But wait, user wants "automatic" fix.
+      throw new Error(`Parse/Validation Error: ${e.message}`);
+    }
+  };
+
+  // Main Execution Loop
+  let finalDays: MealPlanDay[] = [];
+  let planName = "";
+  let planOverview = "";
+
+  for (let i = 1; i <= days; i += BATCH_SIZE) {
+    const remaining = days - i + 1;
+    const currentChunkSize = Math.min(remaining, BATCH_SIZE);
+
+    // RETRY LOOP FOR THIS BATCH
+    let attempts = 0;
+    const MAX_RETRIES = 3;
+    let chunkSuccess = false;
+
+    while (attempts < MAX_RETRIES && !chunkSuccess) {
+      attempts++;
+      try {
+        // Pass the previous chunk as "previousPlan" for continuity if not the first chunk
+        const prevContext = i > 1 ? { days: finalDays } : previousPlan;
+
+        // If retrying, append error context to prompt?
+        // The generateBatch helper re-builds prompt every time.
+        // We might need to modify generateBatch to accept "lastError" but that complicates the closure.
+        // Since the AI is non-deterministic (temperature), just retrying simply works effectively most times.
+
+        const chunk = await generateBatch(i, currentChunkSize, prevContext);
+
+        if (i === 1) {
+          planName = chunk.name || `Nutrition Plan (${days} Days)`;
+          planOverview = chunk.overview || "";
+        }
+
+        if (chunk.days) {
+          finalDays = [...finalDays, ...chunk.days];
+          chunkSuccess = true;
+        }
+      } catch (e: any) {
+        console.error(`[NutritionService] Batch (Day ${i}) Attempt ${attempts} failed: ${e.message}`);
+        if (attempts === MAX_RETRIES) {
+          // If we ran out of retries, we might have to accept a partial/broken result OR fail hard.
+          // Failing hard is safer than showing broken data.
+          console.error('[NutritionService] CRITICAL: Max retries reached for batch generation.');
+          // Optional: fallback to manual "simple" recipe or just throw
+          // For now, let's throw to allow the outer handler to deal with it (or user gets an error)
+          // But wait, user wants "automatic" fix.
+        }
       }
     }
+
+    // CLOSE MAIN LOOP HERE
   }
 
   // Construct Final Plan
@@ -408,115 +411,118 @@ for (let i = 1; i <= days; i += BATCH_SIZE) {
         }
       }
     }
-  }
-}
 
-parsedPlan.varietyMode = varietyMode;
-parsedPlan.name = parsedPlan.name || `${profile?.primaryGoal || 'Nutrition'} Plan`;
 
-// --- BACKGROUND ASSET GENERATION TRIGGER ---
-try {
-  for (const day of parsedPlan.days) {
-    if (day.meals) {
-      for (const meal of day.meals) {
-        if (meal.recipe && meal.recipe.name) {
-          jobProcessor.submitJob(profile.userId || 'system', 'MEAL_GENERATION', {
-            name: meal.recipe.name,
-            instructions: meal.recipe.instructions,
-            ingredients: meal.recipe.ingredients
-          }).catch(() => { });
-        }
-      }
-    }
-  }
-} catch (e) {
-  process.stderr.write(`[NutritionService] Asset job trigger failed: ${e}\n`);
-}
+    parsedPlan.varietyMode = varietyMode;
+    parsedPlan.name = parsedPlan.name || `${profile?.primaryGoal || 'Nutrition'} Plan`;
 
-// --- BACKGROUND PRE-TRANSLATION ---
-// Trigger translation into all supported languages in the background
-try {
-  if (parsedPlan.name) translationService.preTranslate(parsedPlan.name, 'meal_plan_name');
-  if (parsedPlan.overview) translationService.preTranslate(parsedPlan.overview, 'meal_plan_overview');
-
-  for (const day of parsedPlan.days) {
-    if (Array.isArray(day.meals)) {
-      for (const meal of day.meals) {
-        if (meal.recipe) {
-          if (meal.recipe.name) translationService.preTranslate(meal.recipe.name, 'meal_name');
-          if (Array.isArray(meal.recipe.ingredients)) translationService.preTranslate(meal.recipe.ingredients, 'meal_ingredient');
-
-          if (Array.isArray(meal.recipe.instructions)) {
-            const simpleInst = meal.recipe.instructions.map(i => i.simple).filter(Boolean);
-            const detailedInst = meal.recipe.instructions.map(i => i.detailed).filter(Boolean);
-            translationService.preTranslate(simpleInst, 'meal_instruction_simple');
-            translationService.preTranslate(detailedInst, 'meal_instruction_detailed');
-          }
-
-          if (Array.isArray(meal.recipe.nutritionTips)) {
-            translationService.preTranslate(meal.recipe.nutritionTips, 'nutrition_tip');
-          }
-        }
-        if (meal.macronutrientFocus) translationService.preTranslate(meal.macronutrientFocus, 'macronutrient_focus');
-      }
-    }
-  }
-} catch (e) {
-  process.stderr.write(`[NutritionService] Pre-translation trigger failed: ${e}\n`);
-}
-
-// --- LOCALIZATION & CACHING LAYER ---
-if (lang && lang !== 'en') {
-  // 1. Translate Top Level Attributes
-  if (parsedPlan.name) {
-    parsedPlan.name = await translationService.translateText(parsedPlan.name, lang, 'meal_plan_name');
-  }
-  if (parsedPlan.overview) {
-    parsedPlan.overview = await translationService.translateText(parsedPlan.overview, lang, 'meal_plan_overview');
-  }
-
-  // 2. Translate Days and Meals
-  for (const day of parsedPlan.days) {
-    if (Array.isArray(day.meals)) {
-      for (const meal of day.meals) {
-        if (meal.recipe) {
-          // Translate Meal Name
-          if (meal.recipe.name) {
-            meal.recipe.name = await translationService.translateText(meal.recipe.name, lang, 'meal_name');
-          }
-
-          // Translate Ingredients
-          if (Array.isArray(meal.recipe.ingredients)) {
-            meal.recipe.ingredients = await translationService.translateList(meal.recipe.ingredients, lang, 'meal_ingredient');
-          }
-
-          // Translate Instructions
-          if (Array.isArray(meal.recipe.instructions)) {
-            for (const inst of meal.recipe.instructions) {
-              if (inst.simple) {
-                inst.simple = await translationService.translateText(inst.simple, lang, 'meal_instruction_simple');
-              }
-              if (inst.detailed) {
-                inst.detailed = await translationService.translateText(inst.detailed, lang, 'meal_instruction_detailed');
-              }
+    // --- BACKGROUND ASSET GENERATION TRIGGER ---
+    try {
+      for (const day of parsedPlan.days) {
+        if (day.meals) {
+          for (const meal of day.meals) {
+            if (meal.recipe && meal.recipe.name) {
+              jobProcessor.submitJob(profile.userId || 'system', 'MEAL_GENERATION', {
+                name: meal.recipe.name,
+                instructions: meal.recipe.instructions,
+                ingredients: meal.recipe.ingredients
+              }).catch(() => { });
             }
           }
-
-          // Translate Nutrition Tips
-          if (Array.isArray(meal.recipe.nutritionTips)) {
-            meal.recipe.nutritionTips = await translationService.translateList(meal.recipe.nutritionTips, lang, 'nutrition_tip');
-          }
-        }
-
-        if (meal.macronutrientFocus) {
-          meal.macronutrientFocus = await translationService.translateText(meal.macronutrientFocus, lang, 'macronutrient_focus');
         }
       }
+    } catch (e) {
+      process.stderr.write(`[NutritionService] Asset job trigger failed: ${e}\n`);
     }
-  }
-}
 
-return parsedPlan as MealPlan;
+    // --- BACKGROUND PRE-TRANSLATION ---
+    // Trigger translation into all supported languages in the background
+    try {
+      if (parsedPlan.name) translationService.preTranslate(parsedPlan.name, 'meal_plan_name');
+      if (parsedPlan.overview) translationService.preTranslate(parsedPlan.overview, 'meal_plan_overview');
+
+      for (const day of parsedPlan.days) {
+        if (Array.isArray(day.meals)) {
+          for (const meal of day.meals) {
+            if (meal.recipe) {
+              if (meal.recipe.name) translationService.preTranslate(meal.recipe.name, 'meal_name');
+              if (Array.isArray(meal.recipe.ingredients)) translationService.preTranslate(meal.recipe.ingredients, 'meal_ingredient');
+
+              if (Array.isArray(meal.recipe.instructions)) {
+                const simpleInst = meal.recipe.instructions.map(i => i.simple).filter(Boolean);
+                const detailedInst = meal.recipe.instructions.map(i => i.detailed).filter(Boolean);
+                translationService.preTranslate(simpleInst, 'meal_instruction_simple');
+                translationService.preTranslate(detailedInst, 'meal_instruction_detailed');
+              }
+
+              if (Array.isArray(meal.recipe.nutritionTips)) {
+                translationService.preTranslate(meal.recipe.nutritionTips, 'nutrition_tip');
+              }
+            }
+            if (meal.macronutrientFocus) translationService.preTranslate(meal.macronutrientFocus, 'macronutrient_focus');
+          }
+        }
+      }
+    } catch (e) {
+      process.stderr.write(`[NutritionService] Pre-translation trigger failed: ${e}\n`);
+    }
+
+    // --- LOCALIZATION & CACHING LAYER ---
+    if (lang && lang !== 'en') {
+      // 1. Translate Top Level Attributes
+      if (parsedPlan.name) {
+        parsedPlan.name = await translationService.translateText(parsedPlan.name, lang, 'meal_plan_name');
+      }
+      if (parsedPlan.overview) {
+        parsedPlan.overview = await translationService.translateText(parsedPlan.overview, lang, 'meal_plan_overview');
+      }
+
+      // 2. Translate Days and Meals
+      for (const day of parsedPlan.days) {
+        if (Array.isArray(day.meals)) {
+          for (const meal of day.meals) {
+            if (meal.recipe) {
+              // Translate Meal Name
+              if (meal.recipe.name) {
+                meal.recipe.name = await translationService.translateText(meal.recipe.name, lang, 'meal_name');
+              }
+
+              // Translate Ingredients
+              if (Array.isArray(meal.recipe.ingredients)) {
+                meal.recipe.ingredients = await translationService.translateList(meal.recipe.ingredients, lang, 'meal_ingredient');
+              }
+
+              // Translate Instructions
+              if (Array.isArray(meal.recipe.instructions)) {
+                for (const inst of meal.recipe.instructions) {
+                  if (inst.simple) {
+                    inst.simple = await translationService.translateText(inst.simple, lang, 'meal_instruction_simple');
+                  }
+                  if (inst.detailed) {
+                    inst.detailed = await translationService.translateText(inst.detailed, lang, 'meal_instruction_detailed');
+                  }
+                }
+              }
+
+              // Translate Nutrition Tips
+              if (Array.isArray(meal.recipe.nutritionTips)) {
+                meal.recipe.nutritionTips = await translationService.translateList(meal.recipe.nutritionTips, lang, 'nutrition_tip');
+              }
+            }
+
+            if (meal.macronutrientFocus) {
+              meal.macronutrientFocus = await translationService.translateText(meal.macronutrientFocus, lang, 'macronutrient_focus');
+            }
+          }
+        }
+      }
+
+    }
+
+
+  }
+
+  return parsedPlan as MealPlan;
 }
 
 
