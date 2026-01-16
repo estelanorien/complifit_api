@@ -23,7 +23,7 @@ export class AiService {
     }
   }
 
-  async generateText({ prompt, model = 'models/gemini-2.0-flash', generationConfig }: GenerateTextParams & { generationConfig?: any }) {
+  async generateText({ prompt, model = 'models/gemini-2.0-flash-exp', generationConfig }: GenerateTextParams & { generationConfig?: any }) {
     const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
       method: 'POST',
       headers: {
@@ -93,7 +93,7 @@ Return ONLY the cleaned visual description in English. Do not include any explan
     }
   }
 
-  async generateImage({ prompt, model = 'models/gemini-2.0-flash-exp-nano', referenceImage }: GenerateImageParams) {
+  async generateImage({ prompt, model = 'models/gemini-2.0-flash-exp', referenceImage }: GenerateImageParams) {
     const parts: any[] = [];
 
     // Clean prompt to prevent text overlays
