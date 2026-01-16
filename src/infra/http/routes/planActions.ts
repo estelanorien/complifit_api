@@ -11,26 +11,28 @@ import {
     UserProfileSchema,
     PlanSettingsSchema,
     TrainingPlanSchema,
-    MealPlanSchema
+    MealPlanSchema,
+    CalculatedBiometricsSchema
 } from '../schemas/plans.js';
+import { AuthenticatedRequest } from '../types.js';
 
 export async function planActionsRoutes(app: FastifyInstance) {
     const aiService = new AiService();
 
     // Generate a complete Smart Plan (Training + Nutrition)
-    app.post('/plans/generate', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
-        const user = (req as any).user;
+    app.post('/plans/generate', { preHandler: authGuard }, withErrorHandler(async (req: AuthenticatedRequest, reply) => {
+        const user = req.user;
         const body = z.object({
             profile: UserProfileSchema,
             settings: PlanSettingsSchema,
             lang: z.string().default('en'),
             startDate: z.string().optional(),
-            calculatedBiometrics: z.any().optional()
+            calculatedBiometrics: CalculatedBiometricsSchema.optional()
         }).parse(req.body);
 
         // Explicit API key check
         if (!env.geminiApiKey) {
-            req.log.error({ error: 'GEMINI_API_KEY not configured', requestId: (req as any).requestId });
+            req.log.error({ error: 'GEMINI_API_KEY not configured', requestId: req.requestId });
             return reply.status(500).send({ error: 'GEMINI_API_KEY not configured on backend. Please contact support.' });
         }
 
@@ -193,7 +195,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 action: 'Starting AI generation',
                 durationDays,
                 trainingFrequency,
-                requestId: (req as any).requestId
+                requestId: req.requestId
             });
 
             [trainText, nutText] = await Promise.all([
@@ -205,7 +207,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 action: 'AI generation completed',
                 trainingTextLength: trainText?.text?.length || 0,
                 nutritionTextLength: nutText?.text?.length || 0,
-                requestId: (req as any).requestId
+                requestId: req.requestId
             });
         } catch (e: any) {
             req.log.error({
@@ -213,7 +215,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 message: e.message,
                 stack: e.stack,
                 name: e.name,
-                requestId: (req as any).requestId
+                requestId: req.requestId
             });
             throw new Error(`AI generation failed: ${e.message}. Please check GEMINI_API_KEY configuration.`);
         }
@@ -240,7 +242,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 parseError: e.message,
                 rawTextPreview: rawPreview,
                 rawTextLength: trainText.text?.length || 0,
-                requestId: (req as any).requestId
+                requestId: req.requestId
             });
             throw new Error(`Failed to parse training plan: ${e.message}. Raw response preview: ${rawPreview.substring(0, 200)}`);
         }
@@ -255,7 +257,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 parseError: e.message,
                 rawTextPreview: rawPreview,
                 rawTextLength: nutText.text?.length || 0,
-                requestId: (req as any).requestId
+                requestId: req.requestId
             });
             throw new Error(`Failed to parse nutrition plan: ${e.message}. Raw response preview: ${rawPreview.substring(0, 200)}`);
         }
@@ -267,7 +269,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 trainingPlanKeys: trainingPlan ? Object.keys(trainingPlan) : 'null',
                 scheduleType: Array.isArray(trainingPlan?.schedule) ? 'array' : typeof trainingPlan?.schedule,
                 scheduleLength: trainingPlan?.schedule?.length || 0,
-                requestId: (req as any).requestId
+                requestId: req.requestId
             });
             throw new Error(`Training plan validation failed: schedule is empty or invalid.`);
         }
@@ -278,7 +280,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 error: 'Training plan duration mismatch',
                 requested: durationDays,
                 received: trainingPlan.schedule.length,
-                requestId: (req as any).requestId
+                requestId: req.requestId
             });
             throw new Error(`AI generated an incomplete training plan (${trainingPlan.schedule.length}/${durationDays} days).`);
         }
@@ -289,7 +291,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 nutritionPlanKeys: nutritionPlan ? Object.keys(nutritionPlan) : 'null',
                 daysType: Array.isArray(nutritionPlan?.days) ? 'array' : typeof nutritionPlan?.days,
                 daysLength: nutritionPlan?.days?.length || 0,
-                requestId: (req as any).requestId
+                requestId: req.requestId
             });
             throw new Error(`Nutrition plan validation failed: days array is empty or missing.`);
         }
@@ -300,7 +302,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 error: 'Nutrition plan duration mismatch',
                 requested: durationDays,
                 received: nutritionPlan.days.length,
-                requestId: (req as any).requestId
+                requestId: req.requestId
             });
             throw new Error(`AI generated an incomplete nutrition plan (${nutritionPlan.days.length}/${durationDays} days).`);
         }
@@ -388,7 +390,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                         }
                     }
                 } catch (jobErr) {
-                    req.log.warn({ error: 'Failed to queue background jobs', jobErr, requestId: (req as any).requestId });
+                    req.log.warn({ error: 'Failed to queue background jobs', jobErr, requestId: req.requestId });
                 }
 
                 return reply.send({ training: trainingPlan, nutrition: nutritionPlan, trainingId, mealPlanId, archiveId });
@@ -398,7 +400,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                     error: 'Database save failed',
                     message: dbError.message,
                     code: dbError.code,
-                    requestId: (req as any).requestId
+                    requestId: req.requestId
                 });
 
                 // Provide user-friendly error messages
@@ -422,7 +424,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
 
     // Save an existing generated plan
     app.post('/plans/save-generated', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
-        const user = (req as any).user;
+        const user = req.user;
         const body = z.object({
             training: TrainingPlanSchema,
             nutrition: MealPlanSchema,
@@ -445,11 +447,11 @@ export async function planActionsRoutes(app: FastifyInstance) {
 
     // Reroll meal
     app.post('/plans/reroll/meal', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
-        const user = (req as any).user;
+        const user = req.user;
         const body = z.object({
             type: z.string(),
             targetCalories: z.number(),
-            profile: z.any(),
+            profile: UserProfileSchema,
             excludes: z.array(z.string()).default([]),
             additionalIngredients: z.string().optional(),
             lang: z.string().default('en'),
@@ -514,11 +516,11 @@ export async function planActionsRoutes(app: FastifyInstance) {
 
     // Reroll exercise
     app.post('/plans/reroll/exercise', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
-        const user = (req as any).user;
+        const user = req.user;
         const body = z.object({
             currentName: z.string(),
             focus: z.string(),
-            profile: z.any(),
+            profile: UserProfileSchema,
             lang: z.string().default('en'),
             constraint: z.string().optional()
         }).parse(req.body);

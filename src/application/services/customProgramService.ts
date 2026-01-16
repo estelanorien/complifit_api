@@ -1,5 +1,6 @@
 import { GenerativeModel, GoogleGenerativeAI } from '@google/generative-ai';
 import { env } from '../../config/env.js';
+import { logger } from '../../infra/logger.js';
 
 const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
 
@@ -32,7 +33,7 @@ Do not add any commentary or interpretation. Just return the raw text.`;
             const response = await result.response;
             return response.text();
         } catch (error) {
-            console.error('OCR extraction failed:', error);
+            logger.error('OCR extraction failed', error as Error);
             throw new Error('Failed to extract text from image');
         }
     }
@@ -89,7 +90,7 @@ IMPORTANT:
 
             return JSON.parse(jsonText);
         } catch (error) {
-            console.error('Training program parsing failed:', error);
+            logger.error('Training program parsing failed', error as Error);
             throw new Error('Failed to parse training program');
         }
     }
@@ -154,7 +155,7 @@ IMPORTANT:
 
             return JSON.parse(jsonText);
         } catch (error) {
-            console.error('Nutrition plan parsing failed:', error);
+            logger.error('Nutrition plan parsing failed', error as Error);
             throw new Error('Failed to parse nutrition plan');
         }
     }
@@ -225,7 +226,7 @@ Return ONLY valid JSON.`;
 
             return JSON.parse(jsonText);
         } catch (error) {
-            console.error('Program validation failed:', error);
+            logger.error('Program validation failed', error as Error);
             throw new Error('Failed to validate program');
         }
     }
@@ -304,7 +305,7 @@ Return ONLY valid JSON.`;
 
             return JSON.parse(jsonText);
         } catch (error) {
-            console.error('Coaching feedback failed:', error);
+            logger.error('Coaching feedback failed', error as Error);
             throw new Error('Failed to provide coaching feedback');
         }
     }

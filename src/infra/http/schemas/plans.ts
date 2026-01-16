@@ -15,7 +15,7 @@ export const MealRecipeSchema = z.object({
     ingredients: z.array(z.string()).optional(),
     instructions: z.array(InstructionBlockSchema).optional(),
     nutritionTips: z.array(z.string()).optional(),
-    macros: z.record(z.any()).optional()
+    macros: z.record(z.number()).optional() // Macros are numeric values
 });
 
 export const MealSchema = z.object({
@@ -105,3 +105,25 @@ export const PlanSettingsSchema = z.object({
     cycleGoal: z.string().optional(),
     nutritionGoal: z.string().optional(),
 });
+
+export const CalculatedBiometricsSchema = z.object({
+    tdee: z.number().optional(),
+    target: z.number().optional(),
+    safetyFloor: z.number().optional(),
+    bmr: z.number().optional(),
+    bodyFat: z.number().optional(),
+}).passthrough(); // Allow additional fields but validate known ones
+
+export const MetricsSchema = z.object({
+    weight: z.number().optional(),
+    bodyFat: z.number().optional(),
+    muscleMass: z.number().optional(),
+    bmr: z.number().optional(),
+    tdee: z.number().optional(),
+}).passthrough();
+
+export const TrainingHistorySchema = z.object({
+    date: z.string().optional(),
+    exercises: z.array(z.string()).optional(),
+    volume: z.number().optional(),
+}).passthrough();

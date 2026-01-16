@@ -1,4 +1,5 @@
 import { google } from 'googleapis';
+import { logger } from '../infra/logger.js';
 import { env } from '../config/env.js';
 import fs from 'fs';
 import fetch from 'node-fetch';
@@ -67,7 +68,7 @@ export const uploadToYouTube = async (options: UploadOptions) => {
             url: `https://youtu.be/${response.data.id}`
         };
     } catch (error: any) {
-        console.error("YouTube Upload Error:", error);
+        logger.error("YouTube Upload Error", error as Error);
         throw new Error(`YouTube Upload Failed: ${error.message}`);
     }
 };

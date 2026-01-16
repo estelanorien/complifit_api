@@ -31,7 +31,14 @@ const envSchema = z.object({
   FACEBOOK_APP_SECRET: z.string().optional(),
   APPLE_CLIENT_ID: z.string().optional(),
   APPLE_TEAM_ID: z.string().optional(),
-  APPLE_KEY_ID: z.string().optional()
+  APPLE_KEY_ID: z.string().optional(),
+  // Database SSL configuration
+  // Accepts 'true', '1', 'false', '0', or undefined
+  // Defaults to true in production, false in development
+  DB_SSL_REJECT_UNAUTHORIZED: z.string().optional().transform(val => {
+    if (val === undefined || val === null) return undefined;
+    return val === 'true' || val === '1';
+  })
 });
 
 const parseEnv = () => {
@@ -54,9 +61,10 @@ const parseEnv = () => {
       GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
       FACEBOOK_APP_ID: process.env.FACEBOOK_APP_ID,
       FACEBOOK_APP_SECRET: process.env.FACEBOOK_APP_SECRET,
-      APPLE_CLIENT_ID: process.env.APPLE_CLIENT_ID,
-      APPLE_TEAM_ID: process.env.APPLE_TEAM_ID,
-      APPLE_KEY_ID: process.env.APPLE_KEY_ID
+    APPLE_CLIENT_ID: process.env.APPLE_CLIENT_ID,
+    APPLE_TEAM_ID: process.env.APPLE_TEAM_ID,
+    APPLE_KEY_ID: process.env.APPLE_KEY_ID,
+    DB_SSL_REJECT_UNAUTHORIZED: process.env.DB_SSL_REJECT_UNAUTHORIZED
     });
     return parsed;
   } catch (error: any) {
@@ -102,6 +110,7 @@ export const env = {
       teamId: envVars.APPLE_TEAM_ID,
       keyId: envVars.APPLE_KEY_ID
     }
-  }
+  },
+  dbSslRejectUnauthorized: envVars.DB_SSL_REJECT_UNAUTHORIZED ?? (envVars.NODE_ENV === 'production' ? true : false)
 };
 
