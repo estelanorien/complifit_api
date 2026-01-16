@@ -371,12 +371,49 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
         const mealName = meal?.recipe?.name;
 
         if (mealName) {
-          // Check database for existing recipe
-          const existingRecipe = await getExistingRecipe(mealName);
+          // 1. Try Database First
+          let existingRecipe = await getExistingRecipe(mealName);
+
+          // 2. Performance & Quality Check: Is it good enough? (min 5 steps)
+          const isGood = (r: any) => r && Array.isArray(r.instructions) && r.instructions.length >= 5;
+
+          if (!isGood(existingRecipe)) {
+            // SILENT AUTO-REPAIR (Backend): If bad or missing, generate it now.
+            // This ensures the frontend doesn't have to show "Generating" messages later.
+            process.stdout.write(`[NutritionService] Pre-generating full details for "${mealName}" (Quality Baseline)...\n`);
+            try {
+              const detailPrompt = `Generate full professional recipe details for "${mealName}". 
+              Target Language: English.
+              
+              Return JSON:
+              {
+                "ingredients": string[],
+                "instructions": Array<{ "simple": string, "detailed": string }>,
+                "nutritionTips": string[],
+                "prepTips": string[],
+                "macros": { "protein": number, "carbs": number, "fat": number },
+                "calories": number
+              }
+              
+              CRITICAL: Provide EXACTLY 6-8 detailed steps. Each "detailed" step must be 2-3 sentences long with chef tips.`;
+
+              const aiResult = await aiService.generateText({
+                prompt: detailPrompt,
+                model: 'models/gemini-2.0-flash-exp', // Fast and capable for structured tasks
+                generationConfig: { responseMimeType: "application/json" }
+              });
+
+              const fresh = JSON.parse(cleanGeminiJson(aiResult.text) || "{}");
+              if (isGood(fresh)) {
+                existingRecipe = fresh;
+              }
+            } catch (e) {
+              process.stderr.write(`[NutritionService] Background generation failed for ${mealName}\n`);
+            }
+          }
 
           if (existingRecipe) {
-            // Use existing recipe from database
-            // Service doesn't have req logger, skip logging or use process.stdout
+            // Use existing recipe from database or freshly generated
             meal.recipe.ingredients = existingRecipe.ingredients || meal.recipe.ingredients;
             meal.recipe.instructions = existingRecipe.instructions || meal.recipe.instructions;
             meal.recipe.time = existingRecipe.time || meal.recipe.time;
