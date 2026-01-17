@@ -1,7 +1,5 @@
 -- JSONB GIN Indexes for Performance
 -- Bu migration, JSONB kolonlarında yapılan query'lerin performansını artırır
-BEGIN;
-
 -- user_profiles tablosu için GIN index'ler
 -- profile_data en çok kullanılan JSONB kolonu
 CREATE INDEX IF NOT EXISTS idx_user_profiles_profile_data_gin ON user_profiles USING GIN (profile_data);
@@ -51,5 +49,3 @@ CREATE INDEX IF NOT EXISTS idx_guardian_actions_payload_gin ON guardian_actions 
 -- moderation_queue tablosu için
 -- content kolonu JSONB
 CREATE INDEX IF NOT EXISTS idx_moderation_queue_content_gin ON moderation_queue USING GIN (content);
-
-COMMIT;

@@ -16,6 +16,6 @@ CREATE TABLE IF NOT EXISTS moderation_queue (
         TIME ZONE DEFAULT NOW ()
 );
 
-CREATE INDEX idx_mod_status ON moderation_queue (status);
+CREATE INDEX IF NOT EXISTS idx_mod_status ON moderation_queue (status);
 
-CREATE INDEX idx_mod_target ON moderation_queue (target_id);
+CREATE INDEX IF NOT EXISTS idx_mod_target ON moderation_queue (target_id);
