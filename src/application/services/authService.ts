@@ -26,8 +26,8 @@ export class AuthService {
 
       const hash = await bcrypt.hash(password, 10);
       const { rows } = await client.query(
-        'INSERT INTO users(email, password_hash, username) VALUES($1, $2, $3) RETURNING id, email, created_at, username',
-        [email, hash, cleanUsername]
+        'INSERT INTO users(email, password_hash, username, role) VALUES($1, $2, $3, $4) RETURNING id, email, created_at, username, role',
+        [email, hash, cleanUsername, 'user']
       );
       const user = rows[0];
       await client.query('COMMIT');
@@ -44,7 +44,7 @@ export class AuthService {
   async signIn(identifier: string, password: string) {
     const normalized = identifier.trim().toLowerCase();
     const { rows } = await pool.query(
-      'SELECT id, email, password_hash, username FROM users WHERE LOWER(email) = $1 OR LOWER(username) = $1',
+      'SELECT id, email, password_hash, username, role FROM users WHERE LOWER(email) = $1 OR LOWER(username) = $1',
       [normalized]
     );
     if (rows.length === 0) throw new Error('Invalid credentials');
@@ -53,7 +53,7 @@ export class AuthService {
     if (!ok) throw new Error('Invalid credentials');
 
     const token = this.issueToken({ userId: user.id, email: user.email });
-    return { user: { id: user.id, email: user.email, username: user.username }, token };
+    return { user: { id: user.id, email: user.email, username: user.username, role: user.role }, token };
   }
 
   async changePassword(userId: string, currentPassword: string, newPassword: string) {
@@ -141,7 +141,7 @@ export class AuthService {
 
     // Fetch fresh user data
     const { rows } = await pool.query(
-      'SELECT id, email, username FROM users WHERE id = $1',
+      'SELECT id, email, username, role FROM users WHERE id = $1',
       [payload.userId]
     );
 
@@ -158,7 +158,8 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
-        username: user.username
+        username: user.username,
+        role: user.role
       },
       token: newToken
     };

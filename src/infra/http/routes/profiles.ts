@@ -15,7 +15,7 @@ export async function profileRoutes(app: FastifyInstance) {
     let rows;
     try {
       const { rows: testRows } = await pool.query(
-        `SELECT up.profile_data, up.health_metrics, up.age, up.gender, up.height_cm, up.weight_kg, up.avatar_url, u.username, u.email
+        `SELECT up.profile_data, up.health_metrics, up.age, up.gender, up.height_cm, up.weight_kg, up.avatar_url, u.username, u.email, u.role, u.id
          FROM users u
          LEFT JOIN user_profiles up ON up.user_id = u.id
          WHERE u.id = $1`,
@@ -26,7 +26,7 @@ export async function profileRoutes(app: FastifyInstance) {
       // If columns don't exist, use fallback query without biometric columns
       if (e.code === '42703') {
         const { rows: fallbackRows } = await pool.query(
-          `SELECT up.profile_data, up.health_metrics, u.username, u.email
+          `SELECT up.profile_data, up.health_metrics, u.username, u.email, u.role, u.id
            FROM users u
            LEFT JOIN user_profiles up ON up.user_id = u.id
            WHERE u.id = $1`,
@@ -59,6 +59,10 @@ export async function profileRoutes(app: FastifyInstance) {
     if (!profileData.name) profileData.name = row?.email || user.email;
     if (!profileData.email) profileData.email = row?.email || user.email;
     if (!profileData.username) profileData.username = row?.username || (row?.email ? row.email.split('@')[0] : 'user');
+
+    // Crucial for admin persistence and identification
+    profileData.id = row?.id || user.userId;
+    profileData.role = row?.role || 'user';
 
     const metrics = row?.health_metrics || {};
     return { profile: profileData, metrics };

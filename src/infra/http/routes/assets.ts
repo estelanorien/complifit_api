@@ -27,15 +27,15 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   app.get('/assets/:key', { preHandler: authGuard }, async (req, reply) => {
+    const { key } = req.params as any;
     try {
-      const { key } = req.params as any;
       const decodedKey = decodeURIComponent(key);
-      
+
       const { rows } = await pool.query(
         `SELECT value, asset_type FROM cached_assets WHERE key=$1 AND status IN ('active','auto') LIMIT 1`,
         [decodedKey]
       );
-      
+
       if (rows.length === 0) {
         return reply.status(404).send(null);
       }
@@ -43,23 +43,15 @@ export async function assetsRoutes(app: FastifyInstance) {
       const value = rows[0].value;
       const assetType = rows[0].asset_type;
 
-      // If it's an image (base64 string), send it directly as text to avoid JSON serialization issues
-      if (assetType === 'image' && typeof value === 'string') {
-        // Ensure it has data:image prefix
-        const imageValue = value.startsWith('data:image') ? value : `data:image/png;base64,${value}`;
-        reply.type('text/plain');
-        return reply.send(imageValue);
-      }
-
-      // Return as JSON string to maintain compatibility with frontend
-      // Frontend expects string | null
-      return reply.send(value);
+      // Wrap in JSON object to avoid direct string return which can confuse some clients
+      // or cause issues with raw base64 strings being treated as plain text
+      return { value, assetType };
     } catch (error: any) {
-      req.log.error({ 
-        error: 'GET /assets/:key failed', 
-        key: req.params?.key,
+      req.log.error({
+        error: 'GET /assets/:key failed',
+        key,
         message: error.message,
-        requestId: (req as any).requestId 
+        requestId: (req as any).requestId
       });
       return reply.status(500).send({ error: error.message || 'Internal server error' });
     }
@@ -68,7 +60,7 @@ export async function assetsRoutes(app: FastifyInstance) {
   app.post('/assets', { preHandler: authGuard }, async (req, reply) => {
     try {
       const body = assetSchema.parse(req.body);
-      
+
       // Validate value is not empty for non-draft status
       if (body.status !== 'draft' && (!body.value || body.value.trim() === '')) {
         req.log.warn({ error: 'Empty value for non-draft asset', key: body.key });
@@ -84,14 +76,14 @@ export async function assetsRoutes(app: FastifyInstance) {
           [body.key, body.value, body.type, body.status]
         );
       } catch (dbError: any) {
-        req.log.error({ 
-          error: 'Failed to insert/update cached_assets', 
+        req.log.error({
+          error: 'Failed to insert/update cached_assets',
           key: body.key,
           dbError: dbError.message,
           code: dbError.code,
-          requestId: (req as any).requestId 
+          requestId: (req as any).requestId
         });
-        
+
         // Provide user-friendly error messages
         if (dbError.code === '23505') {
           return reply.status(409).send({ error: 'Asset key already exists' });
@@ -113,37 +105,37 @@ export async function assetsRoutes(app: FastifyInstance) {
             [body.key, prompt || null, mode || null, source || null, createdBy || null, movementId || null]
           );
         } catch (metaError: any) {
-          req.log.error({ 
-            error: 'Failed to insert/update cached_asset_meta', 
+          req.log.error({
+            error: 'Failed to insert/update cached_asset_meta',
             key: body.key,
             metaError: metaError.message,
             code: metaError.code,
-            requestId: (req as any).requestId 
+            requestId: (req as any).requestId
           });
           // Don't fail the whole request if metadata insert fails
           // Asset was saved successfully
         }
       }
-      
+
       return reply.send({ success: true });
     } catch (error: any) {
-      req.log.error({ 
-        error: 'POST /assets failed', 
+      req.log.error({
+        error: 'POST /assets failed',
         message: error.message,
         stack: error.stack,
-        requestId: (req as any).requestId 
+        requestId: (req as any).requestId
       });
-      
+
       // Handle Zod validation errors
       if (error instanceof z.ZodError) {
-        return reply.status(400).send({ 
-          error: 'Validation failed', 
-          details: error.errors 
+        return reply.status(400).send({
+          error: 'Validation failed',
+          details: error.errors
         });
       }
-      
-      return reply.status(500).send({ 
-        error: error.message || 'Internal server error' 
+
+      return reply.status(500).send({
+        error: error.message || 'Internal server error'
       });
     }
   });
@@ -181,7 +173,7 @@ export async function assetsRoutes(app: FastifyInstance) {
 
   // System blueprints / guidelines stored as JSON in cached_assets
   app.post('/assets/system-blueprints', { preHandler: authGuard }, async (req, reply) => {
-    const key = 'system_blueprints_config';
+    const key = 'system_blueprints';
     const value = JSON.stringify(req.body || {});
     await pool.query(
       `INSERT INTO cached_assets(key, value, asset_type, status)
@@ -194,7 +186,7 @@ export async function assetsRoutes(app: FastifyInstance) {
 
   app.get('/assets/system-blueprints', { preHandler: authGuard }, async () => {
     const { rows } = await pool.query(
-      `SELECT value FROM cached_assets WHERE key='system_blueprints_config' AND status IN ('active','auto') LIMIT 1`
+      `SELECT value FROM cached_assets WHERE key='system_blueprints' AND status IN ('active','auto') LIMIT 1`
     );
     if (rows.length === 0) return null;
     try { return JSON.parse(rows[0].value); } catch { return null; }
@@ -259,7 +251,7 @@ export async function assetsRoutes(app: FastifyInstance) {
        WHERE (m.movement_id = $1 OR a.key ILIKE $2)
        ORDER BY a.created_at DESC
        LIMIT $3`,
-      [body.movementId, `${body.movementId}%`, limit]
+      [body.movementId, `%${body.movementId}%`, limit]
     );
     // Ensure image values have proper data:image prefix for frontend display
     const processedRows = rows.map((row: any) => {
