@@ -87,7 +87,7 @@ export async function adminRoutes(app: FastifyInstance) {
     let value: string | null = null;
     try {
       // Helper to prepare parts
-      const parts: any[] = [{ text: prompt }];
+      const parts: any[] = [];
       if (imageInput) {
         // Strip prefix if present (data:image/png;base64,)
         const base64Data = imageInput.replace(/^data:image\/\w+;base64,/, "");
@@ -98,6 +98,7 @@ export async function adminRoutes(app: FastifyInstance) {
           }
         });
       }
+      parts.push({ text: prompt });
 
       if (mode === 'image') {
         const model = 'gemini-2.5-flash-image';
@@ -110,7 +111,10 @@ export async function adminRoutes(app: FastifyInstance) {
             'x-goog-api-key': env.geminiApiKey
           },
           body: JSON.stringify({
-            contents: [{ parts }]
+            contents: [{ parts }],
+            generationConfig: {
+              responseModalities: ['IMAGE']
+            }
           })
         });
 
@@ -165,6 +169,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
         const data: any = await res.json();
         const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        // Gemini often wraps JSON in backticks
         value = text;
       } else {
         // Attempt Real Veo Generation (with fallback)
