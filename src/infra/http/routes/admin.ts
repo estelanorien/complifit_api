@@ -546,21 +546,24 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!prefixes || prefixes.length === 0) return reply.send([]);
 
     try {
-      // Construct regex patterns: ^prefix
-      const patterns = prefixes.map(p => `^${p}`);
+      // Construct LIKE patterns: prefix%
+      // Note: We avoid regex (~) because prefixes might contain special chars like () from names
+      const patterns = prefixes.map(p => `${p}%`);
+      console.log("[AdminScan] LIKE Patterns:", patterns);
 
       const res = await pool.query(
         `SELECT a.key, a.value, a.asset_type, a.status,
                 m.translation_status, m.video_status, m.translation_error, m.video_error
          FROM cached_assets a
          LEFT JOIN cached_asset_meta m ON m.key = a.key
-         WHERE a.key ~ ANY($1)`,
+         WHERE a.key LIKE ANY($1)`,
         [patterns]
       );
       return reply.send(res.rows);
     } catch (e: any) {
+      console.error("[AdminScan] Failed:", e.message);
       req.log.error(e);
-      return reply.status(500).send({ error: "Scan failed" });
+      return reply.status(500).send({ error: `Scan failed: ${e.message}` });
     }
   });
 
