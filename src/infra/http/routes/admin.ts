@@ -453,11 +453,11 @@ export async function adminRoutes(app: FastifyInstance) {
 
       // Convert maps to arrays and create response
       const exercises = Array.from(exerciseMap.values()).map((ex) => {
-        const movementId = normalizeToMovementId(ex.name);
+        const movementId = normalizeToMovementId(ex.name); // Server authoritative ID
         return {
           id: movementId,
           name: ex.name,
-          movementId,
+          movementId, // Explicitly pass this
           metadata: ex.metadata
         };
       }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
@@ -467,7 +467,7 @@ export async function adminRoutes(app: FastifyInstance) {
         return {
           id: movementId,
           name: m.name,
-          movementId,
+          movementId, // Explicitly pass this
           instructions: m.instructions
         };
       }).sort((a, b) => a.name.localeCompare(b.name));
@@ -485,16 +485,34 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!keys || keys.length === 0) return reply.send([]);
 
     try {
-      // Optimized query with ANY
       const res = await pool.query(
         `SELECT key FROM cached_assets WHERE key = ANY($1)`,
         [keys]
       );
-      // Return array of found keys
       return reply.send(res.rows.map(r => r.key));
     } catch (e: any) {
       req.log.error(e);
       return reply.status(500).send({ error: "Batch check failed" });
+    }
+  });
+
+  // Batch Scan (Regex/Prefix Match for messy keys) including VALUES
+  app.post('/admin/assets/scan', { preHandler: adminGuard }, async (req, reply) => {
+    const { prefixes } = req.body as { prefixes: string[] };
+    if (!prefixes || prefixes.length === 0) return reply.send([]);
+
+    try {
+      // Construct regex patterns: ^prefix
+      const patterns = prefixes.map(p => `^${p}`);
+
+      const res = await pool.query(
+        `SELECT key, value, asset_type, status FROM cached_assets WHERE key ~ ANY($1)`,
+        [patterns]
+      );
+      return reply.send(res.rows);
+    } catch (e: any) {
+      req.log.error(e);
+      return reply.status(500).send({ error: "Scan failed" });
     }
   });
 
