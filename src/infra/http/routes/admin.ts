@@ -550,7 +550,11 @@ export async function adminRoutes(app: FastifyInstance) {
       const patterns = prefixes.map(p => `^${p}`);
 
       const res = await pool.query(
-        `SELECT key, value, asset_type, status FROM cached_assets WHERE key ~ ANY($1)`,
+        `SELECT a.key, a.value, a.asset_type, a.status,
+                m.translation_status, m.video_status, m.translation_error, m.video_error
+         FROM cached_assets a
+         LEFT JOIN cached_asset_meta m ON m.key = a.key
+         WHERE a.key ~ ANY($1)`,
         [patterns]
       );
       return reply.send(res.rows);

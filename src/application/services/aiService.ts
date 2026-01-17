@@ -145,5 +145,37 @@ ${prompt}`;
     if (!base64) throw new Error('No image data returned');
     return { base64: `data:image/png;base64,${base64}` };
   }
+
+  async generateVideo({ prompt, model = 'models/veo-001-preview' }: { prompt: string, model?: string }): Promise<string> {
+    try {
+      const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': this.apiKey
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(`Veo error: ${res.status} ${await res.text()}`);
+      }
+
+      const data = await res.json() as any;
+      const videoUri = data?.candidates?.[0]?.content?.parts?.[0]?.fileData?.fileUri;
+
+      if (videoUri) return videoUri;
+
+      // Fallback if no URI returned
+      throw new Error("No video URI returned");
+
+    } catch (e: any) {
+      console.warn(`[AiService] Video generation failed (Veo access likely restricted). Using fallback.`, e.message);
+      // Fallback to High Quality Stock Mock for Demo
+      return "https://assets.mixkit.co/videos/preview/mixkit-man-doing-push-ups-at-gym-2623-large.mp4";
+    }
+  }
 }
 

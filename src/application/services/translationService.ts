@@ -1,5 +1,7 @@
 import { pool } from '../../infra/db/pool.js';
 import { AiService } from './aiService.js';
+import { translationQueue } from './translationQueueService.js';
+import { videoQueue } from './videoQueueService.js';
 
 const aiService = new AiService();
 
@@ -100,6 +102,60 @@ ${trimmedText}`;
                 // translateText handles caching automatically
                 this.translateText(text, lang, category).catch(() => { });
             }
+        }
+    }
+
+    /**
+     * Publishes a group of assets and triggers translation and video queues.
+     */
+    async publishAndTranslate(groupId: string, groupName: string, groupType: 'exercise' | 'meal'): Promise<void> {
+        try {
+            console.log(`[TranslationService] Publishing Group: ${groupName} (${groupId})`);
+
+            // 1. Promote ALL assets in this group to 'active'
+            await pool.query(
+                `UPDATE cached_assets 
+                 SET status = 'active' 
+                 WHERE key IN (
+                     SELECT key FROM cached_asset_meta WHERE movement_id = $1
+                 )`,
+                [groupId]
+            );
+
+            // 2. Find JSON assets that need translation
+            const { rows: jsonRows } = await pool.query(
+                `SELECT cached_assets.key 
+                 FROM cached_assets 
+                 JOIN cached_asset_meta ON cached_assets.key = cached_asset_meta.key
+                 WHERE cached_asset_meta.movement_id = $1 
+                 AND cached_assets.asset_type = 'json'`,
+                [groupId]
+            );
+
+            console.log(`[TranslationService] Enqueueing translations for ${jsonRows.length} assets`);
+            for (const row of jsonRows) {
+                await translationQueue.enqueue(row.key);
+            }
+
+            // 3. Trigger Video Generation
+            // For exercises, we usually translate the 'Instructions' JSON asset to get the context.
+            // We use that same asset key to trigger videos.
+            if (jsonRows.length > 0) {
+                const mainJsonAsset = jsonRows[0].key; // Usually the Instructions JSON
+
+                if (groupType === 'exercise') {
+                    console.log(`[TranslationService] Enqueueing Video jobs for Atlas & Nova: ${groupId}`);
+                    await videoQueue.enqueue(mainJsonAsset, 'atlas');
+                    await videoQueue.enqueue(mainJsonAsset, 'nova');
+                } else {
+                    console.log(`[TranslationService] Enqueueing Video job for Meal: ${groupId}`);
+                    await videoQueue.enqueue(mainJsonAsset, null);
+                }
+            }
+
+        } catch (e) {
+            console.error(`[TranslationService] publishAndTranslate failed for ${groupId}`, e);
+            throw e;
         }
     }
 }
