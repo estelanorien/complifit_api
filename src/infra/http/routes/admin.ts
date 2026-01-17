@@ -395,7 +395,7 @@ export async function adminRoutes(app: FastifyInstance) {
           movementId,
           metadata: ex.metadata
         };
-      }).sort((a, b) => a.name.localeCompare(b.name));
+      }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
       const meals = Array.from(mealMap.values()).map((m) => {
         const movementId = normalizeToMovementId(m.name);
