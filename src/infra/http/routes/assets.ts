@@ -32,7 +32,7 @@ export async function assetsRoutes(app: FastifyInstance) {
       const decodedKey = decodeURIComponent(key);
 
       const { rows } = await pool.query(
-        `SELECT value, asset_type FROM cached_assets WHERE key=$1 AND status IN ('active','auto') LIMIT 1`,
+        `SELECT value, asset_type FROM cached_assets WHERE key=$1 AND status IN ('active','auto','draft') LIMIT 1`,
         [decodedKey]
       );
 
@@ -144,7 +144,7 @@ export async function assetsRoutes(app: FastifyInstance) {
     const { keys } = req.body as any;
     if (!Array.isArray(keys) || keys.length === 0) return [];
     const { rows } = await pool.query(
-      `SELECT key, status FROM cached_assets WHERE key = ANY($1) AND status IN ('active','auto')`,
+      `SELECT key, status FROM cached_assets WHERE key = ANY($1) AND status IN ('active','auto','draft')`,
       [keys]
     );
     return rows;
@@ -154,7 +154,7 @@ export async function assetsRoutes(app: FastifyInstance) {
     const { keys } = req.body as any;
     if (!Array.isArray(keys) || keys.length === 0) return {};
     const { rows } = await pool.query(
-      `SELECT key, value FROM cached_assets WHERE key = ANY($1) AND status IN ('active','auto')`,
+      `SELECT key, value FROM cached_assets WHERE key = ANY($1) AND status IN ('active','auto','draft')`,
       [keys]
     );
     const result: Record<string, string> = {};
