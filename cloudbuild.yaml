@@ -35,7 +35,7 @@ steps:
       - '--execution-environment'
       - 'gen2'
       - '--set-env-vars'
-      - 'NODE_ENV=production,DATABASE_URL=postgresql://postgres:6fk23az4_F@104.199.2.9:5432/vitality_db,JWT_SECRET=969d2205e73cd824d031bd404107845ee6448d0acc7b36b8d1cb3db4ab34dc45,GEMINI_API_KEY=AIzaSyBWZmBaalzL4NCgWSJ98k56GJrAhWcWRzQ,GOOGLE_PLACES_KEY=AIzaSyANvvftQAS3IhffHLTjEahRW50E_18h-hw,ALLOWED_ORIGINS=*'
+      - 'NODE_ENV=production,DATABASE_URL=postgresql://postgres:6fk23az4_F@104.199.2.9:5432/vitality_db,JWT_SECRET=969d2205e73cd824d031bd404107845ee6448d0acc7b36b8d1cb3db4ab34dc45,GEMINI_API_KEY=AIzaSyBWZmBaalzL4NCgWSJ98k56GJrAhWcWRzQ,GOOGLE_PLACES_KEY=AIzaSyANvvftQAS3IhffHLTjEahRW50E_18h-hw,ALLOWED_ORIGINS=*,DB_SSL_REJECT_UNAUTHORIZED=false'
 
 images:
   - 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/vitality-api:$COMMIT_SHA'
