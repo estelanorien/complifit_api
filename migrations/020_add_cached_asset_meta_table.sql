@@ -1,8 +1,6 @@
 -- Add cached_asset_meta table (moved from runtime creation in assets.ts)
 -- This table stores metadata about cached assets
 
-BEGIN;
-
 CREATE TABLE IF NOT EXISTS cached_asset_meta (
     key text PRIMARY KEY REFERENCES cached_assets(key) ON DELETE CASCADE,
     prompt text,
@@ -26,6 +24,3 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_cached_asset_meta_movement_id 
 ON cached_asset_meta(movement_id) 
 WHERE movement_id IS NOT NULL;
-
-COMMIT;
-
