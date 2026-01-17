@@ -98,7 +98,7 @@ export async function adminRoutes(app: FastifyInstance) {
           value = `data:image/png;base64,${inline.inlineData.data}`;
         }
       } else if (mode === 'json') {
-        const model = 'models/gemini-2.0-flash';
+        const model = 'models/gemini-3-flash-preview';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
 
         const res = await fetch(genEndpoint, {
