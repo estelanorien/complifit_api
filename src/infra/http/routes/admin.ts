@@ -34,6 +34,33 @@ export async function adminRoutes(app: FastifyInstance) {
     return reply.send(result);
   });
 
+  // NEW: Group Generation Trigger (Server-Side)
+  app.post('/admin/batch/generate-group', { preHandler: adminGuard }, async (req, reply) => {
+    const body = z.object({
+      groupId: z.string(),
+      groupName: z.string(),
+      groupType: z.enum(['exercise', 'meal']),
+      forceRegen: z.boolean().optional(),
+      themeId: z.string().optional()
+    }).parse(req.body);
+
+    // Run in background? Or wait? 
+    // If we wait, it might timeout for large groups (images take 10s each). 
+    // Ideally we return "Accepted" and let client poll.
+    // For now, let's await it but if it takes too long, Fastify might timeout.
+    // Better: Start it, return "Processing", and letting client poll Status.
+
+    // However, to keep it simple for "Chain of Verification":
+    // We will just fire and forget (Background), but we need a way to track status.
+    // The BatchService logs to console. Ideally we'd write a "job status" to DB.
+
+    // Let's await it for now, assuming the client has a long timeout or we accept the risk.
+    // Actually, typical generation for 4 images = 40 seconds. Allowable.
+
+    const result = await BatchAssetService.generateGroupAssets(body as any);
+    return reply.send(result);
+  });
+
   // Asset generation proxy (server-side Gemini key)
   app.post('/admin/generate-asset', { preHandler: adminGuard }, async (req, reply) => {
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
