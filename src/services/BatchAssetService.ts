@@ -9,6 +9,7 @@ interface GroupAssetGenOptions {
     groupType: 'exercise' | 'meal';
     forceRegen?: boolean;
     themeId?: string;
+    targetStatus?: 'auto' | 'draft' | 'active';
 }
 
 export class BatchAssetService {
@@ -19,7 +20,7 @@ export class BatchAssetService {
      */
     static async generateGroupAssets(options: GroupAssetGenOptions) {
         console.log(`[Batch] Starting Group Generation for ${options.groupName} (${options.groupId})`);
-        const { groupName, groupType, forceRegen } = options;
+        const { groupName, groupType, forceRegen, targetStatus = 'auto' } = options;
         const movementId = this.normalizeToId(groupName);
 
         // 1. Instructions & Text (Pre-requisite)
@@ -71,7 +72,7 @@ export class BatchAssetService {
             try {
                 await generateAsset({
                     mode: asset.type === 'text' ? 'json' : asset.type as any,
-                    prompt, key: asset.key, status: 'active', movementId
+                    prompt, key: asset.key, status: targetStatus, movementId
                 });
                 results.generated++;
                 await new Promise(r => setTimeout(r, 1000));
@@ -142,7 +143,7 @@ export class BatchAssetService {
             try {
                 await generateAsset({
                     mode: 'image', // All steps are images for now
-                    prompt, key: asset.key, status: 'active', movementId,
+                    prompt, key: asset.key, status: targetStatus, movementId,
                     imageInput: asset.imageInput
                 });
                 results.generated++;
@@ -335,7 +336,7 @@ export class BatchAssetService {
     private static async cacheAsset(key: string, value: string, type: 'json' | 'image') {
         await pool.query(
             `INSERT INTO cached_assets(key, value, asset_type, status)
-             VALUES($1, $2, $3, 'active')
+             VALUES($1, $2, $3, 'auto')
              ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`,
             [key, value, type]
         );

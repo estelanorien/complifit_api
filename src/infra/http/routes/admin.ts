@@ -57,8 +57,25 @@ export async function adminRoutes(app: FastifyInstance) {
     // Let's await it for now, assuming the client has a long timeout or we accept the risk.
     // Actually, typical generation for 4 images = 40 seconds. Allowable.
 
-    const result = await BatchAssetService.generateGroupAssets(body as any);
+    const result = await BatchAssetService.generateGroupAssets({ ...(body as any), targetStatus: 'draft' });
     return reply.send(result);
+  });
+
+  // NEW: Publish & Translate Endpoint
+  app.post('/admin/publish', { preHandler: adminGuard }, async (req, reply) => {
+    const body = z.object({
+      groupId: z.string(),
+      groupName: z.string(),
+      groupType: z.enum(['exercise', 'meal'])
+    }).parse(req.body);
+
+    const { TranslationService } = await import('../../../services/TranslationService.js');
+
+    // Fire and forget (Async)
+    TranslationService.publishAndTranslate(body.groupId, body.groupName, body.groupType)
+      .catch(err => req.log.error({ msg: "Translation failed", err }));
+
+    return reply.send({ success: true, message: "Publishing started. Translations running in background." });
   });
 
   // Asset generation proxy (server-side Gemini key)
