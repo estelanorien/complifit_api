@@ -552,7 +552,7 @@ export async function adminRoutes(app: FastifyInstance) {
       console.log("[AdminScan] LIKE Patterns:", patterns);
 
       const res = await pool.query(
-        `SELECT a.key, a.value, a.asset_type, a.status,
+        `SELECT a.key, a.asset_type, a.status,
                 m.translation_status, m.video_status, m.translation_error, m.video_error
          FROM cached_assets a
          LEFT JOIN cached_asset_meta m ON m.key = a.key
