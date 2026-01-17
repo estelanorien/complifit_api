@@ -19,22 +19,17 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
 
     let value: string | null = null;
 
-    // Helper to prepare parts
-    const parts: any[] = [{ text: prompt }];
-    if (imageInput) {
-        // Strip prefix if present (data:image/png;base64,)
-        const base64Data = imageInput.replace(/^data:image\/\w+;base64,/, "");
-        parts.push({
-            inlineData: {
-                mimeType: "image/png",
-                data: base64Data
-            }
-        });
-    }
-
     if (mode === 'image') {
         const model = 'gemini-2.5-flash-image';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+        // Helper to prepare parts
+        const parts: any[] = [];
+        if (imageInput) {
+            const base64Data = imageInput.replace(/^data:image\/\w+;base64,/, "");
+            parts.push({ inlineData: { mimeType: "image/png", data: base64Data } });
+        }
+        parts.push({ text: prompt });
 
         const res = await fetch(genEndpoint, {
             method: 'POST',
@@ -43,7 +38,10 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
                 'x-goog-api-key': env.geminiApiKey
             },
             body: JSON.stringify({
-                contents: [{ parts }]
+                contents: [{ parts }],
+                generationConfig: {
+                    responseModalities: ['IMAGE']
+                }
             })
         });
 
@@ -81,6 +79,14 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
         const model = 'models/veo-001-preview';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
 
+        // Helper to prepare parts
+        const parts: any[] = [];
+        if (imageInput) {
+            const base64Data = imageInput.replace(/^data:image\/\w+;base64,/, "");
+            parts.push({ inlineData: { mimeType: "image/png", data: base64Data } });
+        }
+        parts.push({ text: prompt });
+
         try {
             const res = await fetch(genEndpoint, {
                 method: 'POST',
@@ -98,8 +104,6 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
             value = data?.candidates?.[0]?.content?.parts?.[0]?.fileData?.fileUri;
         } catch (e) {
             console.warn("Veo generation failed, falling back to mock", e);
-            // Return null or throw? For batch we might want to fail explicitly.
-            // But for now let's return null to indicate failure.
             value = null;
         }
     }

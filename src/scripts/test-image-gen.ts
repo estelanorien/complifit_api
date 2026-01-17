@@ -14,24 +14,26 @@ if (!API_KEY) {
 }
 
 async function testImageGen() {
-    console.log("Testing gemini-2.0-flash-exp-nano image generation...");
-    const model = 'models/gemini-2.0-flash-exp-nano';
-    const url = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent?key=${API_KEY}`;
+    console.log("Testing gemini-2.5-flash-image generation...");
+    const model = 'models/gemini-2.5-flash-image';
+    const url = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
 
     const body = {
         contents: [{
-            parts: [{ text: "A futuristic city with flying cars, cinematic lighting, 8k" }]
+            parts: [{ text: "Fitness photography: pushups exercise. Proper form, athletic model, gym setting, cinematic lighting, 8k resolution, professional quality." }]
         }],
         generationConfig: {
-            responseModalities: ["image"], // Try strictly image
-            responseMimeType: "image/jpeg"
+            responseModalities: ["IMAGE"]
         }
     };
 
     try {
         const res = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': API_KEY
+            },
             body: JSON.stringify(body)
         });
 
