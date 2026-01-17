@@ -245,7 +245,9 @@ export async function assetsRoutes(app: FastifyInstance) {
     const limit = body.limit || 20;
     const { rows } = await pool.query(
       `SELECT a.key, a.value, a.asset_type, a.status, a.created_at,
-              m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id
+              m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id,
+              m.translation_status, m.translation_error,
+              m.video_status, m.video_error
        FROM cached_assets a
        LEFT JOIN cached_asset_meta m ON m.key = a.key
        WHERE (m.movement_id = $1 OR a.key ILIKE $2)

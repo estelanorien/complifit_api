@@ -2,6 +2,8 @@ import { buildServer } from './infra/http/server.js';
 import { env } from './config/env.js';
 import { pool } from './infra/db/pool.js';
 import { jobProcessor } from './application/services/jobProcessor.js';
+import { translationQueue } from './application/services/translationQueueService.js';
+import { videoQueue } from './application/services/videoQueueService.js';
 import v8 from 'v8';
 
 async function main() {
@@ -14,6 +16,8 @@ async function main() {
     try {
       await app.close();
       jobProcessor.stop();
+      translationQueue.stop();
+      videoQueue.stop();
       await pool.end();
       process.exit(0);
     } catch (err) {
@@ -33,6 +37,8 @@ async function main() {
 
     // Start Background Workers
     jobProcessor.start();
+    translationQueue.start();
+    videoQueue.start();
   } catch (err) {
     app.log.error(err, '[STARTUP] Failed to load Fastify plugins');
     process.exit(1);
