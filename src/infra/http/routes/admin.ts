@@ -271,6 +271,71 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
+  // BEHAVIORAL CONFIG (Missing Route Fix)
+  app.get('/admin/behavioral-config', { preHandler: adminGuard }, async (req, reply) => {
+    try {
+      const res = await pool.query(`SELECT value FROM cached_assets WHERE key = 'behavioral_config'`);
+      if (res.rows.length > 0) {
+        return JSON.parse(res.rows[0].value);
+      }
+    } catch (e) { }
+
+    // Defaults
+    return {
+      critChance: 0.1,
+      nudgeMessages: ["Keep it up!", "Don't break the chain!"],
+      futureMessages: [],
+      flashQuests: [],
+      streakFreezeBaseCost: 100,
+      streakFreezeMultiplier: 1.5,
+      persona: 'stoic'
+    };
+  });
+
+  app.post('/admin/behavioral-config', { preHandler: adminGuard }, async (req, reply) => {
+    const body = req.body as any;
+    try {
+      await pool.query(
+        `INSERT INTO cached_assets(key, value, asset_type, status)
+             VALUES('behavioral_config', $1, 'json', 'active')
+             ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`,
+        [JSON.stringify(body)]
+      );
+      return { success: true };
+    } catch (e: any) {
+      req.log.error(e);
+      return reply.status(500).send({ error: "Failed to save config" });
+    }
+  });
+
+  // ITEMS (Missing Route Fix)
+  app.get('/admin/items', { preHandler: adminGuard }, async (req, reply) => {
+    // Return empty array or fetch from DB if table exists (mocking empty for stability)
+    // We can try to fetch from cached_assets with type='game_item' if we implemented that
+    try {
+      const res = await pool.query(`SELECT value FROM cached_assets WHERE asset_type = 'game_item'`);
+      return res.rows.map(r => JSON.parse(r.value));
+    } catch (e) {
+      return [];
+    }
+  });
+
+  app.post('/admin/items', { preHandler: adminGuard }, async (req, reply) => {
+    const body = req.body as any;
+    // Mock save
+    try {
+      await pool.query(
+        `INSERT INTO cached_assets(key, value, asset_type, status)
+             VALUES($1, $2, 'game_item', 'active')
+             ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`,
+        [body.id || `item_${Date.now()}`, JSON.stringify(body)]
+      );
+      return { success: true, id: body.id };
+    } catch (e: any) {
+      return reply.status(500).send({ error: "Failed to create item" });
+    }
+  });
+
   // Note: /admin/users route is defined later with search functionality
 
   // User role update
