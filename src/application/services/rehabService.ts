@@ -79,7 +79,7 @@ OUTPUT JSON:
 
   const { text } = await aiService.generateText({
     prompt: promptSections.join('\n'),
-    model: 'models/gemini-2.0-flash'
+    model: 'models/gemini-3-flash-preview'
   });
 
   const parsedPlan = JSON.parse(cleanGeminiJson(text) || '{}');

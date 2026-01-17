@@ -256,7 +256,7 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
 
     const { text } = await aiService.generateText({
       prompt: promptSections.join('\n'),
-      model: 'models/gemini-2.0-flash'
+      model: 'models/gemini-3-flash-preview'
     });
 
     try {
@@ -399,7 +399,7 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
 
               const aiResult = await aiService.generateText({
                 prompt: detailPrompt,
-                model: 'models/gemini-2.0-flash-exp', // Fast and capable for structured tasks
+                model: 'models/gemini-3-flash-preview', // Fast and capable for structured tasks
                 generationConfig: { responseMimeType: "application/json" }
               });
 

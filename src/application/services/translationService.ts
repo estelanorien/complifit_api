@@ -52,7 +52,7 @@ ${trimmedText}`;
 
                 const { text: translated } = await aiService.generateText({
                     prompt,
-                    model: 'models/gemini-2.0-flash'
+                    model: 'models/gemini-3-flash-preview'
                 });
 
                 const cleanTranslated = translated.trim();

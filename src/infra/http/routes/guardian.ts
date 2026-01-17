@@ -14,7 +14,7 @@ const cleanGeminiJson = (text: string): string => {
   return cleaned.trim();
 };
 
-const GEMINI_MODEL = 'models/gemini-2.0-flash';
+const GEMINI_MODEL = 'models/gemini-3-flash-preview';
 const GEN_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/${GEMINI_MODEL}:generateContent`;
 
 // Helper to find meal ID in profile plan

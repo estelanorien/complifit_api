@@ -2,17 +2,17 @@ import { GenerativeModel, GoogleGenerativeAI } from '@google/generative-ai';
 import { env } from '../../config/env.js';
 import { logger } from '../../infra/logger.js';
 
-const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
+const genAI = new GoogleGenerativeAI(env.geminiApiKey);
 
 export class CustomProgramService {
-    /**
-     * Extract text from an uploaded image using Gemini Vision
-     */
-    static async extractTextFromImage(imageBase64: string, mimeType: string): Promise<string> {
-        try {
-            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  /**
+   * Extract text from an uploaded image using Gemini Vision
+   */
+  static async extractTextFromImage(imageBase64: string, mimeType: string): Promise<string> {
+    try {
+      const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
 
-            const prompt = `You are an OCR assistant. Extract ALL text from this image. The image may contain:
+      const prompt = `You are an OCR assistant. Extract ALL text from this image. The image may contain:
 - A training/workout program (exercises, sets, reps, notes)
 - A meal/nutrition plan (meals, ingredients, calories, macros)
 - A combination of both
@@ -20,32 +20,32 @@ export class CustomProgramService {
 Please extract the text EXACTLY as it appears, preserving structure, line breaks, and formatting.
 Do not add any commentary or interpretation. Just return the raw text.`;
 
-            const result = await model.generateContent([
-                prompt,
-                {
-                    inlineData: {
-                        data: imageBase64,
-                        mimeType
-                    }
-                }
-            ]);
-
-            const response = await result.response;
-            return response.text();
-        } catch (error) {
-            logger.error('OCR extraction failed', error as Error);
-            throw new Error('Failed to extract text from image');
+      const result = await model.generateContent([
+        prompt,
+        {
+          inlineData: {
+            data: imageBase64,
+            mimeType
+          }
         }
+      ]);
+
+      const response = await result.response;
+      return response.text();
+    } catch (error) {
+      logger.error('OCR extraction failed', error as Error);
+      throw new Error('Failed to extract text from image');
     }
+  }
 
-    /**
-     * Convert approved text into a structured TrainingProgram
-     */
-    static async parseTrainingProgram(text: string, userProfile: any): Promise<any> {
-        try {
-            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  /**
+   * Convert approved text into a structured TrainingProgram
+   */
+  static async parseTrainingProgram(text: string, userProfile: any): Promise<any> {
+    try {
+      const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
 
-            const prompt = `You are a fitness AI. Convert this training plan text into a structured JSON format.
+      const prompt = `You are a fitness AI. Convert this training plan text into a structured JSON format.
 
 USER PROFILE:
 - Age: ${userProfile.age}
@@ -84,25 +84,25 @@ IMPORTANT:
 - Keep all original exercise names and notes
 - Return ONLY valid JSON, no markdown or explanation`;
 
-            const result = await model.generateContent(prompt);
-            const response = await result.response;
-            const jsonText = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const jsonText = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
-            return JSON.parse(jsonText);
-        } catch (error) {
-            logger.error('Training program parsing failed', error as Error);
-            throw new Error('Failed to parse training program');
-        }
+      return JSON.parse(jsonText);
+    } catch (error) {
+      logger.error('Training program parsing failed', error as Error);
+      throw new Error('Failed to parse training program');
     }
+  }
 
-    /**
-     * Convert approved text into a structured WeeklyMealPlan
-     */
-    static async parseNutritionPlan(text: string, userProfile: any): Promise<any> {
-        try {
-            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  /**
+   * Convert approved text into a structured WeeklyMealPlan
+   */
+  static async parseNutritionPlan(text: string, userProfile: any): Promise<any> {
+    try {
+      const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
 
-            const prompt = `You are a nutrition AI. Convert this meal plan text into a structured JSON format.
+      const prompt = `You are a nutrition AI. Convert this meal plan text into a structured JSON format.
 
 USER PROFILE:
 - Age: ${userProfile.age}
@@ -149,26 +149,26 @@ IMPORTANT:
 - Keep all original ingredient lists and instructions
 - Return ONLY valid JSON, no markdown or explanation`;
 
-            const result = await model.generateContent(prompt);
-            const response = await result.response;
-            const jsonText = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const jsonText = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
-            return JSON.parse(jsonText);
-        } catch (error) {
-            logger.error('Nutrition plan parsing failed', error as Error);
-            throw new Error('Failed to parse nutrition plan');
-        }
+      return JSON.parse(jsonText);
+    } catch (error) {
+      logger.error('Nutrition plan parsing failed', error as Error);
+      throw new Error('Failed to parse nutrition plan');
     }
+  }
 
-    /**
-     * Validate a custom program (Free tier)
-     */
-    static async validateProgram(program: any, type: 'training' | 'nutrition', userProfile: any): Promise<any> {
-        try {
-            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  /**
+   * Validate a custom program (Free tier)
+   */
+  static async validateProgram(program: any, type: 'training' | 'nutrition', userProfile: any): Promise<any> {
+    try {
+      const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
 
-            const prompt = type === 'training'
-                ? `You are a fitness safety validator. Review this training program for basic safety issues.
+      const prompt = type === 'training'
+        ? `You are a fitness safety validator. Review this training program for basic safety issues.
 
 USER PROFILE:
 - Age: ${userProfile.age}, Gender: ${userProfile.gender}
@@ -194,7 +194,7 @@ Focus on:
 - Rest/recovery
 
 Return ONLY valid JSON.`
-                : `You are a nutrition safety validator. Review this meal plan for basic safety issues.
+        : `You are a nutrition safety validator. Review this meal plan for basic safety issues.
 
 USER PROFILE:
 - Age: ${userProfile.age}, Gender: ${userProfile.gender}
@@ -220,26 +220,26 @@ Focus on:
 
 Return ONLY valid JSON.`;
 
-            const result = await model.generateContent(prompt);
-            const response = await result.response;
-            const jsonText = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const jsonText = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
-            return JSON.parse(jsonText);
-        } catch (error) {
-            logger.error('Program validation failed', error as Error);
-            throw new Error('Failed to validate program');
-        }
+      return JSON.parse(jsonText);
+    } catch (error) {
+      logger.error('Program validation failed', error as Error);
+      throw new Error('Failed to validate program');
     }
+  }
 
-    /**
-     * Comprehensive coaching feedback (Pro tier)
-     */
-    static async provideCoachingFeedback(program: any, type: 'training' | 'nutrition', userProfile: any): Promise<any> {
-        try {
-            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  /**
+   * Comprehensive coaching feedback (Pro tier)
+   */
+  static async provideCoachingFeedback(program: any, type: 'training' | 'nutrition', userProfile: any): Promise<any> {
+    try {
+      const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
 
-            const prompt = type === 'training'
-                ? `You are an expert fitness coach. Provide comprehensive feedback on this training program.
+      const prompt = type === 'training'
+        ? `You are an expert fitness coach. Provide comprehensive feedback on this training program.
 
 USER PROFILE:
 - Age: ${userProfile.age}, Gender: ${userProfile.gender}
@@ -269,7 +269,7 @@ Provide detailed coaching feedback in this JSON structure:
 }
 
 Return ONLY valid JSON.`
-                : `You are an expert nutrition coach. Provide comprehensive feedback on this meal plan.
+        : `You are an expert nutrition coach. Provide comprehensive feedback on this meal plan.
 
 USER PROFILE:
 - Age: ${userProfile.age}, Gender: ${userProfile.gender}
@@ -299,14 +299,14 @@ Provide detailed coaching feedback in this JSON structure:
 
 Return ONLY valid JSON.`;
 
-            const result = await model.generateContent(prompt);
-            const response = await result.response;
-            const jsonText = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const jsonText = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
-            return JSON.parse(jsonText);
-        } catch (error) {
-            logger.error('Coaching feedback failed', error as Error);
-            throw new Error('Failed to provide coaching feedback');
-        }
+      return JSON.parse(jsonText);
+    } catch (error) {
+      logger.error('Coaching feedback failed', error as Error);
+      throw new Error('Failed to provide coaching feedback');
     }
+  }
 }
