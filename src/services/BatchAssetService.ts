@@ -12,6 +12,18 @@ interface GroupAssetGenOptions {
     targetStatus?: 'auto' | 'draft' | 'active';
 }
 
+function cleanJson(str: string): string {
+    if (!str) return "";
+    // Remove markdown backticks if present
+    let clean = str.trim();
+    if (clean.startsWith("```json")) {
+        clean = clean.replace(/^```json/, "").replace(/```$/, "");
+    } else if (clean.startsWith("```")) {
+        clean = clean.replace(/^```/, "").replace(/```$/, "");
+    }
+    return clean.trim();
+}
+
 export class BatchAssetService {
 
     /**
@@ -259,8 +271,11 @@ export class BatchAssetService {
             REQUIREMENT: Provide a detailed breakdown with 6 to 10 steps.
         `;
         try {
-            const jsonStr = await generateAsset({ mode: 'json', prompt: prompt }); // We don't cache this raw result, we parse it
-            if (jsonStr) return JSON.parse(jsonStr);
+            const jsonStr = await generateAsset({ mode: 'json', prompt: prompt });
+            if (jsonStr) {
+                const clean = cleanJson(jsonStr);
+                return JSON.parse(clean);
+            }
         } catch (e) { console.error("Instruction Gen Failed", e); }
         return { textContext: groupName, textContextSimple: groupName, steps: [] };
     }
@@ -272,7 +287,10 @@ export class BatchAssetService {
         `;
         try {
             const jsonStr = await generateAsset({ mode: 'json', prompt: prompt });
-            if (jsonStr) return JSON.parse(jsonStr);
+            if (jsonStr) {
+                const clean = cleanJson(jsonStr);
+                return JSON.parse(clean);
+            }
         } catch (e) { return []; }
         return [];
     }
