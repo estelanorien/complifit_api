@@ -22,82 +22,58 @@ export class BatchAssetService {
         const { groupName, groupType, forceRegen } = options;
         const movementId = this.normalizeToId(groupName);
 
-        // 1. Determine Assets Needed
-        const assetsToGenerate: { key: string; type: 'image' | 'video' | 'text'; prompt?: string; label?: string; subtype: 'main' | 'step'; context?: string }[] = [];
-
-        // Main Asset
+        // 1. Instructions & Text (Pre-requisite)
         const mainKey = groupType === 'exercise' ? `ex_${movementId}` : `meal_${movementId}`;
-
-        // Check if Text Exists (Instructions) - if not, generate text first
-        let mainInstructions = await this.getAssetValue(`${mainKey}_meta`); // We store json meta here
+        let mainInstructions = await this.getAssetValue(`${mainKey}_meta`);
         if (!mainInstructions || forceRegen) {
             const instructions = await this.generateInstructions(groupName, groupType, 'main');
             if (instructions) {
                 await this.cacheAsset(`${mainKey}_meta`, JSON.stringify(instructions), 'json');
-                mainInstructions = instructions; // Use for prompt context
+                mainInstructions = instructions;
             }
         }
-
-        // Add Main Image to Queue
-        assetsToGenerate.push({
-            key: mainKey,
-            type: 'image',
-            subtype: 'main',
-            label: 'Hero Image',
-            context: (mainInstructions as any)?.textContext || groupName
-        });
-
-
-        // Steps Assets (Heuristic: 3-5 steps if not defined)
         let steps = (mainInstructions as any)?.steps || [];
         if (!steps || steps.length === 0) {
             steps = await this.generateStepBreakdown(groupName, groupType);
-            // Save updated meta
             if (mainInstructions && typeof mainInstructions === 'object') {
                 (mainInstructions as any).steps = steps;
                 await this.cacheAsset(`${mainKey}_meta`, JSON.stringify(mainInstructions), 'json');
             }
         }
 
-        steps.forEach((step: any, idx: number) => {
-            const stepNum = idx + 1;
-            const stepKey = `${mainKey}_step${stepNum}`;
-            assetsToGenerate.push({
-                key: stepKey,
-                type: 'image',
-                subtype: 'step',
-                label: step.label || `Step ${stepNum}`,
-                context: step.instruction
-            });
+        // 2. Define Phase 1 Assets (Independent: Hero, Refs)
+        const phase1Assets: { key: string; type: 'image' | 'video' | 'text'; prompt?: string; label?: string; subtype: 'main' | 'step'; context?: string }[] = [];
+
+        // Hero
+        phase1Assets.push({
+            key: mainKey, type: 'image', subtype: 'main', label: 'Hero Image',
+            context: (mainInstructions as any)?.textContext || groupName
         });
 
-        // 2. Process Queue
+        // Refs (Exercise only)
+        const atlasKey = `ex_${movementId}_atlas`;
+        const novaKey = `ex_${movementId}_nova`;
+
+        if (groupType === 'exercise') {
+            phase1Assets.push({ key: atlasKey, type: 'image', subtype: 'main', label: 'Atlas Reference', context: "Coach Atlas performing the exercise. Keep face and head intact." });
+            phase1Assets.push({ key: novaKey, type: 'image', subtype: 'main', label: 'Nova Reference', context: "Coach Nova performing the exercise. Keep face and head intact." });
+        }
+
         const results = { generated: 0, errors: 0, skipped: 0 };
 
-        for (const asset of assetsToGenerate) {
-            // Check existence
+        // Process Phase 1
+        for (const asset of phase1Assets) {
             if (!forceRegen) {
                 const exists = await this.checkAssetExists(asset.key);
-                if (exists) {
-                    results.skipped++;
-                    continue;
-                }
+                if (exists) { results.skipped++; continue; }
             }
-
-            // Construct Prompt
             const prompt = await this.constructPrompt(asset, groupName, groupType, 'standard', asset.context);
-
             try {
-                // Generate (Sequential to be safe, but server can handle more)
                 await generateAsset({
-                    mode: asset.type === 'text' ? 'json' : asset.type as any, // 'image' or 'video'
-                    prompt,
-                    key: asset.key, // This maps to the raw key e.g. ex_pushups_step1
-                    status: 'active',
-                    movementId
+                    mode: asset.type === 'text' ? 'json' : asset.type as any,
+                    prompt, key: asset.key, status: 'active', movementId
                 });
                 results.generated++;
-                // Small delay to be nice to API
                 await new Promise(r => setTimeout(r, 1000));
             } catch (e) {
                 console.error(`[Batch] Failed to generate ${asset.key}:`, e);
@@ -105,15 +81,83 @@ export class BatchAssetService {
             }
         }
 
-        // 3. Sync to Tables (Critical for App visibility)
+        // 3. Prepare Phase 2 Inputs (Load Refs)
+        let atlasRef: string | undefined;
+        let novaRef: string | undefined;
+
         if (groupType === 'exercise') {
-            await this.syncExerciseVideos(options.groupId, groupName, movementId);
-        } else {
-            await this.syncMealVideos(options.groupId, groupName, movementId);
+            const atlasVal = await this.getAssetValue(atlasKey);
+            const novaVal = await this.getAssetValue(novaKey);
+            if (typeof atlasVal === 'string') atlasRef = atlasVal;
+            if (typeof novaVal === 'string') novaRef = novaVal;
+        }
+
+        // 4. Define Phase 2 Assets (Steps with Refs)
+        const phase2Assets: { key: string; type: 'image'; subtype: 'step'; label: string; context: string; imageInput?: string }[] = [];
+
+        steps.forEach((step: any, idx: number) => {
+            const stepNum = idx + 1;
+
+            if (groupType === 'exercise') {
+                // Dual Sets for Exercises
+                if (atlasRef) {
+                    phase2Assets.push({
+                        key: `${mainKey}_atlas_step${stepNum}`, type: 'image', subtype: 'step', label: `Atlas Step ${stepNum}`,
+                        context: `Coach Atlas: ${step.instruction}. Keep face and head intact and change body positions for training.`,
+                        imageInput: atlasRef
+                    });
+                }
+                if (novaRef) {
+                    phase2Assets.push({
+                        key: `${mainKey}_nova_step${stepNum}`, type: 'image', subtype: 'step', label: `Nova Step ${stepNum}`,
+                        context: `Coach Nova: ${step.instruction}. Keep face and head intact and change body positions for training.`,
+                        imageInput: novaRef
+                    });
+                }
+                // Fallback or Generic if refs missing? Maybe generic is not needed if we have specific ones.
+                // If neither ref exists, maybe fallback to generic?
+                if (!atlasRef && !novaRef) {
+                    phase2Assets.push({
+                        key: `${mainKey}_step${stepNum}`, type: 'image', subtype: 'step', label: `Step ${stepNum}`, context: step.instruction
+                    });
+                }
+            } else {
+                // Standard Meal Steps
+                phase2Assets.push({
+                    key: `${mainKey}_step${stepNum}`, type: 'image', subtype: 'step', label: step.label || `Step ${stepNum}`, context: step.instruction
+                });
+            }
+        });
+
+        // Process Phase 2
+        for (const asset of phase2Assets) {
+            if (!forceRegen) {
+                const exists = await this.checkAssetExists(asset.key);
+                if (exists) { results.skipped++; continue; }
+            }
+            // Add "Reference consistency" note to prompt if imageInput is present
+            const ctx = asset.imageInput ? `${asset.context} STRICTLY MAINTAIN FACE AND IDENTITY FROM REFERENCE IMAGE.` : asset.context;
+
+            const prompt = await this.constructPrompt(asset, groupName, groupType, 'standard', ctx);
+            try {
+                await generateAsset({
+                    mode: 'image', // All steps are images for now
+                    prompt, key: asset.key, status: 'active', movementId,
+                    imageInput: asset.imageInput
+                });
+                results.generated++;
+                await new Promise(r => setTimeout(r, 1000));
+            } catch (e) {
+                console.error(`[Batch] Failed to generate ${asset.key}:`, e);
+                results.errors++;
+            }
         }
 
         return results;
     }
+
+
+
 
     /**
      * Finds movements that lay 'active' assets (either main video/image or meal steps)
@@ -204,52 +248,14 @@ export class BatchAssetService {
 
     // --- GEN HELPERS ---
 
-    private static async constructPrompt(
-        asset: { subtype: 'main' | 'step'; label?: string; },
-        groupName: string,
-        groupType: 'exercise' | 'meal',
-        mode: string,
-        context?: string
-    ): Promise<string> {
-        // Hardcoded Guidelines (sync with adminService.ts)
-        const guidelines = {
-            styleExerciseImage: "Cinematic fitness photography. High contrast, dramatic lighting, professional gym environment, 8k resolution, highly detailed. Realistic skin textures and sweat. No text.",
-            styleMealImage: "Hyperrealistic food photography. 8k resolution, highly detailed, delicious presentation, soft studio lighting, shallow depth of field. CRITICAL: NO TEXT, NO CALORIE LABELS, NO NUTRITION INFO, NO OVERLAYS.",
-            vitalityAvatarDescription: "Athletic Mannequin figure. Faceless, featureless face. Bald head. Neutral metallic grey skin tone. Wearing solid Emerald Green athletic shorts and Slate Grey top."
-        };
 
-        let style = "";
-        if (groupType === 'exercise') {
-            style = guidelines.styleExerciseImage;
-            // Default to Avatar if no coach specified
-            style += ` Featuring: ${guidelines.vitalityAvatarDescription}.`;
-        } else if (groupType === 'meal') {
-            style = guidelines.styleMealImage;
-        }
-
-        let coreDescription = `${groupName}`;
-        if (asset.subtype === 'step') {
-            coreDescription = `${groupName}, Step: ${asset.label || "Action"}. ${context || ""}`;
-        } else {
-            coreDescription = `${groupName}. ${context || "Perfect form execution."}`;
-        }
-
-        let prompt = `${style} SUBJECT: ${coreDescription}.`;
-
-        if (groupType === 'meal') {
-            prompt += " CRITICAL: STRICTLY NO TEXT, NO CALORIE LABELS, NO NUMBERS, NO OVERLAYS, NO NUTRITION INFO.";
-        } else {
-            prompt += " STRICTLY NO TEXT.";
-        }
-
-        return prompt;
-    }
 
     private static async generateInstructions(groupName: string, groupType: string, type: string) {
         // Generate logic using Gemini JSON
         const prompt = `
             Write instructions for ${groupType}: "${groupName}".
             Return JSON: { "textContext": "Detailed Description of execution", "textContextSimple": "Short Cue", "steps": [{ "label": "Step 1", "instruction": "..." }] }
+            REQUIREMENT: Provide a detailed breakdown with 6 to 10 steps.
         `;
         try {
             const jsonStr = await generateAsset({ mode: 'json', prompt: prompt }); // We don't cache this raw result, we parse it
@@ -260,7 +266,7 @@ export class BatchAssetService {
 
     private static async generateStepBreakdown(groupName: string, groupType: string) {
         const prompt = `
-            Break down the ${groupType}: "${groupName}" into a step-by-step guide (3-6 steps).
+            Break down the ${groupType}: "${groupName}" into a step-by-step guide (6-10 steps).
             Return JSON array: [{ "label": "Step Name", "instruction": "Detail" }]
         `;
         try {
@@ -268,6 +274,60 @@ export class BatchAssetService {
             if (jsonStr) return JSON.parse(jsonStr);
         } catch (e) { return []; }
         return [];
+    }
+
+    private static async constructPrompt(
+        asset: { subtype: 'main' | 'step'; label?: string; type: 'image' | 'video' | 'text' },
+        groupName: string,
+        groupType: 'exercise' | 'meal',
+        mode: string,
+        context?: string
+    ): Promise<string> {
+        // Hardcoded Guidelines (sync with adminService.ts)
+        const guidelines = {
+            styleExerciseImage: "Cinematic fitness photography. High contrast, dramatic lighting, professional gym environment, 8k resolution, highly detailed. Realistic skin textures and sweat. No text.",
+            styleMealImage: "Hyperrealistic food photography. 8k resolution, highly detailed, delicious presentation, soft studio lighting, shallow depth of field. CRITICAL: NO TEXT, NO CALORIE LABELS, NO NUTRITION INFO, NO OVERLAYS.",
+            vitalityAvatarDescription: "Athletic Mannequin figure. Faceless, featureless face. Bald head. Neutral metallic grey skin tone. Wearing solid Emerald Green athletic shorts and Slate Grey top.",
+            styleExerciseVideo: "Cinematic 4k fitness shot, dark gym, moody lighting, slow motion execution. Perfect form.",
+            styleMealVideo: "Cinematic 4k food videography, slow motion cooking, delicious steam, chef preparation, moody lighting."
+        };
+
+        let style = "";
+
+        if (asset.type === 'video') {
+            if (groupType === 'exercise') {
+                style = guidelines.styleExerciseVideo;
+                if (asset.label?.includes('Atlas')) style += " Featuring Coach Atlas (Tall, Muscular, Male Model).";
+                else if (asset.label?.includes('Nova')) style += " Featuring Coach Nova (Fit, Athletic, Female Model).";
+            } else {
+                style = guidelines.styleMealVideo;
+            }
+        } else {
+            // Image Styles
+            if (groupType === 'exercise') {
+                style = guidelines.styleExerciseImage;
+                style += ` Featuring: ${guidelines.vitalityAvatarDescription}.`;
+            } else if (groupType === 'meal') {
+                style = guidelines.styleMealImage;
+            }
+        }
+
+        let coreDescription = `${groupName}`;
+        if (asset.subtype === 'step') {
+            coreDescription = `${groupName}, Step: ${asset.label || "Action"}. ${context || ""}`;
+        } else {
+            coreDescription = `${groupName}. ${context || "Perfect execution."}`;
+        }
+
+        let prompt = `${style} SUBJECT: ${coreDescription}.`;
+
+        if (groupType === 'meal' && asset.type === 'image') {
+            prompt += " CRITICAL: STRICTLY NO TEXT, NO CALORIE LABELS, NO NUMBERS, NO OVERLAYS, NO NUTRITION INFO.";
+        } else if (asset.type === 'image') {
+            prompt += " STRICTLY NO TEXT.";
+        }
+
+        return prompt;
     }
 
     // --- DB HELPERS ---
