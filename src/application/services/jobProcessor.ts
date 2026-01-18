@@ -575,7 +575,7 @@ export class JobProcessor {
                     meta.source || 'auto-gen',
                     meta.persona || meta.mode || null,
                     // Infer movement_id from key if not provided (now handles meals)
-                    meta.movementId || (key.match(/^(movement_|meal_)/) ? key.split('_').slice(0, 2).join('_') : null),
+                    meta.movementId || (key.match(/^(movement_|meal_)/) ? key.replace(/_(main|step_\d+.*|atlas|nova)$/, '') : null),
                     meta.persona || null,
                     meta.step !== undefined ? meta.step : null,
                     'system'
