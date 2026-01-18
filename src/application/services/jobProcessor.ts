@@ -18,7 +18,7 @@ const COACH_PROFILES = {
     }
 };
 
-type JobType = 'MEAL_PLAN' | 'IMAGE' | 'MEAL_DETAILS' | 'EXERCISE_GENERATION' | 'MEAL_GENERATION' | 'CONTENT_UPGRADE';
+type JobType = 'MEAL_PLAN' | 'IMAGE' | 'MEAL_DETAILS' | 'EXERCISE_GENERATION' | 'MEAL_GENERATION' | 'CONTENT_UPGRADE' | 'BATCH_ASSET_GENERATION';
 
 export class JobProcessor {
     private processing = false;
@@ -180,6 +180,8 @@ export class JobProcessor {
                 return this.handleMealGeneration(payload);
             case 'CONTENT_UPGRADE':
                 return this.handleContentUpgrade(payload);
+            case 'BATCH_ASSET_GENERATION':
+                return this.handleBatchAssetGeneration(payload);
             default:
                 throw new Error(`Unknown job type: ${type}`);
         }
@@ -451,6 +453,23 @@ export class JobProcessor {
             logger.error(`[JobProcessor] Content Upgrade failed for ${name}`, e as Error);
             throw e;
         }
+    }
+
+    private async handleBatchAssetGeneration(payload: any): Promise<any> {
+        // This is a wrapper around BatchAssetService logic
+        // We import it dynamically to avoid circular dependency issues if any
+        const { BatchAssetService } = await import('../../services/BatchAssetService.js');
+
+        // Pass the payload directly to the service
+        // The service will now perform the one-by-one generation
+        // IMPORTANT: We need to update the service to be "job-aware" if we want granular progress updates here
+        // For now, let's let it run and return the final report.
+
+        // TODO: Refactor BatchAssetService to take a "progressCallback" if possible, 
+        // OR rely on the fact that it updates the DB row-by-row, so the frontend can polling 
+        // the "assets" table independently if it wants deep granular verification.
+
+        return await BatchAssetService.generateGroupAssets(payload);
     }
 
     private async saveAsset(key: string, value: string, meta: any) {

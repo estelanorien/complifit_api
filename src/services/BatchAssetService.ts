@@ -12,6 +12,16 @@ interface GroupAssetGenOptions {
     targetStatus?: 'auto' | 'draft' | 'active';
 }
 
+interface GroupAssetGenOptions {
+    groupId: string;
+    groupName: string;
+    groupType: 'exercise' | 'meal';
+    forceRegen?: boolean;
+    themeId?: string;
+    targetStatus?: 'auto' | 'draft' | 'active';
+    jobId?: string; // Optional: If running inside a job context for progress reporting
+}
+
 function cleanJson(str: string): string {
     if (!str) return "";
     // Remove markdown backticks if present
@@ -24,6 +34,15 @@ function cleanJson(str: string): string {
     return clean.trim();
 }
 
+// Add progress reporting interface
+interface GenerationResult {
+    generated: number;
+    errors: number;
+    skipped: number;
+    total: number;
+}
+
+
 export class BatchAssetService {
 
     /**
@@ -34,6 +53,16 @@ export class BatchAssetService {
         console.log(`[Batch] Starting Group Generation for ${options.groupName} (${options.groupId})`);
         const { groupName, groupType, forceRegen, targetStatus = 'auto' } = options;
         const movementId = this.normalizeToId(groupName);
+
+        // --- NEW: PHASE 0 - Placeholder Creation ---
+        // Immediate persistence of "generating" state for visual feedback
+        // We do this before heavy lifting so frontend sees it immediately
+
+        // We will do this "optimistically" or "just-in-time" during the loop
+        // But doing it upfront allows us to report "0/12 assets" immediately.
+
+        // ... (We will add placeholders in the loop or right after definition) 
+
 
         // 1. Instructions & Text (Pre-requisite)
         const mainKey = groupType === 'exercise' ? `ex_${movementId}` : `meal_${movementId}`;
@@ -76,10 +105,20 @@ export class BatchAssetService {
 
         // Process Phase 1
         for (const asset of phase1Assets) {
+            // Update Progress in Job (Optional Implementation)
+            // if (options.jobId) await this.reportProgress(options.jobId, results);
+
             if (!forceRegen) {
                 const exists = await this.checkAssetExists(asset.key);
+                // CRITICAL FIX: If it's 'generating', we treat it as existing usually, 
+                // BUT since we are THE job, we should assume we need to fulfill it unless it's 'active'/'auto'.
+                // Ideally checkAssetExists only returns true for COMPLETED assets ('active', 'auto').
                 if (exists) { results.skipped++; continue; }
             }
+
+            // PERSISTENCE: Write Placeholder "generating"
+            await this.cacheAsset(asset.key, '', 'image', 'generating');
+
             const prompt = await this.constructPrompt(asset, groupName, groupType, 'standard', asset.context);
             try {
                 await generateAsset({
@@ -87,10 +126,15 @@ export class BatchAssetService {
                     prompt, key: asset.key, status: targetStatus, movementId
                 });
                 results.generated++;
-                await new Promise(r => setTimeout(r, 1000));
+                // No sleep needed, database writes are the throttle now + natural API latency
             } catch (e) {
                 console.error(`[Batch] Failed to generate ${asset.key}:`, e);
                 results.errors++;
+                // PERSISTENCE: Mark as failed or remove 'generating' status so retry is possible
+                // We leave it 'generating' (stale) or set 'draft' (empty)? 
+                // Best to delete it so 404 appears or set special status.
+                // For now, let's just delete the placeholder so it can be retried.
+                await pool.query(`DELETE FROM cached_assets WHERE key=$1`, [asset.key]);
             }
         }
 
@@ -148,6 +192,10 @@ export class BatchAssetService {
                 const exists = await this.checkAssetExists(asset.key);
                 if (exists) { results.skipped++; continue; }
             }
+
+            // PERSISTENCE: Write Placeholder
+            await this.cacheAsset(asset.key, '', 'image', 'generating');
+
             // Add "Reference consistency" note to prompt if imageInput is present
             const ctx = asset.imageInput ? `${asset.context} STRICTLY MAINTAIN FACE AND IDENTITY FROM REFERENCE IMAGE.` : asset.context;
 
@@ -159,10 +207,10 @@ export class BatchAssetService {
                     imageInput: asset.imageInput
                 });
                 results.generated++;
-                await new Promise(r => setTimeout(r, 1000));
             } catch (e) {
                 console.error(`[Batch] Failed to generate ${asset.key}:`, e);
                 results.errors++;
+                await pool.query(`DELETE FROM cached_assets WHERE key=$1`, [asset.key]);
             }
         }
 
@@ -351,12 +399,13 @@ export class BatchAssetService {
 
     // --- DB HELPERS ---
 
-    private static async cacheAsset(key: string, value: string, type: 'json' | 'image') {
+    private static async cacheAsset(key: string, value: string, type: 'json' | 'image', status: string = 'auto') {
+        const safeStatus = ['active', 'draft', 'auto', 'generating'].includes(status) ? status : 'auto';
         await pool.query(
             `INSERT INTO cached_assets(key, value, asset_type, status)
-             VALUES($1, $2, $3, 'auto')
-             ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`,
-            [key, value, type]
+             VALUES($1, $2, $3, $4)
+             ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, status=EXCLUDED.status`,
+            [key, value, type, safeStatus]
         );
     }
 

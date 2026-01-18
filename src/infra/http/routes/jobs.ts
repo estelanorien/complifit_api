@@ -4,7 +4,7 @@ import { authGuard } from '../hooks/auth.js';
 import { jobProcessor } from '../../../application/services/jobProcessor.js';
 
 const submitJobSchema = z.object({
-    type: z.enum(['IMAGE', 'MEAL_PLAN', 'MEAL_DETAILS', 'EXERCISE_GENERATION', 'MEAL_GENERATION']),
+    type: z.enum(['IMAGE', 'MEAL_PLAN', 'MEAL_DETAILS', 'EXERCISE_GENERATION', 'MEAL_GENERATION', 'BATCH_ASSET_GENERATION']),
     payload: z.record(z.any()),
     priority: z.number().min(1).max(3).optional().default(1), // 3=HIGH, 2=MEDIUM, 1=LOW
     jobKey: z.string().optional() // Canonical key for deduplication
