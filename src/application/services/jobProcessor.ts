@@ -413,8 +413,8 @@ export class JobProcessor {
         logger.info(`[JobProcessor] PROACTIVE UPGRADE: Upgrading ${type} "${name}"`, { currentSteps });
 
         const prompt = type === 'MEAL'
-            ? `Upgrade this recipe into a "Golden Standard" recipe. Provide 8-10 high-quality, detailed instruction steps. Recipe: "${name}". Return JSON with "instructions" array (objects with "simple" and "detailed" strings).`
-            : `Upgrade this exercise into a "Golden Standard" movement. Provide 7-9 high-quality, detailed instruction steps. Exercise: "${name}". Return JSON with "instructions" array (objects with "simple" and "detailed" strings).`;
+            ? `Upgrade this recipe into a "Golden Standard" recipe. Provide 8-10 high-quality, detailed instruction steps. Recipe: "${name}". Return JSON with "instructions" array (objects with "simple" and "detailed" strings) and "nutritionTips" array (3 items). Detailed steps must be 2-3 sentences.`
+            : `Upgrade this exercise into a "Golden Standard" movement. Provide 8-10 high-quality, detailed instruction steps. Exercise: "${name}". Return JSON with "instructions" array (objects with "simple" and "detailed" strings). Detailed steps must be 2-3 sentences.`;
 
         try {
             const response: any = await aiService.generateText({ prompt });
@@ -490,15 +490,16 @@ export class JobProcessor {
 
             // 2. Save to cached_asset_meta
             await pool.query(
-                `INSERT INTO cached_asset_meta(key, prompt, source, mode, movement_id, persona, step_index)
-                 VALUES($1, $2, $3, $4, $5, $6, $7)
+                `INSERT INTO cached_asset_meta(key, prompt, source, mode, movement_id, persona, step_index, created_by)
+                 VALUES($1, $2, $3, $4, $5, $6, $7, $8)
                  ON CONFLICT (key) DO UPDATE SET 
                     prompt = EXCLUDED.prompt, 
                     source = EXCLUDED.source, 
                     mode = EXCLUDED.mode, 
                     movement_id = EXCLUDED.movement_id,
                     persona = EXCLUDED.persona,
-                    step_index = EXCLUDED.step_index`,
+                    step_index = EXCLUDED.step_index,
+                    created_by = EXCLUDED.created_by`,
                 [
                     key,
                     meta.prompt || null,
@@ -506,7 +507,8 @@ export class JobProcessor {
                     meta.persona || meta.mode || null,
                     meta.movementId || (key.startsWith('movement_') ? key.split('_').slice(0, 2).join('_') : null), // Best effort movement_id: movement_name
                     meta.persona || null,
-                    meta.step !== undefined ? meta.step : null
+                    meta.step !== undefined ? meta.step : null,
+                    'system'
                 ]
             );
         } catch (e) {
