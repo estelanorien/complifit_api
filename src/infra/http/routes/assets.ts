@@ -1,7 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authGuard } from '../hooks/auth.js';
-import { pool } from '../../db/pool.js';
+import { authGuard } from '../../infra/http/guards/authGuard.js';
+import { pool } from '../../infra/database/pool.js';
+import { canonicalService } from '../../application/services/canonicalService.js';
 
 const assetSchema = z.object({
   key: z.string(),
@@ -242,17 +243,35 @@ export async function assetsRoutes(app: FastifyInstance) {
   app.post('/assets/by-movement', { preHandler: authGuard }, async (req, reply) => {
     const body = z.object({ movementId: z.string(), limit: z.number().min(1).max(50).optional() }).parse(req.body || {});
     const limit = body.limit || 20;
+
+    let movementId = body.movementId;
+
+    // Resolve alias to canonical ID if possible
+    try {
+      const isMeal = movementId.startsWith('meal_');
+      const isExercise = movementId.startsWith('movement_');
+      const type = isMeal ? 'meal' : (isExercise ? 'exercise' : 'meal'); // Default to meal if uncertain
+
+      const cleanName = movementId.replace(/^(meal_|movement_)/, '').replace(/_/g, ' ');
+      const canonical = await canonicalService.getCanonicalId(cleanName, type);
+      if (canonical && canonical.canonicalId) {
+        movementId = canonical.canonicalId;
+      }
+    } catch (e) {
+      req.log.warn(`[Assets] Alias resolution failed for ${movementId}, falling back to literal key`);
+    }
+
     const { rows } = await pool.query(
       `SELECT a.key, a.value, a.asset_type, a.status, a.created_at,
-              m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id,
-              m.translation_status, m.translation_error,
-              m.video_status, m.video_error
-       FROM cached_assets a
-       LEFT JOIN cached_asset_meta m ON m.key = a.key
-       WHERE (m.movement_id = $1 OR a.key ILIKE $2)
-       ORDER BY a.created_at DESC
-       LIMIT $3`,
-      [body.movementId, `%${body.movementId}%`, limit]
+               m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id,
+               m.translation_status, m.translation_error,
+               m.video_status, m.video_error
+        FROM cached_assets a
+        LEFT JOIN cached_asset_meta m ON m.key = a.key
+        WHERE m.movement_id = $1 OR a.key LIKE $2
+        ORDER BY a.created_at DESC
+        LIMIT $3`,
+      [movementId, `${movementId}%`, limit]
     );
     // Ensure image values have proper data:image prefix for frontend display
     const processedRows = rows.map((row: any) => {
