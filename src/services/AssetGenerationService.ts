@@ -118,15 +118,14 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
         );
         // meta
         await pool.query(
-            `INSERT INTO cached_asset_meta(key, prompt, mode, source, created_by, movement_id)
-           VALUES($1,$2,$3,$4,$5,$6)
+            `INSERT INTO cached_asset_meta(key, prompt, mode, source, created_by)
+           VALUES($1,$2,$3,$4,$5)
            ON CONFLICT (key) DO UPDATE SET 
                 prompt=EXCLUDED.prompt, 
                 mode=EXCLUDED.mode, 
                 source=EXCLUDED.source, 
-                created_by=EXCLUDED.created_by, 
-                movement_id=EXCLUDED.movement_id`,
-            [key, prompt, mode, 'batch_service', 'system', movementId || null]
+                created_by=EXCLUDED.created_by`,
+            [key, prompt, mode, 'batch_service', 'system']
         );
     }
 
