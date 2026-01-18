@@ -126,15 +126,11 @@ export class BatchAssetService {
                     prompt, key: asset.key, status: targetStatus, movementId
                 });
                 results.generated++;
-                // No sleep needed, database writes are the throttle now + natural API latency
             } catch (e) {
                 console.error(`[Batch] Failed to generate ${asset.key}:`, e);
                 results.errors++;
-                // PERSISTENCE: Mark as failed or remove 'generating' status so retry is possible
-                // We leave it 'generating' (stale) or set 'draft' (empty)? 
-                // Best to delete it so 404 appears or set special status.
-                // For now, let's just delete the placeholder so it can be retried.
-                await pool.query(`DELETE FROM cached_assets WHERE key=$1`, [asset.key]);
+                // PERSISTENCE: Mark as failed instead of deleting
+                await this.cacheAsset(asset.key, '', 'image', 'failed');
             }
         }
 
@@ -210,7 +206,7 @@ export class BatchAssetService {
             } catch (e) {
                 console.error(`[Batch] Failed to generate ${asset.key}:`, e);
                 results.errors++;
-                await pool.query(`DELETE FROM cached_assets WHERE key=$1`, [asset.key]);
+                await this.cacheAsset(asset.key, '', 'image', 'failed');
             }
         }
 
@@ -315,8 +311,12 @@ export class BatchAssetService {
         // Generate logic using Gemini JSON
         const prompt = `
             Write instructions for ${groupType}: "${groupName}".
-            Return JSON: { "textContext": "Detailed Description of execution", "textContextSimple": "Short Cue", "steps": [{ "label": "Step 1", "instruction": "..." }] }
-            REQUIREMENT: Provide a detailed breakdown with 6 to 10 steps.
+            Return JSON: { "textContext": "Detailed Description of execution", "textContextSimple": "Short Cue", "steps": [{ "label": "Step 1", "instruction": "..." }], "nutritionTips": ["..."] }
+            
+            REQUIREMENT: 
+            1. Provide a detailed breakdown with 8 to 10 steps.
+            2. Include a "nutritionTips" array with 3 clinical science tips.
+            3. Detailed steps must be 2-3 sentences long.
         `;
         try {
             const jsonStr = await generateAsset({ mode: 'json', prompt: prompt });
@@ -330,8 +330,8 @@ export class BatchAssetService {
 
     private static async generateStepBreakdown(groupName: string, groupType: string) {
         const prompt = `
-            Break down the ${groupType}: "${groupName}" into a step-by-step guide (6-10 steps).
-            Return JSON array: [{ "label": "Step Name", "instruction": "Detail" }]
+            Break down the ${groupType}: "${groupName}" into a step-by-step guide (8-10 steps).
+            Return JSON array: [{ "label": "Step Name", "instruction": "Detail (2-3 sentences)" }]
         `;
         try {
             const jsonStr = await generateAsset({ mode: 'json', prompt: prompt });
@@ -399,8 +399,8 @@ export class BatchAssetService {
 
     // --- DB HELPERS ---
 
-    private static async cacheAsset(key: string, value: string, type: 'json' | 'image', status: string = 'auto') {
-        const safeStatus = ['active', 'draft', 'auto', 'generating'].includes(status) ? status : 'auto';
+    private static async cacheAsset(key: string, value: string, type: 'json' | 'image' | 'video', status: string = 'auto') {
+        const safeStatus = ['active', 'draft', 'auto', 'generating', 'failed', 'rejected'].includes(status) ? status : 'auto';
         await pool.query(
             `INSERT INTO cached_assets(key, value, asset_type, status)
              VALUES($1, $2, $3, $4)
@@ -428,9 +428,23 @@ export class BatchAssetService {
 
     private static async checkAssetExists(key: string): Promise<boolean> {
         const res = await pool.query(
-            `SELECT 1 FROM cached_assets WHERE key=$1 AND status IN ('active', 'auto')`,
+            `SELECT status, updated_at FROM cached_assets WHERE key=$1`,
             [key]
         );
-        return (res.rowCount || 0) > 0;
+        if (res.rowCount === 0) return false;
+
+        const { status, updated_at } = res.rows[0];
+
+        // If it's active/auto, it exists.
+        if (['active', 'auto'].includes(status)) return true;
+
+        // If it's 'generating', check if it's stale (> 10 mins)
+        if (status === 'generating') {
+            const isStale = new Date().getTime() - new Date(updated_at).getTime() > 10 * 60 * 1000;
+            return !isStale; // If NOT stale, it exists (is being processed). If stale, treat as NOT existing.
+        }
+
+        // 'failed' or others: Treat as NOT existing so we can retry
+        return false;
     }
 }
