@@ -10,11 +10,11 @@ const VITALITY_IMAGE_STYLE = "photorealistic, 8k resolution, cinematic lighting,
 
 const COACH_PROFILES = {
     atlas: {
-        description: "Caucasian male, 28 years old, short faded dark-blonde hair, clean shaven. Wearing a simple grey athletic t-shirt. Friendly but professional, trustworthy.",
+        description: "Caucasian male, 28 years old, short faded dark-blonde hair, STRICTLY clean shaven, no facial hair. Wearing a simple grey athletic t-shirt. Maintain identical facial features across all shots.",
         refKey: "system_coach_atlas_ref"
     },
     nova: {
-        description: "Caucasian female, 28 years old, long blonde hair in a high ponytail. Wearing a simple black athletic tank top. Friendly, confident smile, approachable.",
+        description: "Caucasian female, 28 years old, long blonde hair in a high ponytail. Wearing a simple black athletic tank top. Friendly, confident smile, strictly maintain hairstyle and face.",
         refKey: "system_coach_nova_ref"
     }
 };
@@ -322,7 +322,7 @@ export class JobProcessor {
                     try {
                         const { base64: pStepImg } = await aiService.generateImage({
                             prompt: pStepPrompt,
-                            referenceImage: primaryImage // Use generated main image to keep outfit consistency for steps
+                            referenceImage: primaryRef || primaryImage // Prefer master coach headshot for maximum facial consistency
                         });
                         if (pStepImg) {
                             await this.saveAsset(pStepKey, pStepImg, { prompt: pStepPrompt, source: 'exercise-job-step', persona: primaryId, step: stepIndex, movementId: baseKey, originalName, language });
@@ -341,7 +341,7 @@ export class JobProcessor {
                         try {
                             const { base64: sStepImg } = await aiService.generateImage({
                                 prompt: sStepPrompt,
-                                referenceImage: secondaryMainImage // Use generated main image for steps
+                                referenceImage: secondaryRef || secondaryMainImage // Prefer master coach headshot
                             });
                             if (sStepImg) {
                                 await this.saveAsset(sStepKey, sStepImg, { prompt: sStepPrompt, source: 'exercise-job-step', persona: secondaryId, step: stepIndex, movementId: baseKey, originalName, language });
@@ -593,6 +593,16 @@ export class JobProcessor {
             );
         } catch (e) {
             logger.error(`[JobProcessor] Failed to save asset ${key}`, e as Error);
+        }
+    }
+    private async getAssetValue(key: string): Promise<string | null> {
+        try {
+            const { rows } = await pool.query('SELECT value FROM cached_assets WHERE key = $1', [key]);
+            if (rows.length > 0) return rows[0].value;
+            return null;
+        } catch (e) {
+            logger.warn(`[JobProcessor] Failed to fetch asset value for ${key}`, e as Error);
+            return null;
         }
     }
 }
