@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authGuard } from '../../infra/http/guards/authGuard.js';
-import { pool } from '../../infra/database/pool.js';
-import { canonicalService } from '../../application/services/canonicalService.js';
+import { authGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
+import { canonicalService } from '../../../application/services/canonicalService.js';
 
 const assetSchema = z.object({
   key: z.string(),
