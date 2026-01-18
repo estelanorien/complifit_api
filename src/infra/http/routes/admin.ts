@@ -576,7 +576,9 @@ export async function adminRoutes(app: FastifyInstance) {
                 m.original_name, m.language
          FROM cached_assets a
          LEFT JOIN cached_asset_meta m ON m.key = a.key
-         WHERE a.key LIKE ANY($1) OR m.original_name LIKE ANY($1)`,
+         WHERE a.key LIKE ANY($1) OR m.original_name LIKE ANY($1)
+         ORDER BY a.created_at DESC
+         LIMIT 100`,
         [patterns]
       );
       return reply.send(res.rows);
