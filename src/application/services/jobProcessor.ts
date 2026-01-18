@@ -1,6 +1,7 @@
 import { pool } from '../../infra/db/pool.js';
 import { AiService } from './aiService.js';
 import { translationService } from './translationService.js';
+import { canonicalService } from './canonicalService.js';
 import { logger } from '../../infra/logger.js';
 
 const aiService = new AiService();
@@ -258,7 +259,9 @@ export class JobProcessor {
         const secondaryId = primaryId === 'atlas' ? 'nova' : 'atlas';
         const secondaryCoach = COACH_PROFILES[secondaryId as keyof typeof COACH_PROFILES];
 
-        const baseKey = this.normalizeKey(name, 'movement');
+        // 1. Canonicalization (Language Agnostic Matching)
+        const { canonicalId: baseKey, originalName, language } = await canonicalService.getCanonicalId(name, 'exercise');
+        const canonicalName = baseKey.replace(/^movement_/, '').replace(/_/g, ' ');
 
         // PRE-FETCH COACH REFERENCES
         const primaryRef = await this.getAsset(primaryCoach.refKey);
@@ -278,8 +281,8 @@ export class JobProcessor {
             });
             if (!primaryImage) throw new Error('Failed to generate primary main image');
 
-            await this.saveAsset(`${baseKey}_main`, primaryImage, { prompt: primaryPrompt, source: 'exercise-job-primary', persona: primaryId, movementId: baseKey });
-            await this.saveAsset(`${baseKey}_${primaryId}`, primaryImage, { prompt: primaryPrompt, source: 'exercise-job-primary', persona: primaryId, movementId: baseKey });
+            await this.saveAsset(`${baseKey}_main`, primaryImage, { prompt: primaryPrompt, source: 'exercise-job-primary', persona: primaryId, movementId: baseKey, originalName, language });
+            await this.saveAsset(`${baseKey}_${primaryId}`, primaryImage, { prompt: primaryPrompt, source: 'exercise-job-primary', persona: primaryId, movementId: baseKey, originalName, language });
 
             // --- PROACTIVE LOCKING: Translation ---
             translationService.preTranslate([name, ...(instructions || [])], 'exercise');
@@ -296,7 +299,7 @@ export class JobProcessor {
                 });
                 secondaryMainImage = sImg;
                 if (secondaryMainImage) {
-                    await this.saveAsset(`${baseKey}_${secondaryId}`, secondaryMainImage, { prompt: secondaryPrompt, source: 'exercise-job-secondary', persona: secondaryId, movementId: baseKey });
+                    await this.saveAsset(`${baseKey}_${secondaryId}`, secondaryMainImage, { prompt: secondaryPrompt, source: 'exercise-job-secondary', persona: secondaryId, movementId: baseKey, originalName, language });
                 }
             } catch (e) {
                 logger.error(`[JobProcessor] SECONDARY MAIN generation failed for ${name}`, e as Error);
@@ -322,9 +325,9 @@ export class JobProcessor {
                             referenceImage: primaryImage // Use generated main image to keep outfit consistency for steps
                         });
                         if (pStepImg) {
-                            await this.saveAsset(pStepKey, pStepImg, { prompt: pStepPrompt, source: 'exercise-job-step', persona: primaryId, step: stepIndex, movementId: baseKey });
+                            await this.saveAsset(pStepKey, pStepImg, { prompt: pStepPrompt, source: 'exercise-job-step', persona: primaryId, step: stepIndex, movementId: baseKey, originalName, language });
                             // Also save as generic step if it's the primary persona
-                            await this.saveAsset(`${baseKey}_step_${stepIndex}_${contentHash}`, pStepImg, { prompt: pStepPrompt, source: 'exercise-job-step', persona: primaryId, step: stepIndex, movementId: baseKey });
+                            await this.saveAsset(`${baseKey}_step_${stepIndex}_${contentHash}`, pStepImg, { prompt: pStepPrompt, source: 'exercise-job-step', persona: primaryId, step: stepIndex, movementId: baseKey, originalName, language });
                         }
                     } catch (e) {
                         logger.error(`[JobProcessor] Primary step ${stepIndex} failed for ${name}`, e as Error);
@@ -341,7 +344,7 @@ export class JobProcessor {
                                 referenceImage: secondaryMainImage // Use generated main image for steps
                             });
                             if (sStepImg) {
-                                await this.saveAsset(sStepKey, sStepImg, { prompt: sStepPrompt, source: 'exercise-job-step', persona: secondaryId, step: stepIndex, movementId: baseKey });
+                                await this.saveAsset(sStepKey, sStepImg, { prompt: sStepPrompt, source: 'exercise-job-step', persona: secondaryId, step: stepIndex, movementId: baseKey, originalName, language });
                             }
                         } catch (e) {
                             logger.error(`[JobProcessor] Secondary step ${stepIndex} failed for ${name}`, e as Error);
@@ -379,10 +382,13 @@ export class JobProcessor {
         if (!name) throw new Error('Meal name required');
 
         // 1. Canonicalization (Language Agnostic Matching)
-        // Translate name to English to use as the unique ID for this meal concepts
-        const canonicalName = await translationService.translateText(name, 'en', 'meal_name');
-        const baseKey = this.normalizeKey(canonicalName, 'meal');
-        const originalKey = this.normalizeKey(name, 'meal');
+        // Maps localized name to standardized English ID and detects language
+        const { canonicalId: baseKey, originalName, language } = await canonicalService.getCanonicalId(name, 'meal');
+        const originalKey = this.normalizeKey(name, 'meal'); // Still need local key for legacy/direct matching
+        const canonicalName = baseKey.replace(/^meal_/, '').replace(/_/g, ' ');
+
+        // Save metadata about the group origin for later search and discovery
+        // This is done implicitly in saveAsset, but we need the variables here
 
         // Translate ingredients for better image generation
         const ingredientText = Array.isArray(ingredients) ? ingredients.join(', ') : '';
@@ -397,15 +403,15 @@ export class JobProcessor {
             if (!mainImage) throw new Error('Failed to generate main meal image');
 
             // Save under Canonical Key (The "Real" Asset)
-            await this.saveAsset(`${baseKey}_main`, mainImage, { prompt: mainPrompt, source: 'meal-job-main', movementId: baseKey });
+            await this.saveAsset(`${baseKey}_main`, mainImage, { prompt: mainPrompt, source: 'meal-job-main', movementId: baseKey, originalName, language });
 
             // Save under Original Key (Alias for Frontend Discovery)
             // Link it to the Canonical movementId so Admin sees them as one group
             if (baseKey !== originalKey) {
-                await this.saveAsset(`${originalKey}_main`, mainImage, { prompt: mainPrompt, source: 'meal-job-main-alias', movementId: baseKey });
+                await this.saveAsset(`${originalKey}_main`, mainImage, { prompt: mainPrompt, source: 'meal-job-main-alias', movementId: baseKey, originalName, language });
             }
             // Legacy/Generic key support
-            await this.saveAsset(baseKey, mainImage, { prompt: mainPrompt, source: 'meal-job-main', movementId: baseKey });
+            await this.saveAsset(baseKey, mainImage, { prompt: mainPrompt, source: 'meal-job-main', movementId: baseKey, originalName, language });
 
 
             // --- PROACTIVE LOCKING: Translation ---
@@ -456,11 +462,11 @@ export class JobProcessor {
                         });
                         if (stepImg) {
                             // Save Canonical
-                            await this.saveAsset(canonicalStepKey, stepImg, { prompt: stepPrompt, source: 'meal-job-step', step: stepIndex, movementId: baseKey });
+                            await this.saveAsset(canonicalStepKey, stepImg, { prompt: stepPrompt, source: 'meal-job-step', step: stepIndex, movementId: baseKey, originalName, language });
 
                             // Save Original Alias
                             if (originalStepKey !== canonicalStepKey) {
-                                await this.saveAsset(originalStepKey, stepImg, { prompt: stepPrompt, source: 'meal-job-step-alias', step: stepIndex, movementId: baseKey });
+                                await this.saveAsset(originalStepKey, stepImg, { prompt: stepPrompt, source: 'meal-job-step-alias', step: stepIndex, movementId: baseKey, originalName, language });
                             }
                         }
                     } catch (e) {
@@ -559,8 +565,8 @@ export class JobProcessor {
 
             // 2. Save to cached_asset_meta
             await pool.query(
-                `INSERT INTO cached_asset_meta(key, prompt, source, mode, movement_id, persona, step_index, created_by)
-                 VALUES($1, $2, $3, $4, $5, $6, $7, $8)
+                `INSERT INTO cached_asset_meta(key, prompt, source, mode, movement_id, persona, step_index, created_by, original_name, language)
+                 VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                  ON CONFLICT (key) DO UPDATE SET 
                     prompt = EXCLUDED.prompt, 
                     source = EXCLUDED.source, 
@@ -568,7 +574,9 @@ export class JobProcessor {
                     movement_id = EXCLUDED.movement_id,
                     persona = EXCLUDED.persona,
                     step_index = EXCLUDED.step_index,
-                    created_by = EXCLUDED.created_by`,
+                    created_by = EXCLUDED.created_by,
+                    original_name = EXCLUDED.original_name,
+                    language = EXCLUDED.language`,
                 [
                     key,
                     meta.prompt || null,
@@ -578,7 +586,9 @@ export class JobProcessor {
                     meta.movementId || (key.match(/^(movement_|meal_)/) ? key.replace(/_(main|step_\d+.*|atlas|nova)$/, '') : null),
                     meta.persona || null,
                     meta.step !== undefined ? meta.step : null,
-                    'system'
+                    'system',
+                    meta.originalName || null,
+                    meta.language || null
                 ]
             );
         } catch (e) {

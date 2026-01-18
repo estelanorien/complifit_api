@@ -6,6 +6,7 @@ import { pool } from '../../db/pool.js';
 import { env } from '../../../config/env.js';
 import { uploadToYouTube } from '../../../services/youtubeService.js';
 import bcrypt from 'bcryptjs';
+import { normalizeToMovementId } from '../../../application/services/normalization.js';
 
 const assetGenSchema = z.object({
   mode: z.enum(['image', 'video', 'json']).default('image'),
@@ -400,16 +401,6 @@ export async function adminRoutes(app: FastifyInstance) {
   // Get all movements (exercises and meals) from database
   app.get('/admin/movements', { preHandler: adminGuard }, async (req) => {
     try {
-      // Helper function to normalize name to movement_id format (without prefix, frontend will add ex_ or meal_)
-      // Matches frontend normalizeKey logic: sorts words for consistency
-      const normalizeToMovementId = (name: string): string => {
-        if (!name) return 'unknown';
-        let clean = name.toLowerCase().trim();
-        clean = clean.replace(/[^a-z0-9]+/g, ' ');
-        const words = clean.split(' ').filter((w: string) => w.length > 0);
-        return words.join('_');
-      };
-
       const exerciseMap = new Map<string, any>();
       const mealMap = new Map<string, any>();
 
@@ -549,15 +540,17 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/admin/assets/recent', { preHandler: adminGuard }, async (req, reply) => {
     try {
       // Fetch distinct movement_ids created in last 24h
-      // Use metadata to group them.
-      // We want things that are NOT in the standard library if possible, 
-      // but for simplicity, we just show "Latest 50".
+      // Use metadata to group them and include localized name/lang
       const res = await pool.query(
-        `SELECT DISTINCT movement_id, source, MAX(created_at) as latest_gen
+        `SELECT DISTINCT ON (movement_id) 
+            movement_id, 
+            source, 
+            original_name,
+            language,
+            MAX(created_at) OVER (PARTITION BY movement_id) as latest_gen
           FROM cached_asset_meta 
           WHERE movement_id IS NOT NULL 
-          GROUP BY movement_id, source
-          ORDER BY latest_gen DESC
+          ORDER BY movement_id, latest_gen DESC
           LIMIT 50`
       );
       return res.rows;
@@ -574,16 +567,16 @@ export async function adminRoutes(app: FastifyInstance) {
 
     try {
       // Construct LIKE patterns: prefix%
-      // Note: We avoid regex (~) because prefixes might contain special chars like () from names
       const patterns = prefixes.map(p => `${p}%`);
       console.log("[AdminScan] LIKE Patterns:", patterns);
 
       const res = await pool.query(
         `SELECT a.key, a.asset_type, a.status,
-                m.translation_status, m.video_status, m.translation_error, m.video_error
+                m.translation_status, m.video_status, m.translation_error, m.video_error,
+                m.original_name, m.language
          FROM cached_assets a
          LEFT JOIN cached_asset_meta m ON m.key = a.key
-         WHERE a.key LIKE ANY($1)`,
+         WHERE a.key LIKE ANY($1) OR m.original_name LIKE ANY($1)`,
         [patterns]
       );
       return reply.send(res.rows);
