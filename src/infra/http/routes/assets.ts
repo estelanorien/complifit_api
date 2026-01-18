@@ -32,20 +32,19 @@ export async function assetsRoutes(app: FastifyInstance) {
       const decodedKey = decodeURIComponent(key);
 
       const { rows } = await pool.query(
-        `SELECT value, asset_type FROM cached_assets WHERE key=$1 AND status IN ('active','auto','draft') LIMIT 1`,
+        `SELECT value, asset_type, status FROM cached_assets WHERE key=$1 AND status IN ('active','auto','draft','generating','failed') LIMIT 1`,
         [decodedKey]
       );
 
       if (rows.length === 0) {
-        return reply.status(404).send(null);
+        return reply.status(404).send({ error: 'Asset not found' });
       }
 
       const value = rows[0].value;
       const assetType = rows[0].asset_type;
+      const status = rows[0].status;
 
-      // Wrap in JSON object to avoid direct string return which can confuse some clients
-      // or cause issues with raw base64 strings being treated as plain text
-      return { value, assetType };
+      return { value, assetType, status };
     } catch (error: any) {
       req.log.error({
         error: 'GET /assets/:key failed',
