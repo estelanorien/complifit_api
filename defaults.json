@@ -1,0 +1,92 @@
+[
+  {
+    "table_name": "cached_asset_meta",
+    "column_name": "created_at",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "cached_asset_meta",
+    "column_name": "created_by",
+    "column_default": null
+  },
+  {
+    "table_name": "cached_assets",
+    "column_name": "created_at",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "cached_asset_meta",
+    "column_name": "step_index",
+    "column_default": null
+  },
+  {
+    "table_name": "cached_asset_meta",
+    "column_name": "key",
+    "column_default": null
+  },
+  {
+    "table_name": "cached_asset_meta",
+    "column_name": "prompt",
+    "column_default": null
+  },
+  {
+    "table_name": "cached_asset_meta",
+    "column_name": "mode",
+    "column_default": null
+  },
+  {
+    "table_name": "cached_asset_meta",
+    "column_name": "source",
+    "column_default": null
+  },
+  {
+    "table_name": "cached_asset_meta",
+    "column_name": "movement_id",
+    "column_default": null
+  },
+  {
+    "table_name": "cached_asset_meta",
+    "column_name": "persona",
+    "column_default": null
+  },
+  {
+    "table_name": "cached_asset_meta",
+    "column_name": "translation_status",
+    "column_default": "'none'::character varying"
+  },
+  {
+    "table_name": "cached_asset_meta",
+    "column_name": "translation_error",
+    "column_default": null
+  },
+  {
+    "table_name": "cached_asset_meta",
+    "column_name": "video_status",
+    "column_default": "'none'::character varying"
+  },
+  {
+    "table_name": "cached_assets",
+    "column_name": "key",
+    "column_default": null
+  },
+  {
+    "table_name": "cached_asset_meta",
+    "column_name": "video_error",
+    "column_default": null
+  },
+  {
+    "table_name": "cached_assets",
+    "column_name": "value",
+    "column_default": null
+  },
+  {
+    "table_name": "cached_assets",
+    "column_name": "asset_type",
+    "column_default": "'json'::text"
+  },
+  {
+    "table_name": "cached_assets",
+    "column_name": "status",
+    "column_default": "'active'::text"
+  }
+]
