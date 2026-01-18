@@ -21,8 +21,8 @@ export async function trainingRoutes(app: FastifyInstance) {
     startDate: z.string().optional()
   });
 
-  app.post('/training/generate', { preHandler: authGuard }, async (req: AuthenticatedRequest, reply) => {
-    const user = req.user;
+  app.post('/training/generate', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
     const body = generateSchema.parse(req.body);
     try {
       const trainingPlan = await generateTrainingPlan({
@@ -67,8 +67,8 @@ export async function trainingRoutes(app: FastifyInstance) {
     dateCreated: z.string().optional()
   });
 
-  app.get('/training/archive', { preHandler: authGuard }, async (req) => {
-    const user = req.user;
+  app.get('/training/archive', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT id, name, program, date_created
        FROM saved_training_programs
@@ -86,8 +86,8 @@ export async function trainingRoutes(app: FastifyInstance) {
     }));
   });
 
-  app.post('/training/archive', { preHandler: authGuard }, async (req) => {
-    const user = req.user;
+  app.post('/training/archive', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
     const body = archiveSchema.parse(req.body);
     if (body.id) {
       await pool.query(
@@ -110,7 +110,7 @@ export async function trainingRoutes(app: FastifyInstance) {
   });
 
   app.delete('/training/archive/:id', { preHandler: authGuard }, async (req, reply) => {
-    const user = req.user;
+    const user = (req as AuthenticatedRequest).user;
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     await pool.query(
       `DELETE FROM saved_training_programs WHERE id = $1 AND user_id = $2`,
@@ -120,8 +120,8 @@ export async function trainingRoutes(app: FastifyInstance) {
   });
 
   // Archives
-  app.get('/training/archives', { preHandler: authGuard }, async (req) => {
-    const user = req.user;
+  app.get('/training/archives', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT id, name, date_created, program, progress_day_index
        FROM training_archives
@@ -147,7 +147,7 @@ export async function trainingRoutes(app: FastifyInstance) {
   });
 
   app.post('/training/archives', { preHandler: authGuard }, async (req, reply) => {
-    const user = req.user;
+    const user = (req as AuthenticatedRequest).user;
     const body = saveArchiveSchema.parse(req.body);
     const archiveId = (await pool.query('SELECT gen_random_uuid() AS id')).rows[0].id;
     await pool.query(
@@ -171,7 +171,7 @@ export async function trainingRoutes(app: FastifyInstance) {
   });
 
   app.post('/training/archives/load', { preHandler: authGuard }, async (req, reply) => {
-    const user = req.user;
+    const user = (req as AuthenticatedRequest).user;
     const body = loadArchiveSchema.parse(req.body);
     const { rows } = await pool.query(
       `SELECT program FROM training_archives WHERE id = $1 AND user_id = $2`,
@@ -195,7 +195,7 @@ export async function trainingRoutes(app: FastifyInstance) {
   });
 
   app.delete('/training/archives/:id', { preHandler: authGuard }, async (req, reply) => {
-    const user = req.user;
+    const user = (req as AuthenticatedRequest).user;
     const id = z.string().uuid().parse((req.params as any).id);
     const res = await pool.query(`DELETE FROM training_archives WHERE id = $1 AND user_id = $2`, [id, user.userId]);
     if (res.rowCount === 0) return reply.status(404).send({ error: 'Archive not found' });
@@ -203,7 +203,7 @@ export async function trainingRoutes(app: FastifyInstance) {
   });
 
   app.patch('/training/archives/:id', { preHandler: authGuard }, async (req, reply) => {
-    const user = req.user;
+    const user = (req as AuthenticatedRequest).user;
     const id = z.string().uuid().parse((req.params as any).id);
     const body = z.object({ name: z.string() }).parse(req.body);
     const res = await pool.query(
@@ -215,8 +215,8 @@ export async function trainingRoutes(app: FastifyInstance) {
   });
 
   // Alias routes for backward compatibility (/archives/training ? /training/archives)
-  app.get('/archives/training', { preHandler: authGuard }, async (req) => {
-    const user = req.user;
+  app.get('/archives/training', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT id, name, date_created, program, progress_day_index
        FROM training_archives
@@ -235,7 +235,7 @@ export async function trainingRoutes(app: FastifyInstance) {
   });
 
   app.post('/archives/training', { preHandler: authGuard }, async (req, reply) => {
-    const user = req.user;
+    const user = (req as AuthenticatedRequest).user;
     const body = saveArchiveSchema.parse(req.body);
     const archiveId = (await pool.query('SELECT gen_random_uuid() AS id')).rows[0].id;
     await pool.query(
@@ -254,7 +254,7 @@ export async function trainingRoutes(app: FastifyInstance) {
   });
 
   app.delete('/archives/training/:id', { preHandler: authGuard }, async (req, reply) => {
-    const user = req.user;
+    const user = (req as AuthenticatedRequest).user;
     const id = z.string().uuid().parse((req.params as any).id);
     const res = await pool.query(`DELETE FROM training_archives WHERE id = $1 AND user_id = $2`, [id, user.userId]);
     if (res.rowCount === 0) return reply.status(404).send({ error: 'Archive not found' });
@@ -262,7 +262,7 @@ export async function trainingRoutes(app: FastifyInstance) {
   });
 
   app.patch('/archives/training/:id', { preHandler: authGuard }, async (req, reply) => {
-    const user = req.user;
+    const user = (req as AuthenticatedRequest).user;
     const id = z.string().uuid().parse((req.params as any).id);
     const body = z.object({ name: z.string() }).parse(req.body);
     const res = await pool.query(
@@ -274,7 +274,7 @@ export async function trainingRoutes(app: FastifyInstance) {
   });
 
   app.get('/archives/training/:id', { preHandler: authGuard }, async (req, reply) => {
-    const user = req.user;
+    const user = (req as AuthenticatedRequest).user;
     const id = z.string().uuid().parse((req.params as any).id);
     const { rows } = await pool.query(
       `SELECT id, name, date_created, program, progress_day_index, summary

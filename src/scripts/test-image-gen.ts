@@ -32,7 +32,7 @@ async function testImageGen() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'x-goog-api-key': API_KEY
+                'x-goog-api-key': API_KEY as string
             },
             body: JSON.stringify(body)
         });
