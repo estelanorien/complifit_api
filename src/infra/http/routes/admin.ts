@@ -545,6 +545,28 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
+  // NEW: Get Recent User Content for Admin Review
+  app.get('/admin/assets/recent', { preHandler: adminGuard }, async (req, reply) => {
+    try {
+      // Fetch distinct movement_ids created in last 24h
+      // Use metadata to group them.
+      // We want things that are NOT in the standard library if possible, 
+      // but for simplicity, we just show "Latest 50".
+      const res = await pool.query(
+        `SELECT DISTINCT movement_id, source, MAX(created_at) as latest_gen
+          FROM cached_asset_meta 
+          WHERE movement_id IS NOT NULL 
+          GROUP BY movement_id, source
+          ORDER BY latest_gen DESC
+          LIMIT 50`
+      );
+      return res.rows;
+    } catch (e: any) {
+      req.log.error(e);
+      return [];
+    }
+  });
+
   // Batch Scan (Regex/Prefix Match for messy keys) including VALUES
   app.post('/admin/assets/scan', { preHandler: adminGuard }, async (req, reply) => {
     const { prefixes } = req.body as { prefixes: string[] };
