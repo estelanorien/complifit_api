@@ -290,3 +290,4 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 }
 
+// Force rebuild 2026-01-19
