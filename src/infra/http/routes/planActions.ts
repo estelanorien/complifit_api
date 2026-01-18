@@ -465,9 +465,13 @@ export async function planActionsRoutes(app: FastifyInstance) {
         while (attempts < MAX_RETRIES) {
             attempts++;
             try {
+                const ingredientInstruction = body.additionalIngredients
+                    ? `\nMUST INCLUDE INGREDIENT: "${body.additionalIngredients}" (Critical Requirement).`
+                    : "";
+
                 const prompt = `Suggest ONE alternative ${body.type} recipe (~${body.targetCalories} kcal).
               Diet: ${body.profile?.dietaryPreference || 'none'}. Excludes: ${body.excludes.join(', ') || 'none'}.
-              Language: ${body.lang}.
+              Language: ${body.lang}.${ingredientInstruction}
               
               CRITICAL QUALITY RULES:
               1. MUST have 5-8 distinct cooking steps.
