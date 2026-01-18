@@ -20,7 +20,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
     const aiService = new AiService();
 
     // Generate a complete Smart Plan (Training + Nutrition)
-    app.post('/plans/generate', { preHandler: authGuard }, withErrorHandler(async (req: AuthenticatedRequest, reply) => {
+    app.post('/plans/generate', { preHandler: authGuard }, withErrorHandler(async (req: any, reply) => {
         const user = req.user;
         const body = z.object({
             profile: UserProfileSchema,
@@ -423,7 +423,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
     }));
 
     // Save an existing generated plan
-    app.post('/plans/save-generated', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
+    app.post('/plans/save-generated', { preHandler: authGuard }, withErrorHandler(async (req: any, reply) => {
         const user = req.user;
         const body = z.object({
             training: TrainingPlanSchema,
@@ -446,7 +446,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
     }));
 
     // Reroll meal
-    app.post('/plans/reroll/meal', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
+    app.post('/plans/reroll/meal', { preHandler: authGuard }, withErrorHandler(async (req: any, reply) => {
         const user = req.user;
         const body = z.object({
             type: z.string(),
@@ -515,7 +515,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
     }));
 
     // Reroll exercise
-    app.post('/plans/reroll/exercise', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
+    app.post('/plans/reroll/exercise', { preHandler: authGuard }, withErrorHandler(async (req: any, reply) => {
         const user = req.user;
         const body = z.object({
             currentName: z.string(),
