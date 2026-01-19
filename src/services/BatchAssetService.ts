@@ -39,7 +39,7 @@ export class BatchAssetService {
             }
         }
 
-        let steps = (mainInstructions as any)?.steps || [];
+        let steps = (mainInstructions as any)?.instructions || (mainInstructions as any)?.steps || [];
         const stepCount = steps.length > 0 ? steps.length : (groupType === 'exercise' ? 6 : 4);
 
         // 2. Collect Assets to Generate
@@ -53,24 +53,27 @@ export class BatchAssetService {
 
         if (groupType === 'exercise') {
             // Atlas Hero & Steps
-            assetsToGenerate.push({ key: `ex_${movementId}_atlas_main`, subtype: 'main', label: 'Atlas Hero', identity: 'atlas', context: `${groupName} by Coach Atlas.` });
+            assetsToGenerate.push({ key: `ex_${movementId}_atlas_main`, subtype: 'main', label: 'Atlas Hero', identity: 'atlas', context: (mainInstructions as any)?.description || `${groupName} by Coach Atlas.` });
             for (let i = 1; i <= stepCount; i++) {
-                const instr = steps[i - 1]?.instruction || `Step ${i} of ${groupName}.`;
-                assetsToGenerate.push({ key: `ex_${movementId}_atlas_step_${i}`, subtype: 'step', label: `Atlas Step ${i}`, identity: 'atlas', context: instr });
+                const instr = steps[i - 1];
+                const contextText = instr ? (instr.detailed || instr.instruction || instr.description || "") : `Step ${i} of ${groupName}.`;
+                assetsToGenerate.push({ key: `ex_${movementId}_atlas_step_${i}`, subtype: 'step', label: instr?.label || `Atlas Step ${i}`, identity: 'atlas', context: contextText });
             }
 
             // Nova Hero & Steps
-            assetsToGenerate.push({ key: `ex_${movementId}_nova_main`, subtype: 'main', label: 'Nova Hero', identity: 'nova', context: `${groupName} by Coach Nova.` });
+            assetsToGenerate.push({ key: `ex_${movementId}_nova_main`, subtype: 'main', label: 'Nova Hero', identity: 'nova', context: (mainInstructions as any)?.description || `${groupName} by Coach Nova.` });
             for (let i = 1; i <= stepCount; i++) {
-                const instr = steps[i - 1]?.instruction || `Step ${i} of ${groupName}.`;
-                assetsToGenerate.push({ key: `ex_${movementId}_nova_step_${i}`, subtype: 'step', label: `Nova Step ${i}`, identity: 'nova', context: instr });
+                const instr = steps[i - 1];
+                const contextText = instr ? (instr.detailed || instr.instruction || instr.description || "") : `Step ${i} of ${groupName}.`;
+                assetsToGenerate.push({ key: `ex_${movementId}_nova_step_${i}`, subtype: 'step', label: instr?.label || `Nova Step ${i}`, identity: 'nova', context: contextText });
             }
         } else {
             // Meal Hero & Steps
-            assetsToGenerate.push({ key: `meal_${movementId}_main`, subtype: 'main', label: 'Hero Image', context: (mainInstructions as any)?.textContext || groupName });
+            assetsToGenerate.push({ key: `meal_${movementId}_main`, subtype: 'main', label: 'Hero Image', context: (mainInstructions as any)?.description || (mainInstructions as any)?.textContext || groupName });
             for (let i = 1; i <= stepCount; i++) {
-                const instr = steps[i - 1]?.instruction || `Preparing ${groupName}, Step ${i}.`;
-                assetsToGenerate.push({ key: `meal_${movementId}_step_${i}`, subtype: 'step', label: `Step ${i}`, context: instr });
+                const instr = steps[i - 1];
+                const contextText = instr ? (instr.detailed || instr.instruction || instr.description || "") : `Preparing ${groupName}, Step ${i}.`;
+                assetsToGenerate.push({ key: `meal_${movementId}_step_${i}`, subtype: 'step', label: instr?.label || `Step ${i}`, context: contextText });
             }
         }
 
