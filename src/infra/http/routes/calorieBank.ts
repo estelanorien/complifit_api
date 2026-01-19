@@ -109,15 +109,70 @@ export async function calorieBankRoutes(app: FastifyInstance) {
   app.get('/calorie-bank/event/current', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as any).user;
     const { rows } = await pool.query(
-      `SELECT id, start_time, accumulated_calories, pending_review
+      `SELECT id, start_time, accumulated_calories, pending_review, is_active
        FROM event_sessions
        WHERE user_id = $1 AND is_active = true
        ORDER BY start_time DESC
        LIMIT 1`,
       [user.userId]
     );
+
     if (rows.length === 0) return reply.send(null);
-    return reply.send(rows[0]);
+
+    const session = rows[0];
+    const startTime = new Date(session.start_time);
+    const now = new Date();
+
+    // Autoconclusion Logic: If start_time is a past day
+    const isPastDay = startTime.toDateString() !== now.toDateString();
+
+    if (isPastDay) {
+      req.log.info({ sessionId: session.id, userId: user.userId }, 'Autoconcluding past-day event session');
+
+      // 1. Calculate smarter review unlock time
+      // If now is before 4 AM, same day neon, else next day noon
+      const reviewUnlockTime = new Date(now);
+      if (now.getHours() >= 4) {
+        reviewUnlockTime.setDate(now.getDate() + 1);
+      }
+      reviewUnlockTime.setHours(12, 0, 0, 0);
+
+      // 2. Update session in database
+      await pool.query(
+        `UPDATE event_sessions
+         SET is_active = false,
+             pending_review = true,
+             end_time = now()
+         WHERE id = $1`,
+        [session.id]
+      );
+
+      // 3. Sync with user profile JSONB
+      await pool.query(
+        `UPDATE user_profiles
+         SET profile_data = jsonb_set(
+             jsonb_set(
+               jsonb_set(
+                 COALESCE(profile_data, '{}'::jsonb),
+                 '{eventMode,isActive}', 'false'::jsonb
+               ),
+               '{eventMode,pendingReview}', 'true'::jsonb
+             ),
+             '{eventMode,reviewUnlockTime}', to_jsonb($1::text)
+           ),
+           updated_at = now()
+         WHERE user_id = $2`,
+        [reviewUnlockTime.toISOString(), user.userId]
+      );
+
+      return reply.send({
+        ...session,
+        is_active: false,
+        pending_review: true
+      });
+    }
+
+    return reply.send(session);
   });
 
   // Generate burner workout for calorie surplus
