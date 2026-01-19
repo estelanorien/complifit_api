@@ -102,7 +102,7 @@ export async function adminRoutes(app: FastifyInstance) {
       parts.push({ text: prompt });
 
       if (mode === 'image') {
-        const model = 'gemini-1.5-flash';
+        const model = 'gemini-2.5-flash';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
         const res = await fetch(genEndpoint, {

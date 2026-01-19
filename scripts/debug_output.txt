@@ -1,0 +1,9 @@
+--- START DEBUG ---
+TS: Atlas Ref: FOUND (Size: 854498)
+TS: Target Key: ex_agility_cones_with_ball_atlas_main
+TS: Target Asset: NOT FOUND (404 Confirmed)
+TS: Bad Key: ex_agility_ball_cones_with_atlas_main
+TS: Bad Sorted Key: NOT FOUND
+TS: Testing Gemini API (GenerateContent with 2.5-flash)...
+TS: ✅ Gemini API Success (2.5-flash)
+--- END DEBUG ---

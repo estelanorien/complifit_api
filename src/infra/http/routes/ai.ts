@@ -876,7 +876,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       // CORRECT MODEL: gemini-2.5-flash-image (Nano Banana)
       // Reference: https://ai.google.dev/gemini-api/docs/image-generation
       // This model natively outputs images via inlineData in response
-      const model = 'gemini-2.5-flash-image';
+      const model = 'gemini-2.5-flash';
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
       // Build parts array
