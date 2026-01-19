@@ -54,16 +54,6 @@ export class BatchAssetService {
         const { groupName, groupType, forceRegen, targetStatus = 'auto' } = options;
         const movementId = this.normalizeToId(groupName);
 
-        // --- NEW: PHASE 0 - Placeholder Creation ---
-        // Immediate persistence of "generating" state for visual feedback
-        // We do this before heavy lifting so frontend sees it immediately
-
-        // We will do this "optimistically" or "just-in-time" during the loop
-        // But doing it upfront allows us to report "0/12 assets" immediately.
-
-        // ... (We will add placeholders in the loop or right after definition) 
-
-
         // 1. Instructions & Text (Pre-requisite)
         const mainKey = groupType === 'exercise' ? `ex_${movementId}` : `meal_${movementId}`;
         let mainInstructions = await this.getAssetValue(`${mainKey}_meta`);
@@ -83,42 +73,92 @@ export class BatchAssetService {
             }
         }
 
-        // 2. Define Phase 1 Assets (Independent: Hero, Refs)
+        // 2. Define Assets
         const phase1Assets: { key: string; type: 'image' | 'video' | 'text'; prompt?: string; label?: string; subtype: 'main' | 'step'; context?: string }[] = [];
+        const phase2Assets: { key: string; type: 'image'; subtype: 'step'; label: string; context: string; imageInput?: string }[] = [];
 
-        // Hero
-        phase1Assets.push({
-            key: mainKey, type: 'image', subtype: 'main', label: 'Hero Image',
-            context: (mainInstructions as any)?.textContext || groupName
-        });
-
-        // Refs (Exercise only)
-        const atlasKey = `ex_${movementId}_atlas`;
-        const novaKey = `ex_${movementId}_nova`;
-
+        // --- EXERCISE ASSETS ---
         if (groupType === 'exercise') {
-            phase1Assets.push({ key: atlasKey, type: 'image', subtype: 'main', label: 'Atlas Reference', context: "Coach Atlas performing the exercise. Keep face and head intact." });
-            phase1Assets.push({ key: novaKey, type: 'image', subtype: 'main', label: 'Nova Reference', context: "Coach Nova performing the exercise. Keep face and head intact." });
+            const mainKey = `ex_${movementId}`;
+            const contextData = mainInstructions as any;
+
+            // 1. Generic Hero (Mannequin fallback)
+            phase1Assets.push({
+                key: `${mainKey}_main`,
+                type: 'image', subtype: 'main', label: 'Hero (Mannequin)',
+                context: `${groupName} performed by standard avatar.`
+            });
+
+            // 2. Atlas & Nova Hero Assets (Dual Generation)
+            phase1Assets.push({
+                key: `ex_${movementId}_atlas`,
+                type: 'image', subtype: 'main', label: 'Atlas Hero',
+                context: `${groupName} performed by Coach Atlas.`
+            });
+            phase1Assets.push({
+                key: `ex_${movementId}_nova`,
+                type: 'image', subtype: 'main', label: 'Nova Hero',
+                context: `${groupName} performed by Coach Nova.`
+            });
+
+            // 3. Instruction Steps (Dual Generation)
+            // Use generating breakdown or fallback
+            // IMPORTANT: We use the `steps` variable we ensured exists above.
+            const stepCount = steps.length > 0 ? steps.length : 6;
+
+            for (let i = 1; i <= stepCount; i++) {
+                const instrText = steps[i - 1]?.instruction || `Step ${i} of ${groupName}.`;
+
+                // Atlas Step
+                phase2Assets.push({
+                    key: `ex_${movementId}_atlas_step_${i}`,
+                    type: 'image', subtype: 'step', label: `Atlas Step ${i}`,
+                    context: `Coach Atlas: ${instrText}. Keep face and head intact and change body positions for training.`
+                });
+
+                // Nova Step
+                phase2Assets.push({
+                    key: `ex_${movementId}_nova_step_${i}`,
+                    type: 'image', subtype: 'step', label: `Nova Step ${i}`,
+                    context: `Coach Nova: ${instrText}. Keep face and head intact and change body positions for training.`
+                });
+            }
+        } else { // MEAL ASSETS
+            const mainKey = `meal_${movementId}`;
+            // Hero
+            phase1Assets.push({
+                key: `${mainKey}_main`, type: 'image', subtype: 'main', label: 'Hero Image',
+                context: (mainInstructions as any)?.textContext || groupName
+            });
+
+            // Standard Meal Steps
+            if (steps.length === 0) {
+                for (let i = 1; i <= 6; i++) {
+                    phase2Assets.push({
+                        key: `${mainKey}_step_${i}`,
+                        type: 'image', subtype: 'step', label: `Step ${i}`,
+                        context: `Step ${i} of preparing ${groupName}`
+                    });
+                }
+            } else {
+                steps.forEach((step: any, idx: number) => {
+                    const stepNum = idx + 1;
+                    phase2Assets.push({
+                        key: `${mainKey}_step_${stepNum}`, type: 'image', subtype: 'step', label: step.label || `Step ${stepNum}`, context: step.instruction
+                    });
+                });
+            }
         }
 
         const results = { generated: 0, errors: 0, skipped: 0 };
 
-        // Process Phase 1
+        // Process Phase 1 (Heroes)
         for (const asset of phase1Assets) {
-            // Update Progress in Job (Optional Implementation)
-            // if (options.jobId) await this.reportProgress(options.jobId, results);
-
             if (!forceRegen) {
                 const exists = await this.checkAssetExists(asset.key);
-                // CRITICAL FIX: If it's 'generating', we treat it as existing usually, 
-                // BUT since we are THE job, we should assume we need to fulfill it unless it's 'active'/'auto'.
-                // Ideally checkAssetExists only returns true for COMPLETED assets ('active', 'auto').
                 if (exists) { results.skipped++; continue; }
             }
-
-            // PERSISTENCE: Write Placeholder "generating"
             await this.cacheAsset(asset.key, '', 'image', 'generating');
-
             const prompt = await this.constructPrompt(asset, groupName, groupType, 'standard', asset.context);
             try {
                 await generateAsset({
@@ -129,76 +169,22 @@ export class BatchAssetService {
             } catch (e) {
                 console.error(`[Batch] Failed to generate ${asset.key}:`, e);
                 results.errors++;
-                // PERSISTENCE: Mark as failed instead of deleting
                 await this.cacheAsset(asset.key, '', 'image', 'failed');
             }
         }
 
-        // 3. Prepare Phase 2 Inputs (Load Refs)
-        let atlasRef: string | undefined;
-        let novaRef: string | undefined;
-
-        if (groupType === 'exercise') {
-            const atlasVal = await this.getAssetValue(atlasKey);
-            const novaVal = await this.getAssetValue(novaKey);
-            if (typeof atlasVal === 'string') atlasRef = atlasVal;
-            if (typeof novaVal === 'string') novaRef = novaVal;
-        }
-
-        // 4. Define Phase 2 Assets (Steps with Refs)
-        const phase2Assets: { key: string; type: 'image'; subtype: 'step'; label: string; context: string; imageInput?: string }[] = [];
-
-        steps.forEach((step: any, idx: number) => {
-            const stepNum = idx + 1;
-
-            if (groupType === 'exercise') {
-                // Dual Sets for Exercises
-                if (atlasRef) {
-                    phase2Assets.push({
-                        key: `${mainKey}_atlas_step${stepNum}`, type: 'image', subtype: 'step', label: `Atlas Step ${stepNum}`,
-                        context: `Coach Atlas: ${step.instruction}. Keep face and head intact and change body positions for training.`,
-                        imageInput: atlasRef
-                    });
-                }
-                if (novaRef) {
-                    phase2Assets.push({
-                        key: `${mainKey}_nova_step${stepNum}`, type: 'image', subtype: 'step', label: `Nova Step ${stepNum}`,
-                        context: `Coach Nova: ${step.instruction}. Keep face and head intact and change body positions for training.`,
-                        imageInput: novaRef
-                    });
-                }
-                // Fallback or Generic if refs missing? Maybe generic is not needed if we have specific ones.
-                // If neither ref exists, maybe fallback to generic?
-                if (!atlasRef && !novaRef) {
-                    phase2Assets.push({
-                        key: `${mainKey}_step${stepNum}`, type: 'image', subtype: 'step', label: `Step ${stepNum}`, context: step.instruction
-                    });
-                }
-            } else {
-                // Standard Meal Steps
-                phase2Assets.push({
-                    key: `${mainKey}_step${stepNum}`, type: 'image', subtype: 'step', label: step.label || `Step ${stepNum}`, context: step.instruction
-                });
-            }
-        });
-
-        // Process Phase 2
+        // Process Phase 2 (Steps)
         for (const asset of phase2Assets) {
             if (!forceRegen) {
                 const exists = await this.checkAssetExists(asset.key);
                 if (exists) { results.skipped++; continue; }
             }
-
-            // PERSISTENCE: Write Placeholder
             await this.cacheAsset(asset.key, '', 'image', 'generating');
-
-            // Add "Reference consistency" note to prompt if imageInput is present
-            const ctx = asset.imageInput ? `${asset.context} STRICTLY MAINTAIN FACE AND IDENTITY FROM REFERENCE IMAGE.` : asset.context;
-
-            const prompt = await this.constructPrompt(asset, groupName, groupType, 'standard', ctx);
+            // Using prompt injection for reference, so imageInput is optional/unused here unless we pipe logic later
+            const prompt = await this.constructPrompt(asset, groupName, groupType, 'standard', asset.context);
             try {
                 await generateAsset({
-                    mode: 'image', // All steps are images for now
+                    mode: 'image',
                     prompt, key: asset.key, status: targetStatus, movementId,
                     imageInput: asset.imageInput
                 });
@@ -360,12 +346,22 @@ export class BatchAssetService {
         };
 
         let style = "";
+        let identity = 'mannequin'; // Default identity
+
+        const lowerKey = asset.key.toLowerCase();
+        const lowerLabel = asset.label?.toLowerCase() || "";
+
+        if (lowerKey.includes('atlas') || lowerLabel.includes('atlas')) {
+            identity = 'atlas';
+        } else if (lowerKey.includes('nova') || lowerLabel.includes('nova')) {
+            identity = 'nova';
+        }
 
         if (asset.type === 'video') {
             if (groupType === 'exercise') {
                 style = guidelines.styleExerciseVideo;
-                if (asset.label?.includes('Atlas')) style += " Featuring Coach Atlas (Tall, Muscular, Male Model).";
-                else if (asset.label?.includes('Nova')) style += " Featuring Coach Nova (Fit, Athletic, Female Model).";
+                if (identity === 'atlas') style += ` Featuring Coach Atlas (${guidelines.coachMaleDescription}).`;
+                else if (identity === 'nova') style += ` Featuring Coach Nova (${guidelines.coachFemaleDescription}).`;
             } else {
                 style = guidelines.styleMealVideo;
             }
@@ -373,7 +369,13 @@ export class BatchAssetService {
             // Image Styles
             if (groupType === 'exercise') {
                 style = guidelines.styleExerciseImage;
-                style += ` Featuring: ${guidelines.vitalityAvatarDescription}.`;
+                if (identity === 'atlas') {
+                    style += ` FEATURING COACH ATLAS: ${guidelines.coachMaleDescription}. STRICTLY clean shaven. Maintain identical facial features to reference. system_coach_atlas_ref`;
+                } else if (identity === 'nova') {
+                    style += ` FEATURING COACH NOVA: ${guidelines.coachFemaleDescription}. Maintain identical facial features to reference. system_coach_nova_ref`;
+                } else {
+                    style += ` Featuring: ${guidelines.vitalityAvatarDescription}.`;
+                }
             } else if (groupType === 'meal') {
                 style = guidelines.styleMealImage;
             }
