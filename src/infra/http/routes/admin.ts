@@ -173,42 +173,35 @@ export async function adminRoutes(app: FastifyInstance) {
         // Gemini often wraps JSON in backticks
         value = text;
       } else {
-        // Attempt Real Veo Generation (with fallback)
+        // Attempt Real Veo Generation
         // Note: 'veo-001-preview' is the model name for private preview
         const model = 'models/veo-001-preview';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
 
-        try {
-          const res = await fetch(genEndpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-goog-api-key': env.geminiApiKey
-            },
-            body: JSON.stringify({
-              contents: [{ parts }] // Send image to Veo if provided
-            })
-          });
+        const res = await fetch(genEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': env.geminiApiKey
+          },
+          body: JSON.stringify({
+            contents: [{ parts }] // Send image to Veo if provided
+          })
+        });
 
-          if (!res.ok) {
-            // Fallback if not allowed/found
-            throw new Error(`Veo not available (${res.status})`);
-          }
-
-          const data: any = await res.json();
-          // Veo response structure might differ, but assuming unified API for now:
-          const videoUri = data?.candidates?.[0]?.content?.parts?.[0]?.fileData?.fileUri;
-          if (videoUri) {
-            value = videoUri;
-          } else {
-            // If it returns text instead or wait-token
-            value = "https://assets.mixkit.co/videos/preview/mixkit-man-doing-push-ups-at-gym-2623-large.mp4"; // Mock fallback
-          }
-        } catch (e) {
-          // Fallback to Mock Video for demo purposes if Veo fails (likely due to access)
-          req.log?.warn({ msg: "Veo generation failed, using mock", error: e });
-          value = `https://assets.mixkit.co/videos/preview/mixkit-man-doing-push-ups-at-gym-2623-large.mp4`;
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`Veo API error (${res.status}): ${errorText}`);
         }
+
+        const data: any = await res.json();
+        const videoUri = data?.candidates?.[0]?.content?.parts?.[0]?.fileData?.fileUri;
+
+        if (!videoUri) {
+          throw new Error(`Veo API returned no video URI. Response: ${JSON.stringify(data)}`);
+        }
+
+        value = videoUri;
       }
 
       if (value && key) {
