@@ -27,25 +27,80 @@ export async function assetsRoutes(app: FastifyInstance) {
     return rows;
   });
 
+
   app.get('/assets/:key', { preHandler: authGuard }, async (req, reply) => {
     const { key } = req.params as any;
     try {
       const decodedKey = decodeURIComponent(key);
 
       const { rows } = await pool.query(
-        `SELECT value, asset_type, status FROM cached_assets WHERE key=$1 AND status IN ('active','auto','draft','generating','failed') LIMIT 1`,
+        `SELECT value, asset_type, status FROM cached_assets WHERE key=$1 LIMIT 1`,
         [decodedKey]
       );
 
-      if (rows.length === 0) {
-        return reply.status(404).send({ error: 'Asset not found' });
+      // 1. Return immediately if active
+      if (rows.length > 0) {
+        const { value, asset_type, status } = rows[0];
+        if (status === 'active' || status === 'auto' || status === 'generating') {
+          return { value, assetType: asset_type, status };
+        }
+        // If 'failed', we treat as missing to allow discovery/retry
       }
 
-      const value = rows[0].value;
-      const assetType = rows[0].asset_type;
-      const status = rows[0].status;
+      // 2. TRIGGER SMART DISCOVERY (On-demand restoration)
+      // Check if this is a system asset that can be generated (ex_*, meal_*)
+      const isExercise = decodedKey.startsWith('ex_');
+      const isMeal = decodedKey.startsWith('meal_');
 
-      return { value, assetType, status };
+      if (isExercise || isMeal) {
+        // Find the base movement name from the key
+        // Pattern: ex_bench_press_atlas_main or ex_bench_press_meta
+        let movementSlug = decodedKey;
+        if (isExercise) {
+          movementSlug = decodedKey.replace(/^ex_/, '').replace(/_(atlas|nova|mannequin)_(main|step_\d+)$/, '').replace(/_meta$/, '');
+        } else {
+          movementSlug = decodedKey.replace(/^meal_/, '').replace(/_(main|step_\d+)$/, '').replace(/_meta$/, '');
+        }
+
+
+        // Try to find the group in DB to get real name and ID
+        const tableName = isExercise ? 'training_exercises' : 'meals';
+        const searchName = movementSlug.replace(/_/g, ' ');
+
+        // Improved Fuzzy Search: Match either exact, or after stripping non-alphanumeric chars
+        const groupRes = await pool.query(
+          `SELECT id, name FROM ${tableName} 
+           WHERE name ILIKE $1 
+              OR REGEXP_REPLACE(LOWER(name), '[^a-z0-9]+', '_', 'g') = $2
+              OR REGEXP_REPLACE(LOWER(name), '[^a-z0-9]+', '_', 'g') LIKE $3
+           LIMIT 1`,
+          [searchName, movementSlug, `%${movementSlug}%`]
+        );
+
+        if (groupRes.rows.length > 0) {
+          const { id, name } = groupRes.rows[0];
+
+
+          // Trigger generation in background
+          const { BatchAssetService } = await import('../../../services/BatchAssetService.js');
+          BatchAssetService.generateGroupAssets({
+            groupId: id,
+            groupName: name,
+            groupType: isExercise ? 'exercise' : 'meal',
+            targetStatus: 'auto'
+          }).catch((err: any) => req.log.error(`[SmartProxy] Background gen failed for ${name}:`, err));
+
+          // Return a placeholder so the UI doesn't 404
+          const isMeta = decodedKey.endsWith('_meta');
+          return {
+            value: isMeta ? {} : '',
+            assetType: isMeta ? 'json' : 'image',
+            status: 'generating'
+          };
+        }
+      }
+
+      return reply.status(404).send({ error: 'Asset not found' });
     } catch (error: any) {
       req.log.error({
         error: 'GET /assets/:key failed',
