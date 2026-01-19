@@ -1,5 +1,16 @@
 [
   {
+    "id": "44b1d926-8dd0-405d-8adc-5c29e091b75b",
+    "type": "BATCH_ASSET_GENERATION",
+    "status": "COMPLETED",
+    "result": {
+      "errors": 12,
+      "skipped": 9,
+      "generated": 1
+    },
+    "created_at": "2026-01-19T20:16:55.533Z"
+  },
+  {
     "id": "b508bcfa-6904-441b-bd75-6d75a25503af",
     "type": "BATCH_ASSET_GENERATION",
     "status": "COMPLETED",
@@ -20,18 +31,105 @@
       "generated": 0
     },
     "created_at": "2026-01-19T19:49:01.944Z"
-  },
-  {
-    "id": "e5cd26d0-e5e5-4f34-925c-56670d85da1a",
-    "type": "BATCH_ASSET_GENERATION",
-    "status": "COMPLETED",
-    "result": {
-      "errors": 14,
-      "skipped": 0,
-      "generated": 0
-    },
-    "created_at": "2026-01-19T19:20:13.759Z"
   }
 ]
 
-Specific Key: [{"key":"ex_25m_sprint_25m_slow_atlas_main","status":"generating"}]
+Specific Key: [{"key":"ex_25m_sprint_25m_slow_atlas_main","status":"active"}]
+
+Fuzzy Search: [
+  {
+    "key": "ex_25m_sprint_25m_slow_atlas_main",
+    "status": "active",
+    "created_at": "2026-01-19T20:30:06.879Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_nova_main",
+    "status": "active",
+    "created_at": "2026-01-19T20:32:17.194Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_nova_step_1",
+    "status": "active",
+    "created_at": "2026-01-19T20:32:27.998Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_nova_step_2",
+    "status": "active",
+    "created_at": "2026-01-19T20:32:43.068Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_nova_step_5",
+    "status": "active",
+    "created_at": "2026-01-19T20:33:31.271Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_nova_step_6",
+    "status": "active",
+    "created_at": "2026-01-19T20:33:45.267Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_nova_step_3",
+    "status": "active",
+    "created_at": "2026-01-19T20:33:00.079Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_nova_step_4",
+    "status": "active",
+    "created_at": "2026-01-19T20:33:15.578Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_meta",
+    "status": "auto",
+    "created_at": "2026-01-19T19:49:13.449Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_atlas_step_1",
+    "status": "auto",
+    "created_at": "2026-01-19T20:01:02.327Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_atlas_step_2",
+    "status": "auto",
+    "created_at": "2026-01-19T20:01:27.716Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_atlas_step_3",
+    "status": "auto",
+    "created_at": "2026-01-19T20:01:49.564Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_atlas_step_6",
+    "status": "auto",
+    "created_at": "2026-01-19T20:02:47.634Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_atlas_step_7",
+    "status": "auto",
+    "created_at": "2026-01-19T20:03:08.748Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_atlas_step_8",
+    "status": "auto",
+    "created_at": "2026-01-19T20:03:27.148Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_atlas_step_5",
+    "status": "auto",
+    "created_at": "2026-01-19T20:02:23.248Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_atlas_step_9",
+    "status": "auto",
+    "created_at": "2026-01-19T20:03:45.469Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_atlas_step_10",
+    "status": "auto",
+    "created_at": "2026-01-19T20:04:07.248Z"
+  },
+  {
+    "key": "ex_25m_sprint_25m_slow_atlas_step_4",
+    "status": "auto",
+    "created_at": "2026-01-19T20:17:40.858Z"
+  }
+]

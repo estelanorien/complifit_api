@@ -34,6 +34,11 @@ async function run() {
         );
         fs.appendFileSync(OUT_FILE, "\n\nSpecific Key: " + JSON.stringify(resSpecific.rows));
 
+        const resFuzzy = await client.query(
+            "SELECT key, status, created_at FROM cached_assets WHERE key LIKE '%sprint%slow%' LIMIT 20"
+        );
+        fs.appendFileSync(OUT_FILE, "\n\nFuzzy Search: " + JSON.stringify(resFuzzy.rows, null, 2));
+
     } catch (e) {
         console.error(e);
     } finally {
