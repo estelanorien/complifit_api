@@ -20,7 +20,7 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
     let value: string | null = null;
 
     if (mode === 'image') {
-        const model = 'gemini-2.5-flash-image';
+        const model = 'gemini-1.5-flash';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
         // Helper to prepare parts
@@ -57,7 +57,7 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
             value = `data:image/png;base64,${inline.inlineData.data}`;
         }
     } else if (mode === 'json') {
-        const model = 'gemini-3-flash-preview';
+        const model = 'gemini-1.5-flash';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
         const res = await fetch(genEndpoint, {
