@@ -57,7 +57,7 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
             value = `data:image/png;base64,${inline.inlineData.data}`;
         }
     } else if (mode === 'json') {
-        const model = 'gemini-1.5-flash';
+        const model = 'gemini-2.5-flash';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
         const res = await fetch(genEndpoint, {

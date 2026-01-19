@@ -74,9 +74,11 @@ Input prompt: ${prompt}
 
 Return ONLY the cleaned visual description in English. Do not include any explanations or notes.`;
 
+      // Use gemini-2.5-flash for consistency and speed (Vision + Text)
+      // gemini-1.5-flash is NOT available in this Beta environment.
       const { text } = await this.generateText({
         prompt: cleaningPrompt,
-        model: 'models/gemini-1.5-flash'
+        model: 'models/gemini-2.5-flash'
       });
 
       const cleaned = text.trim();
