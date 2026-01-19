@@ -77,7 +77,14 @@ export class BatchAssetService {
             }
         }
 
-        // 3. Sequential Generation Loop (Prevents 429s)
+        // 3. Reset statuses for this group if forceRegen or starting fresh
+        if (forceRegen) {
+            console.log(`[Batch] Hard Resetting statuses for ${groupName}`);
+            const keysToReset = assetsToGenerate.map(a => a.key);
+            await pool.query(`DELETE FROM cached_assets WHERE key = ANY($1)`, [keysToReset]);
+        }
+
+        // 4. Sequential Generation Loop (Prevents 429s)
         const results = { generated: 0, errors: 0, skipped: 0 };
 
         let atlasRef: string | null = null;
@@ -88,11 +95,13 @@ export class BatchAssetService {
         }
 
         for (const asset of assetsToGenerate) {
-            if (!forceRegen) {
-                const exists = await this.checkAssetExists(asset.key);
-                if (exists) { results.skipped++; continue; }
+            const exists = await this.checkAssetExists(asset.key);
+            if (exists && !forceRegen) {
+                results.skipped++;
+                continue;
             }
 
+            // Mark as generating so Proxy shows spinner
             await this.cacheAsset(asset.key, '', 'image', 'generating');
 
             try {
@@ -110,18 +119,22 @@ export class BatchAssetService {
                 if (asset.identity === 'atlas') refImage = atlasRef || undefined;
                 if (asset.identity === 'nova') refImage = novaRef || undefined;
 
+                console.log(`[Batch] Generating ${asset.key}...`);
                 await generateAsset({
                     mode: 'image',
                     prompt,
                     key: asset.key,
                     status: targetStatus,
                     movementId,
-                    imageInput: refImage
+                    imageInput: refImage,
+                    // Use imagen-3 (nanobanana) as requested
+                    model: 'models/imagen-3.0-generate-001'
                 });
 
                 results.generated++;
-            } catch (e) {
-                console.error(`[Batch] Failed to generate ${asset.key}:`, e);
+                console.log(`[Batch] Success: ${asset.key}`);
+            } catch (e: any) {
+                console.error(`[Batch] Failed to generate ${asset.key}:`, e.message);
                 results.errors++;
                 await this.cacheAsset(asset.key, '', 'image', 'failed');
             }
