@@ -82,14 +82,7 @@ export class BatchAssetService {
             const mainKey = `ex_${movementId}`;
             const contextData = mainInstructions as any;
 
-            // 1. Generic Hero (Mannequin fallback)
-            phase1Assets.push({
-                key: `${mainKey}_main`,
-                type: 'image', subtype: 'main', label: 'Hero (Mannequin)',
-                context: `${groupName} performed by standard avatar.`
-            });
-
-            // 2. Atlas & Nova Hero Assets (Dual Generation)
+            // 1. Atlas & Nova Hero Assets (Dual Generation)
             phase1Assets.push({
                 key: `ex_${movementId}_atlas_main`,
                 type: 'image', subtype: 'main', label: 'Atlas Hero',
@@ -330,7 +323,7 @@ export class BatchAssetService {
     }
 
     private static async constructPrompt(
-        asset: { subtype: 'main' | 'step'; label?: string; type: 'image' | 'video' | 'text' },
+        asset: { key: string; subtype: 'main' | 'step'; label?: string; type: 'image' | 'video' | 'text' },
         groupName: string,
         groupType: 'exercise' | 'meal',
         mode: string,
@@ -342,7 +335,9 @@ export class BatchAssetService {
             styleMealImage: "Hyperrealistic food photography. 8k resolution, highly detailed, delicious presentation, soft studio lighting, shallow depth of field. CRITICAL: NO TEXT, NO CALORIE LABELS, NO NUTRITION INFO, NO OVERLAYS.",
             vitalityAvatarDescription: "Athletic Mannequin figure. Faceless, featureless face. Bald head. Neutral metallic grey skin tone. Wearing solid Emerald Green athletic shorts and Slate Grey top.",
             styleExerciseVideo: "Cinematic 4k fitness shot, dark gym, moody lighting, slow motion execution. Perfect form.",
-            styleMealVideo: "Cinematic 4k food videography, slow motion cooking, delicious steam, chef preparation, moody lighting."
+            styleMealVideo: "Cinematic 4k food videography, slow motion cooking, delicious steam, chef preparation, moody lighting.",
+            coachMaleDescription: "28-year-old Caucasian male, short faded dark-blonde hair, clean shaven, athletic build, grey t-shirt.",
+            coachFemaleDescription: "28-year-old Caucasian female, long blonde hair in high ponytail, athletic build, black tank top."
         };
 
         let style = "";
