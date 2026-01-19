@@ -1,14 +1,13 @@
 
 import { env } from '../config/env.js';
 import { pool } from '../infra/db/pool.js';
-import { z } from 'zod';
 import { AiService } from '../application/services/aiService.js';
 
 export interface AssetGenOptions {
     mode: 'image' | 'video' | 'json';
     prompt: string;
     key?: string; // Cache key
-    status?: 'active' | 'draft' | 'auto';
+    status?: 'active' | 'draft' | 'auto' | 'generating' | 'failed';
     movementId?: string;
     imageInput?: string; // Base64
 }
@@ -20,51 +19,74 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
 
     const ai = new AiService();
     let value: string | null = null;
+    let attempts = 0;
+    const maxAttempts = 3;
+    let currentImageInput = imageInput;
 
-    if (mode === 'image') {
-        // Delegate to AiService (uses gemini-2.5-flash-image w/ prompt cleaning)
-        const result = await ai.generateImage({
-            prompt,
-            referenceImage: imageInput
-        });
-        value = result.base64;
+    while (attempts < maxAttempts) {
+        attempts++;
+        try {
+            console.log(`[Gen] Attempt ${attempts}/${maxAttempts} for ${key || 'anonymous'} (Mode: ${mode}, HasRef: ${!!currentImageInput})`);
 
-    } else if (mode === 'json') {
-        // Delegate to AiService (uses gemini-2.5-flash)
-        const result = await ai.generateText({
-            prompt,
-            // Explicitly set JSON mime type via generation config if needed, 
-            // but AiService default text generation is usually sufficient if prompt asks for JSON.
-            // However, let's pass a hint or just rely on the prompt.
-            // The original code passed `generationConfig: { responseMimeType: 'application/json' }` implicitly via the schema in `ai.ts`? 
-            // No, `AssetGenerationService` old code just sent prompt. 
-            // Let's rely on the prompt asking for JSON as before.
-        });
-        value = result.text;
+            if (mode === 'image') {
+                const result = await ai.generateImage({
+                    prompt,
+                    referenceImage: currentImageInput
+                });
+                value = result.base64;
+            } else if (mode === 'json') {
+                const result = await ai.generateText({ prompt });
+                value = result.text;
+            } else if (mode === 'video') {
+                value = await ai.generateVideo({ prompt });
+            }
 
-    } else if (mode === 'video') {
-        // Delegate to AiService (uses Veo or fallback)
-        value = await ai.generateVideo({ prompt });
+            if (value) break; // Success!
+
+        } catch (error: any) {
+            console.error(`[Gen] Attempt ${attempts} failed:`, error.message);
+
+            // CRITICAL HARDENING: If safety block triggered by reference image, try text-only fallback
+            if (error.message.includes('SAFETY_BLOCK') && currentImageInput) {
+                console.warn(`[Gen] Safety block triggered. Retrying WITHOUT reference image (Fallback Mode).`);
+                currentImageInput = undefined;
+                continue; // Immediate retry without reference
+            }
+
+            if (attempts >= maxAttempts) {
+                // Persistent failure
+                if (key) {
+                    await pool.query(
+                        `UPDATE cached_assets SET status = 'failed' WHERE key = $1`,
+                        [key]
+                    );
+                }
+                throw error;
+            }
+
+            // Wait slightly before retry for non-safety errors (possible rate limits)
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+        }
     }
 
     // Cache Result
     if (value && key) {
         await pool.query(
             `INSERT INTO cached_assets(key, value, asset_type, status)
-           VALUES($1,$2,$3,$4)
+           VALUES($1, $2, $3, $4)
            ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, asset_type=EXCLUDED.asset_type, status=EXCLUDED.status`,
-            [key, value, mode === 'json' ? 'json' : mode, status]
+            [key, value, mode === 'json' ? 'json' : mode, status === 'generating' ? 'active' : status]
         );
-        // meta
+
         await pool.query(
             `INSERT INTO cached_asset_meta(key, prompt, mode, source, created_by)
-           VALUES($1,$2,$3,$4,$5)
+           VALUES($1, $2, $3, $4, $5)
            ON CONFLICT (key) DO UPDATE SET 
                 prompt=EXCLUDED.prompt, 
                 mode=EXCLUDED.mode, 
                 source=EXCLUDED.source, 
                 created_by=EXCLUDED.created_by`,
-            [key, prompt, mode, 'batch_service_v2', 'system']
+            [key, prompt, mode, 'hardened_gen_v3', 'system']
         );
     }
 

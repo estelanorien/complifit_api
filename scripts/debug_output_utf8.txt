@@ -1,36 +1,36 @@
 [
   {
-    "id": "44b1d926-8dd0-405d-8adc-5c29e091b75b",
+    "id": "760a4d4f-79e9-43c3-9c98-77a53730227b",
     "type": "BATCH_ASSET_GENERATION",
     "status": "COMPLETED",
     "result": {
-      "errors": 12,
+      "errors": 10,
+      "skipped": 0,
+      "generated": 10
+    },
+    "created_at": "2026-01-19T22:10:46.664Z"
+  },
+  {
+    "id": "1ef4b118-c7ed-4b36-947f-028b178dbb7d",
+    "type": "BATCH_ASSET_GENERATION",
+    "status": "COMPLETED",
+    "result": {
+      "errors": 11,
       "skipped": 9,
-      "generated": 1
+      "generated": 2
     },
-    "created_at": "2026-01-19T20:16:55.533Z"
+    "created_at": "2026-01-19T21:01:39.586Z"
   },
   {
-    "id": "b508bcfa-6904-441b-bd75-6d75a25503af",
+    "id": "258d1770-a120-439a-ae3b-34d4f4c3773b",
     "type": "BATCH_ASSET_GENERATION",
     "status": "COMPLETED",
     "result": {
-      "errors": 0,
-      "skipped": 0,
-      "generated": 22
+      "errors": 9,
+      "skipped": 8,
+      "generated": 3
     },
-    "created_at": "2026-01-19T20:00:42.946Z"
-  },
-  {
-    "id": "9894af3f-8923-4843-b591-e9077a6e96cb",
-    "type": "BATCH_ASSET_GENERATION",
-    "status": "COMPLETED",
-    "result": {
-      "errors": 22,
-      "skipped": 0,
-      "generated": 0
-    },
-    "created_at": "2026-01-19T19:49:01.944Z"
+    "created_at": "2026-01-19T20:54:28.834Z"
   }
 ]
 

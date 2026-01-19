@@ -2,6 +2,7 @@
 import { pool } from '../infra/db/pool.js';
 import { generateAsset } from './AssetGenerationService.js';
 import { env } from '../config/env.js';
+import { AssetPromptService } from '../application/services/assetPromptService.js';
 
 const TARGET_LANGUAGES = ['es', 'fr', 'de', 'it', 'pt', 'ru', 'tr', 'zh', 'ja', 'ko', 'ar', 'hi'];
 
@@ -11,7 +12,7 @@ export class TranslationService {
      * Publishes a group (sets status to active) and triggers translation for its text content.
      */
     static async publishAndTranslate(groupId: string, groupName: string, groupType: 'exercise' | 'meal') {
-        const movementId = this.normalizeToId(groupName);
+        const movementId = AssetPromptService.normalizeToId(groupName);
         console.log(`[Translation] Publishing and Translating ${groupName} (${groupId})`);
 
         // 1. Promote Status: auto -> active
@@ -27,9 +28,6 @@ export class TranslationService {
         await promoteAssets(mainKey);
 
         // 2. Fetch Text Content for Translation
-        // We need: Main Description (from _meta), Step Instructions (from _meta or individual steps?)
-        // Currently instructions are in `_meta`.
-
         const metaKey = `${mainKey}_meta`;
         const metaRes = await pool.query(`SELECT value FROM cached_assets WHERE key=$1`, [metaKey]);
 
@@ -55,7 +53,6 @@ export class TranslationService {
                 }
 
                 // 3. Process Translations (Batch)
-                // We process each distinct text string.
                 for (const item of textsToTranslate) {
                     await this.translateContent(item.text, item.category);
                 }
@@ -75,7 +72,7 @@ export class TranslationService {
     static async translateContent(originalText: string, category: string) {
         if (!originalText || originalText.length < 2) return;
 
-        // Check cache first (for at least one language to see if we did this)
+        // Check cache first
         const cacheCheck = await pool.query(
             `SELECT 1 FROM content_translations WHERE original_text=$1 LIMIT 1`,
             [originalText]
@@ -122,13 +119,5 @@ export class TranslationService {
         } catch (e) {
             console.error(`[Translation] Error translating "${originalText.substring(0, 20)}..."`, e);
         }
-    }
-
-    private static normalizeToId(name: string): string {
-        if (!name) return 'unknown';
-        let clean = name.toLowerCase().trim();
-        clean = clean.replace(/[^a-z0-9]+/g, ' ');
-        const words = clean.split(' ').filter(w => w.length > 0).sort();
-        return words.join('_');
     }
 }

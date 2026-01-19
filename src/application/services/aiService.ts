@@ -141,8 +141,16 @@ ${prompt}`;
       const isProduction = process.env.NODE_ENV === 'production';
       throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini image error: ${res.status} ${text}`);
     }
+
     const data = await res.json() as any;
-    const part = data?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData?.data);
+
+    // Check for safety blocks
+    const candidate = data?.candidates?.[0];
+    if (candidate?.finishReason === 'SAFETY') {
+      throw new Error('SAFETY_BLOCK: The generated content was blocked by AI safety filters.');
+    }
+
+    const part = candidate?.content?.parts?.find((p: any) => p.inlineData?.data);
     const base64 = part?.inlineData?.data;
     if (!base64) throw new Error('No image data returned');
     return { base64: `data:image/png;base64,${base64}` };
