@@ -23,7 +23,7 @@ export class AiService {
     }
   }
 
-  async generateText({ prompt, model = 'models/gemini-2.5-flash', generationConfig }: GenerateTextParams & { generationConfig?: any }) {
+  async generateText({ prompt, model = 'models/gemini-1.5-flash', generationConfig }: GenerateTextParams & { generationConfig?: any }) {
     const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
       method: 'POST',
       headers: {
@@ -32,7 +32,11 @@ export class AiService {
       },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig
+        generationConfig: generationConfig || {
+          temperature: 0.1,
+          topP: 1,
+          maxOutputTokens: 2048
+        }
       })
     });
     if (!res.ok) {
@@ -51,67 +55,50 @@ export class AiService {
    */
   async cleanImagePrompt(prompt: string): Promise<string> {
     try {
-      // Check if prompt contains non-ASCII characters (likely non-English)
-      const hasNonEnglish = /[^\x00-\x7F]/.test(prompt);
-
-      // Check if prompt contains step indicators or UI labels
-      const hasStepLabels = /\b(step|étape|paso|adım)\s*\d+/i.test(prompt) ||
-        /^\d+[.:)]/.test(prompt.trim());
-
-      if (!hasNonEnglish && !hasStepLabels) {
-        // Already clean English prompt, just return with safety suffix
+      // CRITICAL BYPASS: Do NOT clean identity-critical prompts
+      const lower = prompt.toLowerCase();
+      if (lower.includes('coach atlas') || lower.includes('coach nova') || lower.includes('mannequin')) {
+        // Add text-suppression suffix even to identity prompts
         return `${prompt}. CRITICAL: Absolutely no text, labels, numbers, letters, words, captions, or watermarks in the image.`;
       }
 
-      // Use AI to translate and clean the prompt
+      const hasNonEnglish = /[^\x00-\x7F]/.test(prompt);
+      const hasStepLabels = /\b(step|étape|paso|adım)\s*\d+/i.test(prompt) || /^\d+[.:)]/.test(prompt.trim());
+
+      if (!hasNonEnglish && !hasStepLabels) {
+        return `${prompt}. CRITICAL: Absolutely no text, labels, numbers, letters, words, captions, or watermarks in the image.`;
+      }
+
       const cleaningPrompt = `You are a professional image prompt translator. Your task is to:
-1. Translate the following text to English if it's in another language
-2. Remove any step numbers, UI labels, or instructional prefixes (like "Step 1:", "Étape 2:", etc.)
-3. Extract ONLY the visual scene description
-4. Keep it concise and focused on what should be visible in the photo
-
+1. Translate to English if needed.
+2. Remove step numbers and UI labels.
+3. Extract ONLY visual scene description.
 Input prompt: ${prompt}
+Return ONLY cleaned visual description.`;
 
-Return ONLY the cleaned visual description in English. Do not include any explanations or notes.`;
-
-      // Use gemini-2.5-flash for consistency and speed (Vision + Text)
-      // gemini-1.5-flash is NOT available in this Beta environment.
       const { text } = await this.generateText({
         prompt: cleaningPrompt,
-        model: 'models/gemini-2.5-flash'
+        model: 'models/gemini-1.5-flash'
       });
 
-      const cleaned = text.trim();
-
-      // Add safety suffix to prevent text rendering
-      return `${cleaned}. CRITICAL: Absolutely no text, labels, numbers, letters, words, captions, or watermarks in the image.`;
+      return `${text.trim()}. CRITICAL: Absolutely no text, labels, numbers, letters, words, captions, or watermarks in the image.`;
     } catch (e) {
-      // Fallback: Basic regex cleaning if AI translation fails
-      let cleaned = prompt;
-      // Remove step numbers
-      cleaned = cleaned.replace(/^(step|étape|paso|adım)\s*\d+[.:)]?\s*/i, '');
-      cleaned = cleaned.replace(/^\d+[.:)]\s*/, '');
+      let cleaned = prompt.replace(/^(step|étape|paso|adım)\s*\d+[.:)]?\s*/i, '').replace(/^\d+[.:)]\s*/, '');
       return `${cleaned}. CRITICAL: Absolutely no text, labels, numbers, letters, words, captions, or watermarks in the image.`;
     }
   }
 
-  async generateImage({ prompt, model = 'models/gemini-2.5-flash-image', referenceImage }: GenerateImageParams) {
+  async generateImage({ prompt, model = 'models/imagen-3.0-generate-001', referenceImage }: GenerateImageParams) {
     const parts: any[] = [];
-
-    // Clean prompt to prevent text overlays
     const cleanedPrompt = await this.cleanImagePrompt(prompt);
-
-    // Build enhanced prompt with identity preservation for reference images
     let enhancedPrompt = cleanedPrompt;
 
     if (referenceImage) {
-      enhancedPrompt = `CRITICAL IDENTITY PRESERVATION: Match the exact person from the reference image.
-Keep the SAME face, facial features, hair style, and hair color.
-Only change the body posture/position as needed for the action.
+      enhancedPrompt = `IDENTITY: Replicate the person from the reference image exactly.
+Same face, same hair (bald if reference is bald), same build.
 
-${prompt}`;
+ACTION: ${cleanedPrompt}`;
 
-      // Add reference image first
       const base64Data = referenceImage.replace(/^data:image\/\w+;base64,/, "");
       parts.push({
         inlineData: {
