@@ -41,8 +41,15 @@ export async function assetsRoutes(app: FastifyInstance) {
 
       // 1.1 Meta-Fallback: If _meta requested but not found, try to resolve to group-level meta
       if (rows.length === 0 && decodedKey.endsWith('_meta')) {
-        const groupMetaKey = decodedKey.split('_meta')[0].replace(/(_atlas|_nova|_main|_step_\d+|_video_.*)$/, '') + '_meta';
+        // IMPROVED: Strip any known suffixes recursively
+        const groupMetaKey = decodedKey.split('_meta')[0]
+          .replace(/_(atlas|nova|mannequin)$/, '')
+          .replace(/_(main|step_\d+|video_.*)$/, '')
+          .replace(/_(atlas|nova|mannequin)$/, '') // Repeat to catch double suffixes
+          + '_meta';
+
         if (groupMetaKey !== decodedKey) {
+          req.log.info(`[Proxy] Meta-Fallback: ${decodedKey} -> ${groupMetaKey}`);
           const metaFallback = await pool.query(
             `SELECT value, asset_type, status FROM cached_assets WHERE key=$1 LIMIT 1`,
             [groupMetaKey]
@@ -59,25 +66,27 @@ export async function assetsRoutes(app: FastifyInstance) {
         let textContext = '';
         let textContextSimple = '';
 
-        if (asset_type === 'image' && (status === 'active' || status === 'auto')) {
-          const groupMetaKey = decodedKey.replace(/(_atlas|_nova|_main|_step_\d+|_video_.*)$/, '') + '_meta';
+        if (asset_type === 'image' && (status === 'active' || status === 'auto' || status === 'generating')) {
+          const groupMetaKey = decodedKey
+            .replace(/_(atlas|nova|mannequin)_(main|step_\d+|video_.*)$/, '_meta')
+            .replace(/_(main|step_\d+|video_.*)$/, '_meta');
+
           const metaRes = await pool.query(`SELECT value FROM cached_assets WHERE key=$1 LIMIT 1`, [groupMetaKey]);
           if (metaRes.rows.length > 0) {
             try {
               const meta = JSON.parse(metaRes.rows[0].value);
-              // If it's a step image, try to find the specific step in instructions
               const stepMatch = decodedKey.match(/step_(\d+)$/);
               if (stepMatch) {
                 const stepNum = parseInt(stepMatch[1]);
-                if (meta.instructions && meta.instructions[stepNum - 1]) {
-                  const instr = meta.instructions[stepNum - 1];
-                  textContext = instr.detailed || instr.description || '';
+                const instrs = meta.instructions || meta.steps || [];
+                if (instrs[stepNum - 1]) {
+                  const instr = instrs[stepNum - 1];
+                  textContext = instr.detailed || instr.instruction || instr.description || '';
                   textContextSimple = instr.simple || instr.cue || '';
                 }
               } else {
-                // Hero image or generic
-                textContext = meta.description || meta.recipeDescription || '';
-                textContextSimple = meta.summary || '';
+                textContext = meta.description || meta.recipeDescription || meta.textContext || '';
+                textContextSimple = meta.summary || meta.textContextSimple || '';
               }
             } catch (e) { /* ignore parse errors */ }
           }
@@ -86,17 +95,13 @@ export async function assetsRoutes(app: FastifyInstance) {
         if (status === 'active' || status === 'auto' || status === 'generating') {
           return { value, assetType: asset_type, status, textContext, textContextSimple };
         }
-        // If 'failed', we treat as missing to allow discovery/retry
       }
 
       // 2. TRIGGER SMART DISCOVERY (On-demand restoration)
-      // Check if this is a system asset that can be generated (ex_*, meal_*)
       const isExercise = decodedKey.startsWith('ex_');
       const isMeal = decodedKey.startsWith('meal_');
 
       if (isExercise || isMeal) {
-        // Find the base movement name from the key
-        // Pattern: ex_bench_press_atlas_main or ex_bench_press_meta
         let movementSlug = decodedKey;
         if (isExercise) {
           movementSlug = decodedKey.replace(/^ex_/, '').replace(/_(atlas|nova|mannequin)_(main|step_\d+)$/, '').replace(/_meta$/, '');
@@ -104,24 +109,26 @@ export async function assetsRoutes(app: FastifyInstance) {
           movementSlug = decodedKey.replace(/^meal_/, '').replace(/_(main|step_\d+)$/, '').replace(/_meta$/, '');
         }
 
-
-        // Try to find the group in DB to get real name and ID
         const tableName = isExercise ? 'training_exercises' : 'meals';
-        const searchName = movementSlug.replace(/_/g, ' ');
+        const searchPattern = movementSlug.replace(/_/g, '%');
 
-        // Improved Fuzzy Search: Match either exact, or after stripping non-alphanumeric chars
+        req.log.info(`[Proxy] Discovery Attempt: ${decodedKey} -> Slug: ${movementSlug}`);
+
+        // ULTRA FUZZY SEARCH
         const groupRes = await pool.query(
           `SELECT id, name FROM ${tableName} 
            WHERE name ILIKE $1 
               OR REGEXP_REPLACE(LOWER(name), '[^a-z0-9]+', '_', 'g') = $2
               OR REGEXP_REPLACE(LOWER(name), '[^a-z0-9]+', '_', 'g') LIKE $3
+              OR name ILIKE $4
+           ORDER BY length(name) ASC
            LIMIT 1`,
-          [searchName, movementSlug, `%${movementSlug}%`]
+          [movementSlug.replace(/_/g, ' '), movementSlug, `%${movementSlug}%`, `%${searchPattern}%`]
         );
 
         if (groupRes.rows.length > 0) {
           const { id, name } = groupRes.rows[0];
-
+          req.log.info(`[Proxy] Discovery SUCCESS: ${name} (${id})`);
 
           // Trigger generation in background
           const { BatchAssetService } = await import('../../../services/BatchAssetService.js');
@@ -132,13 +139,14 @@ export async function assetsRoutes(app: FastifyInstance) {
             targetStatus: 'auto'
           }).catch((err: any) => req.log.error(`[SmartProxy] Background gen failed for ${name}:`, err));
 
-          // Return a placeholder so the UI doesn't 404
           const isMeta = decodedKey.endsWith('_meta');
           return {
             value: isMeta ? {} : '',
             assetType: isMeta ? 'json' : 'image',
             status: 'generating'
           };
+        } else {
+          req.log.warn(`[Proxy] Discovery FAILED: No match in ${tableName} for ${movementSlug}`);
         }
       }
 

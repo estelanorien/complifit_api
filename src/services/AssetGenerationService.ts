@@ -10,10 +10,11 @@ export interface AssetGenOptions {
     status?: 'active' | 'draft' | 'auto' | 'generating' | 'failed';
     movementId?: string;
     imageInput?: string; // Base64
+    model?: string;
 }
 
 export const generateAsset = async (options: AssetGenOptions): Promise<string | null> => {
-    const { mode, prompt, key, status = 'active', movementId, imageInput } = options;
+    const { mode, prompt, key, status = 'active', movementId, imageInput, model } = options;
 
     if (!env.geminiApiKey) throw new Error("GEMINI_API_KEY missing");
 
@@ -31,11 +32,12 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
             if (mode === 'image') {
                 const result = await ai.generateImage({
                     prompt,
-                    referenceImage: currentImageInput
+                    referenceImage: currentImageInput,
+                    model
                 });
                 value = result.base64;
             } else if (mode === 'json') {
-                const result = await ai.generateText({ prompt });
+                const result = await ai.generateText({ prompt, model });
                 value = result.text;
             } else if (mode === 'video') {
                 value = await ai.generateVideo({ prompt });
