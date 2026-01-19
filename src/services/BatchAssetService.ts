@@ -54,6 +54,14 @@ export class BatchAssetService {
         const { groupName, groupType, forceRegen, targetStatus = 'auto' } = options;
         const movementId = this.normalizeToId(groupName);
 
+        // Pre-fetch Reference Images for Identity Consistency
+        let atlasRef: string | null = null;
+        let novaRef: string | null = null;
+        if (groupType === 'exercise') {
+            atlasRef = (await this.getAssetValue('system_coach_atlas_ref')) as string;
+            novaRef = (await this.getAssetValue('system_coach_nova_ref')) as string;
+        }
+
         // 1. Instructions & Text (Pre-requisite)
         const mainKey = groupType === 'exercise' ? `ex_${movementId}` : `meal_${movementId}`;
         let mainInstructions = await this.getAssetValue(`${mainKey}_meta`);
@@ -95,8 +103,6 @@ export class BatchAssetService {
             });
 
             // 3. Instruction Steps (Dual Generation)
-            // Use generating breakdown or fallback
-            // IMPORTANT: We use the `steps` variable we ensured exists above.
             const stepCount = steps.length > 0 ? steps.length : 6;
 
             for (let i = 1; i <= stepCount; i++) {
@@ -153,10 +159,17 @@ export class BatchAssetService {
             }
             await this.cacheAsset(asset.key, '', 'image', 'generating');
             const prompt = await this.constructPrompt(asset, groupName, groupType, 'standard', asset.context);
+
+            // Determine reference image
+            let refImage: string | undefined = undefined;
+            if (asset.key.includes('atlas')) refImage = atlasRef || undefined;
+            if (asset.key.includes('nova')) refImage = novaRef || undefined;
+
             try {
                 await generateAsset({
                     mode: asset.type === 'text' ? 'json' : asset.type as any,
-                    prompt, key: asset.key, status: targetStatus, movementId
+                    prompt, key: asset.key, status: targetStatus, movementId,
+                    imageInput: refImage // Pass the reference!
                 });
                 results.generated++;
             } catch (e) {
@@ -173,13 +186,18 @@ export class BatchAssetService {
                 if (exists) { results.skipped++; continue; }
             }
             await this.cacheAsset(asset.key, '', 'image', 'generating');
-            // Using prompt injection for reference, so imageInput is optional/unused here unless we pipe logic later
             const prompt = await this.constructPrompt(asset, groupName, groupType, 'standard', asset.context);
+
+            // Determine reference image for steps
+            let refImage: string | undefined = undefined;
+            if (asset.key.includes('atlas')) refImage = atlasRef || undefined;
+            if (asset.key.includes('nova')) refImage = novaRef || undefined;
+
             try {
                 await generateAsset({
                     mode: 'image',
                     prompt, key: asset.key, status: targetStatus, movementId,
-                    imageInput: asset.imageInput
+                    imageInput: refImage // Pass the reference!
                 });
                 results.generated++;
             } catch (e) {
@@ -419,7 +437,8 @@ export class BatchAssetService {
         if (!name) return 'unknown';
         let clean = name.toLowerCase().trim();
         clean = clean.replace(/[^a-z0-9]+/g, ' ');
-        const words = clean.split(' ').filter(w => w.length > 0).sort();
+        // CRITICAL BUG FIX: Do NOT sort words. Order matters for matching frontend keys.
+        const words = clean.split(' ').filter(w => w.length > 0);
         return words.join('_');
     }
 
