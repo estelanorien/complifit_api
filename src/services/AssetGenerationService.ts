@@ -56,6 +56,10 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
         if (inline?.inlineData?.data) {
             value = `data:image/png;base64,${inline.inlineData.data}`;
         }
+
+        if (!value) {
+            throw new Error(`Gemini Image Gen Succeeded (200) but returned NO DATA. Cause: ${JSON.stringify(data)}`);
+        }
     } else if (mode === 'json') {
         const model = 'gemini-2.5-flash';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;

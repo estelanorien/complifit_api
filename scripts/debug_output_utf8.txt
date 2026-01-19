@@ -1,0 +1,37 @@
+[
+  {
+    "id": "b508bcfa-6904-441b-bd75-6d75a25503af",
+    "type": "BATCH_ASSET_GENERATION",
+    "status": "COMPLETED",
+    "result": {
+      "errors": 0,
+      "skipped": 0,
+      "generated": 22
+    },
+    "created_at": "2026-01-19T20:00:42.946Z"
+  },
+  {
+    "id": "9894af3f-8923-4843-b591-e9077a6e96cb",
+    "type": "BATCH_ASSET_GENERATION",
+    "status": "COMPLETED",
+    "result": {
+      "errors": 22,
+      "skipped": 0,
+      "generated": 0
+    },
+    "created_at": "2026-01-19T19:49:01.944Z"
+  },
+  {
+    "id": "e5cd26d0-e5e5-4f34-925c-56670d85da1a",
+    "type": "BATCH_ASSET_GENERATION",
+    "status": "COMPLETED",
+    "result": {
+      "errors": 14,
+      "skipped": 0,
+      "generated": 0
+    },
+    "created_at": "2026-01-19T19:20:13.759Z"
+  }
+]
+
+Specific Key: [{"key":"ex_25m_sprint_25m_slow_atlas_main","status":"generating"}]
