@@ -33,16 +33,58 @@ export async function assetsRoutes(app: FastifyInstance) {
     try {
       const decodedKey = decodeURIComponent(key);
 
-      const { rows } = await pool.query(
+      // 1. Search for asset
+      let { rows } = await pool.query(
         `SELECT value, asset_type, status FROM cached_assets WHERE key=$1 LIMIT 1`,
         [decodedKey]
       );
 
-      // 1. Return immediately if active
+      // 1.1 Meta-Fallback: If _meta requested but not found, try to resolve to group-level meta
+      if (rows.length === 0 && decodedKey.endsWith('_meta')) {
+        const groupMetaKey = decodedKey.split('_meta')[0].replace(/(_atlas|_nova|_main|_step_\d+|_video_.*)$/, '') + '_meta';
+        if (groupMetaKey !== decodedKey) {
+          const metaFallback = await pool.query(
+            `SELECT value, asset_type, status FROM cached_assets WHERE key=$1 LIMIT 1`,
+            [groupMetaKey]
+          );
+          if (metaFallback.rows.length > 0) rows = metaFallback.rows;
+        }
+      }
+
+      // 1.2 Return immediately if found and active
       if (rows.length > 0) {
-        const { value, asset_type, status } = rows[0];
+        let { value, asset_type, status } = rows[0];
+
+        // Enrichment: If it's an image, try to fetch associated instructions for Admin UI
+        let textContext = '';
+        let textContextSimple = '';
+
+        if (asset_type === 'image' && (status === 'active' || status === 'auto')) {
+          const groupMetaKey = decodedKey.replace(/(_atlas|_nova|_main|_step_\d+|_video_.*)$/, '') + '_meta';
+          const metaRes = await pool.query(`SELECT value FROM cached_assets WHERE key=$1 LIMIT 1`, [groupMetaKey]);
+          if (metaRes.rows.length > 0) {
+            try {
+              const meta = JSON.parse(metaRes.rows[0].value);
+              // If it's a step image, try to find the specific step in instructions
+              const stepMatch = decodedKey.match(/step_(\d+)$/);
+              if (stepMatch) {
+                const stepNum = parseInt(stepMatch[1]);
+                if (meta.instructions && meta.instructions[stepNum - 1]) {
+                  const instr = meta.instructions[stepNum - 1];
+                  textContext = instr.detailed || instr.description || '';
+                  textContextSimple = instr.simple || instr.cue || '';
+                }
+              } else {
+                // Hero image or generic
+                textContext = meta.description || meta.recipeDescription || '';
+                textContextSimple = meta.summary || '';
+              }
+            } catch (e) { /* ignore parse errors */ }
+          }
+        }
+
         if (status === 'active' || status === 'auto' || status === 'generating') {
-          return { value, assetType: asset_type, status };
+          return { value, assetType: asset_type, status, textContext, textContextSimple };
         }
         // If 'failed', we treat as missing to allow discovery/retry
       }

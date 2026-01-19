@@ -1,6 +1,7 @@
 
 import { pool } from '../../infra/db/pool.js';
 import { generateAsset } from '../../services/AssetGenerationService.js';
+import { AiService } from './aiService.js';
 
 export interface PromptGuidelines {
     styleExerciseImage: string;
@@ -19,8 +20,8 @@ export const DEFAULT_GUIDELINES: PromptGuidelines = {
     styleExerciseVideo: "Cinematic 4k fitness shot, dark gym, moody lighting, slow motion execution.",
     style3DAnatomyVideo: "3D anatomical render of [Subject]. Transparent biological skin, glowing emerald green muscle highlights on [Target Muscles]. Neutral studio background. Seamless loop motion. 4k resolution, high frame rate.",
     styleMealVideo: "Cinematic 4k food videography, slow motion cooking, delicious steam, chef preparation, moody lighting.",
-    coachMaleDescription: "28-year-old Caucasian male, short faded dark-blonde hair, clean shaven, athletic build, grey t-shirt.",
-    coachFemaleDescription: "28-year-old Caucasian female, long blonde hair in high ponytail, athletic build, black tank top."
+    coachMaleDescription: "28-year-old Caucasian male, athletic build, bald head, clean shaven. Wearing a tight Slate Grey compression t-shirt and solid black athletic shorts. No logos.",
+    coachFemaleDescription: "28-year-old Caucasian female, athletic build, platinum blonde hair in a high ponytail. Wearing a black sports bra and high-performance full-length black athletic leggings. No logos."
 } as any;
 
 function cleanJson(str: string): string {
@@ -56,30 +57,6 @@ export class AssetPromptService {
         return DEFAULT_GUIDELINES;
     }
 
-    static async generateInstructions(groupName: string, groupType: 'exercise' | 'meal') {
-        const prompt = `
-            Write instructions for ${groupType}: "${groupName}".
-            Return JSON: { 
-                "textContext": "Detailed Description of execution", 
-                "textContextSimple": "Short Cue", 
-                "steps": [{ "label": "Step 1", "instruction": "..." }], 
-                "nutritionTips": ["..."] 
-            }
-            
-            REQUIREMENT: 
-            1. Provide a detailed breakdown with 8 to 10 steps.
-            2. For exercises, focus on exact motor control. For meals, focus on culinary technique.
-            3. Detailed steps must be 2-3 sentences long.
-        `;
-        try {
-            const jsonStr = await generateAsset({ mode: 'json', prompt: prompt });
-            if (jsonStr) {
-                const clean = cleanJson(jsonStr);
-                return JSON.parse(clean);
-            }
-        } catch (e) { console.error("Instruction Gen Failed", e); }
-        return { textContext: groupName, textContextSimple: groupName, steps: [] };
-    }
 
     static async constructPrompt(
         options: {
@@ -132,11 +109,11 @@ export class AssetPromptService {
             }
         }
 
-        let coreDescription = `${groupName}`;
+        let coreDescription = "";
         if (subtype === 'step') {
-            coreDescription = `${groupName}, Step: ${label || "Action"}. ${context || ""}`;
+            coreDescription = `Single subject centered athletic shot. ${groupName}, Step: ${label || "Action"}. ${context || ""}`;
         } else {
-            coreDescription = `${groupName}. ${context || "Perfect execution."}`;
+            coreDescription = `Single subject centered. ${groupName} full body athletic hero pose. ${context || "Perfect execution."}`;
         }
 
         let prompt = `${style} SUBJECT: ${coreDescription}.`;
@@ -148,5 +125,36 @@ export class AssetPromptService {
         }
 
         return prompt;
+    }
+
+    static async generateInstructions(name: string, type: 'exercise' | 'meal'): Promise<any> {
+        const ai = new AiService();
+        const fullPrompt = `You are an expert fitness coach and nutritionist. Generate detailed instructions for the ${type === 'exercise' ? 'exercise' : 'meal'}: "${name}".
+        
+        REQUIREMENTS:
+        - Return ONLY valid JSON.
+        - description: One sentence high-level summary.
+        - instructions: Array of 6 steps. Each step object has:
+            "label": "Short name (e.g. Setup, Launch, Catch)",
+            "detailed": "Full sentence instruction (2-3 sentences)",
+            "simple": "Short 3-5 word cue (e.g. Keep back straight)"
+        
+        JSON STRUCTURE:
+        {
+            "description": "...",
+            "instructions": [
+                { "label": "...", "detailed": "...", "simple": "..." },
+                ...
+            ]
+        }`;
+
+        try {
+            const res = await ai.generateText({ prompt: fullPrompt });
+            const cleaned = cleanJson(res.text);
+            return JSON.parse(cleaned);
+        } catch (e) {
+            console.error("[AssetPromptService] Failed to generate instructions:", e);
+            return { description: name, instructions: [] };
+        }
     }
 }
