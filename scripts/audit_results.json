@@ -1,0 +1,59 @@
+﻿--- Audit Coach Refs ---
+[
+  { key: 'system_coach_atlas_ref', len: 854498, status: 'active' },
+  { key: 'system_coach_nova_ref', len: 775898, status: 'active' }
+]
+
+--- Audit Recent Assets ---
+[
+  {
+    key: 'ex_active_mobility_flow_nova_step_6',
+    status: 'failed',
+    updated_at: 2026-01-19T23:09:55.012Z
+  },
+  {
+    key: 'ex_active_mobility_flow_nova_step_5',
+    status: 'failed',
+    updated_at: 2026-01-19T23:09:40.311Z
+  },
+  {
+    key: 'ex_active_mobility_flow_nova_step_4',
+    status: 'failed',
+    updated_at: 2026-01-19T23:09:22.414Z
+  },
+  {
+    key: 'ex_active_mobility_flow_nova_step_3',
+    status: 'failed',
+    updated_at: 2026-01-19T23:08:49.011Z
+  },
+  {
+    key: 'ex_active_mobility_flow_nova_step_2',
+    status: 'failed',
+    updated_at: 2026-01-19T23:08:45.712Z
+  },
+  {
+    key: 'ex_active_mobility_flow_nova_step_1',
+    status: 'failed',
+    updated_at: 2026-01-19T23:08:03.613Z
+  },
+  {
+    key: 'ex_active_mobility_flow_nova_main',
+    status: 'failed',
+    updated_at: 2026-01-19T23:07:27.140Z
+  },
+  {
+    key: 'ex_active_mobility_flow_atlas_step_5',
+    status: 'active',
+    updated_at: 2026-01-19T23:07:23.613Z
+  },
+  {
+    key: 'ex_active_mobility_flow_atlas_step_1',
+    status: 'active',
+    updated_at: 2026-01-19T23:07:23.613Z
+  },
+  {
+    key: 'ex_active_mobility_flow_atlas_step_3',
+    status: 'active',
+    updated_at: 2026-01-19T23:07:23.613Z
+  }
+]

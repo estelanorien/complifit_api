@@ -20,8 +20,8 @@ export const DEFAULT_GUIDELINES: PromptGuidelines = {
     styleExerciseVideo: "Cinematic 4k fitness shot, dark gym, moody lighting, slow motion execution.",
     style3DAnatomyVideo: "3D anatomical render of [Subject]. Transparent biological skin, glowing emerald green muscle highlights on [Target Muscles]. Neutral studio background. Seamless loop motion. 4k resolution, high frame rate.",
     styleMealVideo: "Cinematic 4k food videography, slow motion cooking, delicious steam, chef preparation, moody lighting.",
-    coachMaleDescription: "28-year-old Caucasian male, athletic build, bald head, clean shaven. Wearing a tight Slate Grey compression t-shirt and solid black athletic shorts. No logos.",
-    coachFemaleDescription: "28-year-old Caucasian female, athletic build, platinum blonde hair in a high ponytail. Wearing a black sports bra and high-performance full-length black athletic leggings. No logos."
+    coachMaleDescription: "Bald Caucasian male athlete. No hair. Clean shaven.",
+    coachFemaleDescription: "Platinum blonde Caucasian female athlete. High ponytail. Emerald green sports bra."
 } as any;
 
 function cleanJson(str: string): string {
@@ -87,8 +87,8 @@ export class AssetPromptService {
         if (type === 'video') {
             if (groupType === 'exercise') {
                 style = guidelines.styleExerciseVideo;
-                if (identity === 'atlas') style += ` Featuring Coach Atlas (${guidelines.coachMaleDescription}).`;
-                else if (identity === 'nova') style += ` Featuring Coach Nova (${guidelines.coachFemaleDescription}).`;
+                if (identity === 'atlas') style += ` Subject: Coach Atlas.`;
+                else if (identity === 'nova') style += ` Subject: Coach Nova.`;
             } else {
                 style = guidelines.styleMealVideo;
             }
@@ -97,10 +97,10 @@ export class AssetPromptService {
             if (groupType === 'exercise') {
                 style = guidelines.styleExerciseImage;
                 if (identity === 'atlas') {
-                    style += ` FEATURING COACH ATLAS: ${guidelines.coachMaleDescription}. STRICTLY clean shaven. Maintain identical facial features to reference. system_coach_atlas_ref`;
+                    // MINIMAL DESCRIPTION TO AVOID OVERRIDING REFERENCE
+                    style += ` Subject: COACH ATLAS (Bald Caucasian Athlete from reference image). STRICTLY BALD. NO HAIR. NO BEARD.`;
                 } else if (identity === 'nova') {
-                    // CRITICAL: Explicitly mention professional headshot reference to avoid safety blocks
-                    style += ` FEATURING COACH NOVA: ${guidelines.coachFemaleDescription}. Using professional headshot reference. Maintain identical facial features to reference. system_coach_nova_ref`;
+                    style += ` Subject: COACH NOVA (Blonde Caucasian Athlete from reference image). Platinum blonde high ponytail. Emerald green sports bra.`;
                 } else {
                     style += ` Featuring: ${guidelines.vitalityAvatarDescription}.`;
                 }
