@@ -20,7 +20,7 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
     let value: string | null = null;
 
     if (mode === 'image') {
-        const model = 'gemini-1.5-flash';
+        const model = 'gemini-2.5-flash-image';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
         // Helper to prepare parts

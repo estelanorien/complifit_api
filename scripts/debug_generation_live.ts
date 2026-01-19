@@ -17,7 +17,7 @@ const pool = new pg.Pool({
     ssl: { rejectUnauthorized: false }
 });
 
-const GROUP_NAME = "Agility Cones with Ball";
+const GROUP_NAME = "25m Sprint 25m Slow"; // EXACT FAILING GROUP
 
 function normalizeToId(name: string): string {
     if (!name) return 'unknown';
@@ -36,32 +36,64 @@ function log(msg: string) {
     console.log(msg);
 }
 
-async function testGemini() {
-    log("TS: Testing Gemini API (GenerateContent with 2.5-flash)...");
+async function testGemini(client: pg.PoolClient) {
+    log("TS: Testing Alternate Models for Geo-Block Bypass...");
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
         log("TS: ❌ GEMINI_API_KEY Missing");
         return;
     }
-    const model = 'gemini-2.5-flash'; // UPDATED MODEL
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-    try {
-        const resp = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: "Hello" }] }]
-            })
-        });
-        const data = await resp.json();
-        if (data.candidates && data.candidates.length > 0) {
-            log("TS: ✅ Gemini API Success (2.5-flash)");
-        } else {
-            log(`TS: ❌ Gemini API Failed Response: ${JSON.stringify(data)}`);
+    // 1. Fetch Atlas Ref
+    const resRef = await client.query("SELECT value FROM cached_assets WHERE key='system_coach_atlas_ref'");
+    if (resRef.rows.length === 0) {
+        log("TS: ❌ Cannot test Image Gen: Atlas Ref Missing");
+        return;
+    }
+    const atlasRefBase64 = resRef.rows[0].value;
+    const cleanBase64 = atlasRefBase64.replace(/^data:image\/\w+;base64,/, "");
+
+    const candidates = ['gemini-2.5-flash-image', 'gemini-2.0-flash', 'gemini-1.5-pro'];
+
+    for (const model of candidates) {
+        log(`\nTS: Testing Model: ${model} ...`);
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+        const parts: any[] = [];
+        parts.push({ inlineData: { mimeType: "image/png", data: cleanBase64 } });
+        parts.push({ text: "Portrait of Coach Atlas. High quality fitness photography." });
+
+        try {
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts }],
+                    generationConfig: {
+                        responseModalities: ['IMAGE']
+                    }
+                })
+            });
+
+            if (!resp.ok) {
+                const errText = await resp.text();
+                log(`TS: ❌ ${model} Failed: ${resp.status} ${errText}`);
+                continue;
+            }
+
+            const data = await resp.json();
+            const resParts = data?.candidates?.[0]?.content?.parts || [];
+            const inline = resParts.find((p: any) => p.inlineData?.data);
+
+            if (inline?.inlineData?.data) {
+                log(`TS: ✅ ${model} SUCCESS! (Received Image)`);
+                return; // Stop on first success
+            } else {
+                log(`TS: ❌ ${model} Failed (No Image Data): ${JSON.stringify(data)}`);
+            }
+        } catch (e) {
+            log(`TS: ❌ ${model} Exception: ${e}`);
         }
-    } catch (e) {
-        log(`TS: ❌ Gemini API Exception: ${e}`);
     }
 }
 
@@ -86,7 +118,7 @@ async function check() {
             log(`TS: Target Asset: FOUND (${resTarget.rows[0].status})`);
         }
 
-        // 3. Check SORTED (Bad) Key
+        // 3. Check for the "Bad" sorted key
         const sortedWords = GROUP_NAME.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(w => w.length > 0).sort();
         const sortedKey = `ex_${sortedWords.join('_')}_atlas_main`;
         log(`TS: Bad Key: ${sortedKey}`);
@@ -98,7 +130,7 @@ async function check() {
         }
 
         // 4. Test Gemini
-        await testGemini();
+        await testGemini(client);
 
     } catch (e) {
         log(`TS: DEBUG ERROR: ${e}`);
