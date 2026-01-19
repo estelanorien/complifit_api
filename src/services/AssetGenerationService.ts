@@ -2,6 +2,7 @@
 import { env } from '../config/env.js';
 import { pool } from '../infra/db/pool.js';
 import { z } from 'zod';
+import { AiService } from '../application/services/aiService.js';
 
 export interface AssetGenOptions {
     mode: 'image' | 'video' | 'json';
@@ -17,99 +18,33 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
 
     if (!env.geminiApiKey) throw new Error("GEMINI_API_KEY missing");
 
+    const ai = new AiService();
     let value: string | null = null;
 
     if (mode === 'image') {
-        const model = 'gemini-2.5-flash-image';
-        const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-
-        // Helper to prepare parts
-        const parts: any[] = [];
-        if (imageInput) {
-            const base64Data = imageInput.replace(/^data:image\/\w+;base64,/, "");
-            parts.push({ inlineData: { mimeType: "image/png", data: base64Data } });
-        }
-        parts.push({ text: prompt });
-
-        const res = await fetch(genEndpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-goog-api-key': env.geminiApiKey
-            },
-            body: JSON.stringify({
-                contents: [{ parts }],
-                generationConfig: {
-                    responseModalities: ['IMAGE']
-                }
-            })
+        // Delegate to AiService (uses gemini-2.5-flash-image w/ prompt cleaning)
+        const result = await ai.generateImage({
+            prompt,
+            referenceImage: imageInput
         });
+        value = result.base64;
 
-        if (!res.ok) {
-            const err = await res.text();
-            throw new Error(`Gemini Image Gen Failed: ${res.status} ${err}`);
-        }
-
-        const data: any = await res.json();
-        const resParts = data?.candidates?.[0]?.content?.parts || [];
-        const inline = resParts.find((p: any) => p.inlineData?.data);
-        if (inline?.inlineData?.data) {
-            value = `data:image/png;base64,${inline.inlineData.data}`;
-        }
-
-        if (!value) {
-            throw new Error(`Gemini Image Gen Succeeded (200) but returned NO DATA. Cause: ${JSON.stringify(data)}`);
-        }
     } else if (mode === 'json') {
-        const model = 'gemini-2.5-flash';
-        const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-
-        const res = await fetch(genEndpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-goog-api-key': env.geminiApiKey
-            },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
+        // Delegate to AiService (uses gemini-2.5-flash)
+        const result = await ai.generateText({
+            prompt,
+            // Explicitly set JSON mime type via generation config if needed, 
+            // but AiService default text generation is usually sufficient if prompt asks for JSON.
+            // However, let's pass a hint or just rely on the prompt.
+            // The original code passed `generationConfig: { responseMimeType: 'application/json' }` implicitly via the schema in `ai.ts`? 
+            // No, `AssetGenerationService` old code just sent prompt. 
+            // Let's rely on the prompt asking for JSON as before.
         });
+        value = result.text;
 
-        if (!res.ok) throw new Error(`Gemini JSON Gen Failed: ${res.status}`);
-        const data: any = await res.json();
-        value = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     } else if (mode === 'video') {
-        // Veo Logic (using preview endpoint)
-        const model = 'models/veo-001-preview';
-        const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
-
-        // Helper to prepare parts
-        const parts: any[] = [];
-        if (imageInput) {
-            const base64Data = imageInput.replace(/^data:image\/\w+;base64,/, "");
-            parts.push({ inlineData: { mimeType: "image/png", data: base64Data } });
-        }
-        parts.push({ text: prompt });
-
-        try {
-            const res = await fetch(genEndpoint, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-goog-api-key': env.geminiApiKey
-                },
-                body: JSON.stringify({
-                    contents: [{ parts }]
-                })
-            });
-
-            if (!res.ok) throw new Error(`Veo unavailable: ${res.status}`);
-            const data: any = await res.json();
-            value = data?.candidates?.[0]?.content?.parts?.[0]?.fileData?.fileUri;
-        } catch (e) {
-            console.warn("Veo generation failed, falling back to mock", e);
-            value = null;
-        }
+        // Delegate to AiService (uses Veo or fallback)
+        value = await ai.generateVideo({ prompt });
     }
 
     // Cache Result
@@ -129,7 +64,7 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
                 mode=EXCLUDED.mode, 
                 source=EXCLUDED.source, 
                 created_by=EXCLUDED.created_by`,
-            [key, prompt, mode, 'batch_service', 'system']
+            [key, prompt, mode, 'batch_service_v2', 'system']
         );
     }
 
