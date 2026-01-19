@@ -91,12 +91,12 @@ export class BatchAssetService {
 
             // 2. Atlas & Nova Hero Assets (Dual Generation)
             phase1Assets.push({
-                key: `ex_${movementId}_atlas`,
+                key: `ex_${movementId}_atlas_main`,
                 type: 'image', subtype: 'main', label: 'Atlas Hero',
                 context: `${groupName} performed by Coach Atlas.`
             });
             phase1Assets.push({
-                key: `ex_${movementId}_nova`,
+                key: `ex_${movementId}_nova_main`,
                 type: 'image', subtype: 'main', label: 'Nova Hero',
                 context: `${groupName} performed by Coach Nova.`
             });
