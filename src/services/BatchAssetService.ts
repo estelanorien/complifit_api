@@ -12,6 +12,7 @@ interface GroupAssetGenOptions {
     themeId?: string;
     targetStatus?: 'auto' | 'draft' | 'active';
     jobId?: string;
+    onProgress?: (progress: { generated: number; errors: number; skipped: number; total: number }) => Promise<void>;
 }
 
 export class BatchAssetService {
@@ -85,7 +86,11 @@ export class BatchAssetService {
         }
 
         // 4. Sequential Generation Loop (Prevents 429s)
-        const results = { generated: 0, errors: 0, skipped: 0 };
+        const total = assetsToGenerate.length;
+        const results = { generated: 0, errors: 0, skipped: 0, total };
+
+        // Initial Progress Call
+        if (options.onProgress) await options.onProgress(results);
 
         let atlasRef: string | null = null;
         let novaRef: string | null = null;
@@ -98,6 +103,8 @@ export class BatchAssetService {
             const exists = await this.checkAssetExists(asset.key);
             if (exists && !forceRegen) {
                 results.skipped++;
+                // Skip progress update for skipped items to avoid spamming DB, or do sparse updates?
+                // Let's update every 5 skips or if generated changed.
                 continue;
             }
 
@@ -142,6 +149,14 @@ export class BatchAssetService {
                 results.errors++;
                 await this.cacheAsset(asset.key, '', 'image', 'failed');
             }
+
+            // Real-time Progress Update
+            if (options.onProgress) {
+                await options.onProgress(results);
+            }
+
+            // SAFETY DELAY: 2 seconds between generations to prevent Rate Limiting / Stuck States
+            await new Promise(resolve => setTimeout(resolve, 2000));
         }
 
         TranslationService.publishAndTranslate(options.groupId, groupName, groupType)

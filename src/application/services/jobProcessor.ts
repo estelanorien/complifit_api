@@ -2,6 +2,7 @@ import { pool } from '../../infra/db/pool.js';
 import { AiService } from './aiService.js';
 import { translationService } from './translationService.js';
 import { canonicalService } from './canonicalService.js';
+import { AssetPromptService } from './assetPromptService.js';
 import { logger } from '../../infra/logger.js';
 
 const aiService = new AiService();
@@ -104,15 +105,27 @@ export class JobProcessor {
                 await client.query('BEGIN');
 
                 // 1. Claim a job with SKIP LOCKED to prevent race conditions
+                // STRICTLY SEQUENTIAL: Check if ANY job is currently PROCESSING
+                const start = Date.now();
+                const { rows: active } = await client.query(
+                    `SELECT id FROM generation_jobs WHERE status = 'PROCESSING' AND started_at > NOW() - INTERVAL '30 minutes'`
+                );
+
+                // If any job found processing (that is not stale), we wait.
+                // UNLESS it's a high priority job? No, user requested STRICT sequential.
+                if (active.length > 0) {
+                    await client.query('ROLLBACK');
+                    return;
+                }
+
                 // Priority ordering: HIGH (3) > MEDIUM (2) > LOW (1)
-                // Also reclaim jobs stuck in PROCESSING for > 5 minutes (heartbeat timeout)
-                // Skip expired jobs
+                // Also reclaim jobs stuck in PROCESSING for > 30 minutes (heartbeat timeout)
                 const { rows } = await client.query(`
                     SELECT id, user_id, type, payload 
                     FROM generation_jobs 
                     WHERE (
                         status = 'PENDING' 
-                        OR (status = 'PROCESSING' AND started_at < NOW() - INTERVAL '5 minutes')
+                        OR (status = 'PROCESSING' AND started_at < NOW() - INTERVAL '30 minutes')
                     )
                     AND (expires_at IS NULL OR expires_at > NOW())
                     ORDER BY priority DESC, created_at ASC 
@@ -141,7 +154,21 @@ export class JobProcessor {
 
                 // 2. Execute Work
                 try {
-                    const result = await this.executeJob(job.type, job.payload);
+                    // Pass the jobId inside context if needed, but mainly we want the callback for Batch Jobs
+                    const tick = async (progress: any) => {
+                        try {
+                            await pool.query(
+                                `UPDATE generation_jobs SET status = 'PROCESSING', result = $1, updated_at = NOW() WHERE id = $2`,
+                                [JSON.stringify(progress), job.id]
+                            );
+                            logger.info(`[JobProcessor] Job ${job.id} TICK: Generated ${progress.generated}`);
+                        } catch (e) {
+                            logger.warn(`[JobProcessor] Failed to tick progress for ${job.id}`, e);
+                        }
+                    };
+
+                    // Add progress callback to payload for handlers that support it
+                    const result = await this.executeJob(job.type, { ...(job.payload as any), onProgress: tick });
 
                     await pool.query(
                         `UPDATE generation_jobs SET status = 'COMPLETED', result = $1, updated_at = now() WHERE id = $2`,
@@ -204,14 +231,8 @@ export class JobProcessor {
         return { assetUrl: image }; // Return same base64 for immediate UI use if needed
     }
 
-    private normalizeKey(str: string, prefix: string): string {
-        if (!str) return `${prefix}_unknown`;
-        let clean = str.toLowerCase().trim();
-        // Frontend-compatible normalization: No sorting, preserve order, use underscores
-        clean = clean.replace(/[^a-z0-9]+/g, '_');
-        clean = clean.replace(/^_+|_+$/g, '');
-        return prefix ? `${prefix}_${clean}` : clean;
-    }
+    // MOVED TO AssetPromptService.normalizeToId
+    // Kept briefly for reference but unused
 
     private getContentHash(text: string): string {
         if (!text) return '0';
@@ -383,8 +404,9 @@ export class JobProcessor {
 
         // 1. Canonicalization (Language Agnostic Matching)
         // Maps localized name to standardized English ID and detects language
+        // Maps localized name to standardized English ID and detects language
         const { canonicalId: baseKey, originalName, language } = await canonicalService.getCanonicalId(name, 'meal');
-        const originalKey = this.normalizeKey(name, 'meal'); // Still need local key for legacy/direct matching
+        const originalKey = `meal_${AssetPromptService.normalizeToId(name)}`; // Unify with Frontend
         const canonicalName = baseKey.replace(/^meal_/, '').replace(/_/g, ' ');
 
         // Save metadata about the group origin for later search and discovery
