@@ -5,8 +5,8 @@ export const pool = new Pool({
   connectionString: env.databaseUrl,
 
   // Connection pool limits - optimized for Cloud Run
-  max: 10, // ✅ Düşürdüm: 2GB memory için 10 yeterli (20 çok fazla)
-  min: 1, // ✅ Düşürdüm: Minimum 1 connection yeterli
+  max: 10,
+  min: 0, // ✅ Updated: Set to 0 to avoid startup connection issues on Cloud Run
 
   // Idle connection management
   idleTimeoutMillis: 20000, // ✅ 20 saniyeye düşürdüm - daha agresif cleanup
