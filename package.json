@@ -7,6 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "esbuild src/server.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/server.cjs --external:pg-native --external:fsevents",
     "start": "node dist/server.cjs",
+    "start:direct": "tsx src/server.ts",
     "lint": "eslint . --ext .ts",
     "debug:nova": "/Users/mehmetcandiri/Desktop/reha/vitality_api/node_modules/.bin/tsx src/scripts/debug_nova.ts"
   },

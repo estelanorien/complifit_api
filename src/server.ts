@@ -1,3 +1,4 @@
+console.log("[SERVER] Starting process...");
 import { buildServer } from './infra/http/server.js';
 import { env } from './config/env.js';
 import { pool } from './infra/db/pool.js';
