@@ -242,7 +242,7 @@ export class BatchAssetService {
         const { status, updated_at } = res.rows[0];
         if (['active', 'auto'].includes(status)) return true;
         if (status === 'generating') {
-            const isStale = new Date().getTime() - new Date(updated_at).getTime() > 10 * 60 * 1000;
+            const isStale = new Date().getTime() - new Date(updated_at).getTime() > 30 * 60 * 1000; // 30 min
             return !isStale;
         }
         return false;

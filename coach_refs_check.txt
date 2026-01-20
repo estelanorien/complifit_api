@@ -1,0 +1,35 @@
+=== Coach Reference Images Check ===
+
+Found 2 coach reference entries:
+  - system_coach_atlas_ref: active, 854498 bytes
+  - system_coach_nova_ref: active, 775898 bytes
+
+Job Status (Last 7 Days):
+  - COMPLETED: 26
+  - FAILED: 3
+
+Stuck Assets (generating for >10 min): 10
+  - ex_archer_pushups_atlas_step_6
+  - ex_archer_pushups_nova_step_2
+  - ex_archer_pushups_nova_step_3
+  - ex_archer_pushups_atlas_step_5
+  - ex_agility_cones_with_ball_atlas_step_3
+  - ex_agility_cones_with_ball_nova_step_5
+  - ex_agility_cones_with_ball_nova_step_3
+  - ex_agility_cones_with_ball_nova_step_1
+  - ex_archer_pushups_nova_step_6
+  - ex_archer_pushups_atlas_step_4
+
+Recent Failed Assets: 10
+  - meal_unknown_step_4
+  - meal_unknown_step_3
+  - meal_unknown_step_2
+  - meal_unknown_step_1
+  - meal_unknown_main
+  - ex_archer_push_ups_nova_step_6
+  - ex_archer_push_ups_nova_step_5
+  - ex_archer_push_ups_nova_step_4
+  - ex_archer_push_ups_nova_step_3
+  - ex_archer_push_ups_nova_step_2
+
+=== Check Complete ===
