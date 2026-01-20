@@ -88,7 +88,7 @@ Return ONLY cleaned visual description.`;
     }
   }
 
-  async generateImage({ prompt, model = 'models/imagen-3.0-generate-001', referenceImage }: GenerateImageParams) {
+  async generateImage({ prompt, model = 'models/gemini-3-pro-image-preview', referenceImage }: GenerateImageParams) {
     const parts: any[] = [];
     const cleanedPrompt = await this.cleanImagePrompt(prompt);
     let enhancedPrompt = cleanedPrompt;
