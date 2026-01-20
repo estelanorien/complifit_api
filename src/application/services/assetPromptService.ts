@@ -97,10 +97,10 @@ export class AssetPromptService {
             if (groupType === 'exercise') {
                 style = guidelines.styleExerciseImage;
                 if (identity === 'atlas') {
-                    // MINIMAL DESCRIPTION TO AVOID OVERRIDING REFERENCE
-                    style += ` Subject: COACH ATLAS (Bald Caucasian Athlete from reference image). STRICTLY BALD. NO HAIR. NO BEARD.`;
+                    // FORCEFUL IDENTITY FOR IMAGEN-3
+                    style += ` Subject: COACH ATLAS. Bald Caucasian male athlete. SHAVED HEAD. NO HAIR. NO BEARD. Athletic build. Wearing dark grey performance top and black shorts. High-end professional fitness photography.`;
                 } else if (identity === 'nova') {
-                    style += ` Subject: COACH NOVA (Blonde Caucasian Athlete from reference image). Platinum blonde high ponytail. Emerald green sports bra.`;
+                    style += ` Subject: COACH NOVA. Platinum blonde Caucasian female athlete. HIGH PONYTAIL. Fit athletic build. Wearing Emerald Green sports bra and black leggings. High-end professional fitness photography.`;
                 } else {
                     style += ` Featuring: ${guidelines.vitalityAvatarDescription}.`;
                 }
@@ -134,7 +134,7 @@ export class AssetPromptService {
         REQUIREMENTS:
         - Return ONLY valid JSON.
         - description: One sentence high-level summary.
-        - instructions: Array of 6 steps. Each step object has:
+        - instructions: Array of 6 to 10 steps (be thorough). Each step object has:
             "label": "Short name (e.g. Setup, Launch, Catch)",
             "detailed": "Full sentence instruction (2-3 sentences)",
             "simple": "Short 3-5 word cue (e.g. Keep back straight)"

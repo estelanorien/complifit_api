@@ -128,7 +128,11 @@ export class BatchAssetService {
                     movementId,
                     imageInput: refImage,
                     // Use imagen-3 (nanobanana) as requested
-                    model: 'models/imagen-3.0-generate-001'
+                    model: 'models/imagen-3.0-generate-001',
+                    persona: asset.identity as any,
+                    stepIndex: asset.subtype === 'step' ? parseInt(asset.key.split('_step_')[1]) : undefined,
+                    textContext: asset.context,
+                    originalName: groupName
                 });
 
                 results.generated++;

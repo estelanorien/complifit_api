@@ -11,10 +11,18 @@ export interface AssetGenOptions {
     movementId?: string;
     imageInput?: string; // Base64
     model?: string;
+    persona?: 'atlas' | 'nova' | 'mannequin';
+    stepIndex?: number;
+    textContext?: string;
+    textContextSimple?: string;
+    originalName?: string;
 }
 
 export const generateAsset = async (options: AssetGenOptions): Promise<string | null> => {
-    const { mode, prompt, key, status = 'active', movementId, imageInput, model } = options;
+    const {
+        mode, prompt, key, status = 'active', movementId, imageInput, model,
+        persona, stepIndex, textContext, textContextSimple, originalName
+    } = options;
 
     if (!env.geminiApiKey) throw new Error("GEMINI_API_KEY missing");
 
@@ -81,14 +89,28 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
         );
 
         await pool.query(
-            `INSERT INTO cached_asset_meta(key, prompt, mode, source, created_by)
-           VALUES($1, $2, $3, $4, $5)
+            `INSERT INTO cached_asset_meta(
+                key, prompt, mode, source, created_by, 
+                movement_id, persona, step_index, 
+                text_context, text_context_simple, original_name
+            )
+           VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            ON CONFLICT (key) DO UPDATE SET 
                 prompt=EXCLUDED.prompt, 
                 mode=EXCLUDED.mode, 
                 source=EXCLUDED.source, 
-                created_by=EXCLUDED.created_by`,
-            [key, prompt, mode, 'hardened_gen_v3', 'system']
+                created_by=EXCLUDED.created_by,
+                movement_id=EXCLUDED.movement_id,
+                persona=EXCLUDED.persona,
+                step_index=EXCLUDED.step_index,
+                text_context=EXCLUDED.text_context,
+                text_context_simple=EXCLUDED.text_context_simple,
+                original_name=EXCLUDED.original_name`,
+            [
+                key, prompt, mode, 'hardened_gen_v4', 'system',
+                movementId || null, persona || null, stepIndex || null,
+                textContext || null, textContextSimple || null, originalName || null
+            ]
         );
     }
 

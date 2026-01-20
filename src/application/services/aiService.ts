@@ -94,8 +94,9 @@ Return ONLY cleaned visual description.`;
     let enhancedPrompt = cleanedPrompt;
 
     if (referenceImage) {
-      enhancedPrompt = `IDENTITY: Replicate the person from the reference image exactly.
-Same face, same hair (bald if reference is bald), same build.
+      enhancedPrompt = `IDENTITY: REPLICATE THE FACE AND BODY FROM THE REFERENCE IMAGE EXACTLY. 
+Same face, same features, same build. 
+CRITICAL: ONLY ONE PERSON IN THE IMAGE. NO SPLIT SCREENS. NO BEFORE/AFTER.
 
 ACTION: ${cleanedPrompt}`;
 
