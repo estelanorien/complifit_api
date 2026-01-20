@@ -94,10 +94,17 @@ Return ONLY cleaned visual description.`;
     let enhancedPrompt = cleanedPrompt;
 
     if (referenceImage) {
-      enhancedPrompt = `IDENTITY: REPLICATE THE FACE, BODY, ETHNICITY, AND SKIN TONE FROM THE REFERENCE IMAGE EXACTLY. 
-Same face, same features, same build, same skin tone. 
-CRITICAL: ONLY ONE PERSON IN THE IMAGE. NO SPLIT SCREENS. NO BEFORE/AFTER.
-CRITICAL: THE CLOTHING COLORS IN THE ACTION DESCRIPTION MUST BE FOLLOWED.
+      enhancedPrompt = `IDENTITY REPLICATION: Copy the EXACT appearance from the reference image:
+- Same FACE (eyes, nose, mouth, facial structure)
+- Same HAIR (hairstyle, hair color, hair length, hair texture - DO NOT make them bald)
+- Same BODY TYPE and BUILD
+- Same SKIN TONE and ETHNICITY
+
+CRITICAL RULES:
+- ONLY ONE PERSON in the image
+- NO split screens, NO before/after comparisons
+- Follow the clothing colors specified in the action description
+- The person MUST have the same hairstyle as the reference - NOT BALD
 
 ACTION: ${cleanedPrompt}`;
 

@@ -58,7 +58,7 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
 
             // CRITICAL HARDENING: If safety block triggered by reference image, try text-only fallback
             if (error.message.includes('SAFETY_BLOCK') && currentImageInput) {
-                console.warn(`[Gen] Safety block triggered. Retrying WITHOUT reference image (Fallback Mode).`);
+                console.warn(`[Gen] ⚠️ SAFETY BLOCK on ${key || 'anonymous'}. Retrying WITHOUT reference image. This will cause identity loss (bald images).`);
                 currentImageInput = undefined;
                 continue; // Immediate retry without reference
             }
