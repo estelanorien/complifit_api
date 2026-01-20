@@ -56,11 +56,11 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
         } catch (error: any) {
             console.error(`[Gen] Attempt ${attempts} failed:`, error.message);
 
-            // CRITICAL HARDENING: If safety block triggered by reference image, try text-only fallback
+            // CRITICAL: Do NOT retry without reference image - this causes bald coaches
+            // If safety block occurs WITH reference image, log it clearly and throw
             if (error.message.includes('SAFETY_BLOCK') && currentImageInput) {
-                console.warn(`[Gen] ⚠️ SAFETY BLOCK on ${key || 'anonymous'}. Retrying WITHOUT reference image. This will cause identity loss (bald images).`);
-                currentImageInput = undefined;
-                continue; // Immediate retry without reference
+                console.error(`[Gen] ❌ SAFETY BLOCK on ${key || 'anonymous'} - The reference image was rejected. NOT retrying without it (would cause identity loss).`);
+                throw new Error(`SAFETY_BLOCK: Reference image rejected for ${key}. Please regenerate the coach reference image.`);
             }
 
             if (attempts >= maxAttempts) {

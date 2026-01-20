@@ -94,20 +94,7 @@ Return ONLY cleaned visual description.`;
     let enhancedPrompt = cleanedPrompt;
 
     if (referenceImage) {
-      enhancedPrompt = `IDENTITY REPLICATION: Copy the EXACT appearance from the reference image:
-- Same FACE (eyes, nose, mouth, facial structure)
-- Same HAIR (hairstyle, hair color, hair length, hair texture - DO NOT make them bald)
-- Same BODY TYPE and BUILD
-- Same SKIN TONE and ETHNICITY
-
-CRITICAL RULES:
-- ONLY ONE PERSON in the image
-- NO split screens, NO before/after comparisons
-- Follow the clothing colors specified in the action description
-- The person MUST have the same hairstyle as the reference - NOT BALD
-
-ACTION: ${cleanedPrompt}`;
-
+      // CRITICAL: Put image FIRST, then text prompt - order matters for identity preservation
       const base64Data = referenceImage.replace(/^data:image\/\w+;base64,/, "");
       parts.push({
         inlineData: {
@@ -115,6 +102,24 @@ ACTION: ${cleanedPrompt}`;
           data: base64Data
         }
       });
+
+      enhancedPrompt = `MANDATORY IDENTITY REPLICATION - FOLLOW EXACTLY:
+
+🚫 NEVER GENERATE A BALD PERSON - THIS IS STRICTLY FORBIDDEN 🚫
+
+Copy these features EXACTLY from the reference image above:
+1. HAIR - Same hairstyle, color, length, texture (THE PERSON HAS HAIR - REPLICATE IT)
+2. FACE - Same eyes, nose, mouth, facial structure
+3. BODY - Same build, height, physique
+4. SKIN - Same skin tone and ethnicity
+
+RULES:
+- Only ONE person in the image
+- No split screens or before/after
+- Hair must match reference exactly - if reference has short dark hair, output must have short dark hair
+- The person is PERFORMING AN EXERCISE, not just standing
+
+EXERCISE ACTION: ${cleanedPrompt}`;
     }
 
     parts.push({ text: enhancedPrompt });
