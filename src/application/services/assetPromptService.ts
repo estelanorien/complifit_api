@@ -20,8 +20,8 @@ export const DEFAULT_GUIDELINES: PromptGuidelines = {
     styleExerciseVideo: "Cinematic 4k fitness shot, dark gym, moody lighting, slow motion execution.",
     style3DAnatomyVideo: "3D anatomical render of [Subject]. Transparent biological skin, glowing emerald green muscle highlights on [Target Muscles]. Neutral studio background. Seamless loop motion. 4k resolution, high frame rate.",
     styleMealVideo: "Cinematic 4k food videography, slow motion cooking, delicious steam, chef preparation, moody lighting.",
-    coachMaleDescription: "Bald Caucasian male athlete. No hair. Clean shaven.",
-    coachFemaleDescription: "Platinum blonde Caucasian female athlete. High ponytail. Emerald green sports bra."
+    coachMaleDescription: "Light-skinned Caucasian athletic male with a short dark buzz cut haircut, slight facial stubble, clean and sharp features. Wearing a dark grey performance t-shirt and black athletic shorts.",
+    coachFemaleDescription: "Platinum blonde Caucasian female athlete. High ponytail. Emerald green sports bra and black athletic leggings."
 } as any;
 
 function cleanJson(str: string): string {
@@ -98,9 +98,9 @@ export class AssetPromptService {
                 style = guidelines.styleExerciseImage;
                 if (identity === 'atlas') {
                     // FORCEFUL IDENTITY FOR IMAGEN-3
-                    style += ` Subject: COACH ATLAS. Bald Caucasian male athlete. SHAVED HEAD. NO HAIR. NO BEARD. Athletic build. Wearing dark grey performance top and black shorts. High-end professional fitness photography.`;
+                    style += ` Subject: COACH ATLAS. Light-skinned Caucasian athletic male with short dark buzz cut hair and slight facial stubble. Fit athletic build. Wearing a dark grey performance t-shirt and black shorts. High-end professional fitness photography.`;
                 } else if (identity === 'nova') {
-                    style += ` Subject: COACH NOVA. Platinum blonde Caucasian female athlete. HIGH PONYTAIL. Fit athletic build. Wearing Emerald Green sports bra and black leggings. High-end professional fitness photography.`;
+                    style += ` Subject: COACH NOVA. Platinum blonde Caucasian female athlete. HIGH PONYTAIL. Fit athletic build. Wearing an Emerald Green sports bra and black athletic leggings. High-end professional fitness photography.`;
                 } else {
                     style += ` Featuring: ${guidelines.vitalityAvatarDescription}.`;
                 }
@@ -111,9 +111,9 @@ export class AssetPromptService {
 
         let coreDescription = "";
         if (subtype === 'step') {
-            coreDescription = `Single subject centered athletic shot. ${groupName}, Step: ${label || "Action"}. ${context || ""}`;
+            coreDescription = `ACTION: ${label || "Active Movement"}. ${context || "Performing the exercise with perfect form."} Single subject centered athletic shot of ${groupName}.`;
         } else {
-            coreDescription = `Single subject centered. ${groupName} full body athletic hero pose. ${context || "Perfect execution."}`;
+            coreDescription = `HERO POSE: ${groupName}. Full body athletic execution. ${context || "Perfect professional form."}`;
         }
 
         let prompt = `${style} SUBJECT: ${coreDescription}.`;
@@ -134,18 +134,30 @@ export class AssetPromptService {
         REQUIREMENTS:
         - Return ONLY valid JSON.
         - description: One sentence high-level summary.
-        - instructions: Array of 6 to 10 steps (be thorough). Each step object has:
-            "label": "Short name (e.g. Setup, Launch, Catch)",
-            "detailed": "Full sentence instruction (2-3 sentences)",
-            "simple": "Short 3-5 word cue (e.g. Keep back straight)"
+        - instructions: Array of 6 to 10 steps.
+        
+        IF EXERCISE:
+        - safety_warnings: Array of 3 critical safety tips.
+        - pro_tips: Array of 3 performance tips.
+        - common_mistakes: Array of 3 mistakes to avoid.
+        
+        IF MEAL:
+        - nutrition_science: A short paragraph explaining the health benefits.
+        - prep_tips: Array of 3 preparation tips.
+        - allergens: Array of potential allergens.
         
         JSON STRUCTURE:
         {
             "description": "...",
             "instructions": [
-                { "label": "...", "detailed": "...", "simple": "..." },
-                ...
-            ]
+                { "label": "...", "detailed": "...", "simple": "..." }
+            ],
+            "safety_warnings": ["..."],
+            "pro_tips": ["..."],
+            "common_mistakes": ["..."],
+            "nutrition_science": "...",
+            "prep_tips": ["..."],
+            "allergens": ["..."]
         }`;
 
         try {

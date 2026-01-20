@@ -1,4 +1,5 @@
 import { TrainingPlan } from '../../../../application/services/trainingService.js';
+import { AssetMiddleware } from '../../../../services/AssetMiddleware.js';
 
 export const saveTrainingProgram = async (
   client: any,
@@ -51,6 +52,14 @@ export const saveTrainingProgram = async (
         }
       }
     }
+  }
+
+  // Ensure assets exist for all exercises (fire-and-forget)
+  if (Array.isArray(trainingPlan?.schedule)) {
+    const allExercises = trainingPlan.schedule.flatMap(day => day.exercises || []);
+    AssetMiddleware.ensureTrainingPlanAssets(allExercises).catch(e => {
+      console.error('[SavePlan] Asset generation failed:', e);
+    });
   }
 
   // Get current profile_data to preserve all existing data

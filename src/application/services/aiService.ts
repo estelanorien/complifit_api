@@ -94,9 +94,10 @@ Return ONLY cleaned visual description.`;
     let enhancedPrompt = cleanedPrompt;
 
     if (referenceImage) {
-      enhancedPrompt = `IDENTITY: REPLICATE THE FACE AND BODY FROM THE REFERENCE IMAGE EXACTLY. 
-Same face, same features, same build. 
+      enhancedPrompt = `IDENTITY: REPLICATE THE FACE, BODY, ETHNICITY, AND SKIN TONE FROM THE REFERENCE IMAGE EXACTLY. 
+Same face, same features, same build, same skin tone. 
 CRITICAL: ONLY ONE PERSON IN THE IMAGE. NO SPLIT SCREENS. NO BEFORE/AFTER.
+CRITICAL: THE CLOTHING COLORS IN THE ACTION DESCRIPTION MUST BE FOLLOWED.
 
 ACTION: ${cleanedPrompt}`;
 

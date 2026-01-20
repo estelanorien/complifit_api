@@ -11,6 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 // Jump up from src/application/services to src/assets
 const NOVA_REF_PATH = path.resolve(__dirname, '../../assets/coach_nova_ref.png');
+const ATLAS_REF_PATH = path.resolve(__dirname, '../../assets/coach_atlas_ref.png');
 
 export class AssetOrchestrator {
     private static ai = new AiService();
@@ -66,12 +67,44 @@ export class AssetOrchestrator {
                 }
 
                 // Auto-Generate Meta if missing
-                if (!instructions.steps) {
+                if (!instructions.instructions || !Array.isArray(instructions.instructions)) {
                     console.log(`[Orchestrator] Missing instructions for ${id}, generating meta...`);
-                    const newInstr = await AssetPromptService.generateInstructions(id.replace(/_/g, ' '), 'exercise'); // Rough name
+                    const newInstr = await AssetPromptService.generateInstructions(id.replace(/_/g, ' '), type === 'ex' ? 'exercise' : 'meal');
                     if (newInstr) {
                         await UnifiedAssetService.storeAsset(metaKey, Buffer.from(JSON.stringify(newInstr)), 'json', 'active');
                         instructions = newInstr;
+
+                        // SYNC TO ENTITY TABLE (Critical for App UI)
+                        // The app reads instructions/tips from the entity table, not cached_assets.
+                        try {
+                            const { pool } = await import('../../infra/db/pool.js');
+                            if (type === 'ex') {
+                                await pool.query(
+                                    `UPDATE training_exercises SET 
+                                        metadata = jsonb_set(COALESCE(metadata, '{}'), '{generated_instructions}', $1)
+                                     WHERE id = $2`,
+                                    [JSON.stringify(newInstr), id]
+                                );
+                            } else {
+                                // Meals
+                                await pool.query(
+                                    `UPDATE meals SET 
+                                        instructions = $1, 
+                                        nutrition_tips = $2,
+                                        metadata = $3
+                                     WHERE id = $4`,
+                                    [
+                                        JSON.stringify(newInstr.instructions),
+                                        JSON.stringify({ science: newInstr.nutrition_science, tips: newInstr.prep_tips, allergens: newInstr.allergens }),
+                                        JSON.stringify(newInstr),
+                                        id
+                                    ]
+                                );
+                            }
+                            console.log(`[Orchestrator] Synced metadata to entity table for ${id}`);
+                        } catch (e: any) {
+                            console.error(`[Orchestrator] Entity sync failed: ${e.message}`);
+                        }
                     }
                 }
 
@@ -79,12 +112,57 @@ export class AssetOrchestrator {
                 if (subtype === 'main') {
                     instruction = instructions.description || `${id.replace(/_/g, ' ')} main hero shot.`;
                 } else if (subtype === 'step') {
-                    const stepData = instructions.steps?.[index - 1];
+                    const stepData = instructions.instructions?.[index - 1];
                     instruction = stepData?.detailed || stepData?.instruction || `Step ${index}`;
                 }
-            } else {
-                // Meal logic similar...
-                instruction = `Delicious ${id.replace(/_/g, ' ')}`;
+            } else if (type === 'meal') {
+                // Meal generation logic
+                const metaKey = UnifiedAssetService.generateKey({ type, id, persona: 'none', subtype: 'meta', index: 0 });
+                const metaAsset = await UnifiedAssetService.getAsset(metaKey);
+
+                let instructions: any = {};
+                if (metaAsset && metaAsset.buffer && metaAsset.buffer.length > 0) {
+                    try { instructions = JSON.parse(metaAsset.buffer.toString()); } catch { }
+                }
+
+                // Auto-generate if missing
+                if (!instructions.instructions || !Array.isArray(instructions.instructions)) {
+                    console.log(`[Orchestrator] Missing meal instructions for ${id}, generating meta...`);
+                    const newInstr = await AssetPromptService.generateInstructions(id.replace(/_/g, ' '), 'meal');
+                    if (newInstr) {
+                        await UnifiedAssetService.storeAsset(metaKey, Buffer.from(JSON.stringify(newInstr)), 'json', 'active');
+                        instructions = newInstr;
+
+                        // Sync to meals table
+                        try {
+                            const { pool } = await import('../../infra/db/pool.js');
+                            await pool.query(
+                                `UPDATE meals SET 
+                                    instructions = $1, 
+                                    nutrition_tips = $2,
+                                    metadata = $3
+                                 WHERE id = $4`,
+                                [
+                                    JSON.stringify(newInstr.instructions),
+                                    JSON.stringify({ science: newInstr.nutrition_science, tips: newInstr.prep_tips, allergens: newInstr.allergens }),
+                                    JSON.stringify(newInstr),
+                                    id
+                                ]
+                            );
+                            console.log(`[Orchestrator] Synced meal metadata to entity table for ${id}`);
+                        } catch (e: any) {
+                            console.error(`[Orchestrator] Meal entity sync failed: ${e.message}`);
+                        }
+                    }
+                }
+
+                // Get meal step text
+                if (subtype === 'main') {
+                    instruction = instructions.description || `Delicious ${id.replace(/_/g, ' ')}`;
+                } else if (subtype === 'step') {
+                    const stepData = instructions.instructions?.[index - 1];
+                    instruction = stepData?.detailed || stepData?.instruction || `Preparation step ${index}`;
+                }
             }
 
 
@@ -93,10 +171,12 @@ export class AssetOrchestrator {
             let refImage: string | undefined = undefined;
 
             if (persona === 'atlas') {
-                prompt += `Subject: Coach Atlas. Bald Caucasian male athlete, shaved head, athletic muscular build, professional gym lighting. `;
-                // No Ref Image for Atlas (Missing)
+                prompt += `Subject: Coach Atlas. Light-skinned Caucasian athletic male with a short dark buzz cut haircut, slight facial stubble, fit muscular build. Wearing a dark grey performance t-shirt and black athletic shorts. Professional gym lighting. `;
+                if (fs.existsSync(ATLAS_REF_PATH)) {
+                    refImage = fs.readFileSync(ATLAS_REF_PATH, { encoding: 'base64' });
+                }
             } else if (persona === 'nova') {
-                prompt += `Subject: Coach Nova. Platinum blonde Caucasian female athlete, high ponytail, fit athletic build, emerald green sports bra. `;
+                prompt += `Subject: Coach Nova. Platinum blonde Caucasian female athlete, high ponytail, fit athletic build. Wearing an emerald green sports bra and black athletic leggings. Professional gym lighting. `;
                 if (fs.existsSync(NOVA_REF_PATH)) {
                     refImage = fs.readFileSync(NOVA_REF_PATH, { encoding: 'base64' });
                 }
@@ -107,7 +187,7 @@ export class AssetOrchestrator {
             // Equipment Enrichment (Bulletproof)
             if (type === 'ex') {
                 try {
-                    const exRes = await import('../infra/db/pool.js').then(m => m.pool.query(
+                    const exRes = await import('../../infra/db/pool.js').then(m => m.pool.query(
                         `SELECT equipment FROM training_exercises WHERE id = $1`,
                         [id]
                     ));

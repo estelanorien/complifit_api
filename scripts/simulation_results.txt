@@ -1,0 +1,10 @@
+
+--- Simulating fetch for: [ex_arnold_press_atlas_step_1] ---
+DB STATUS: active, TYPE: image, VALUE LEN: 911750
+Looking for Meta: ex_arnold_press_meta
+META FOUND
+
+--- Simulating fetch for: [ex_arnold_press_atlas_step_5] ---
+DB STATUS: active, TYPE: image, VALUE LEN: 921110
+Looking for Meta: ex_arnold_press_meta
+META FOUND

@@ -27,6 +27,7 @@ const roleSchema = z.object({
 });
 
 import { BatchAssetService } from '../../../services/BatchAssetService.js';
+import { AssetGenerationFacade } from '../../../application/services/AssetGenerationFacade.js';
 
 export async function adminRoutes(app: FastifyInstance) {
   // Batch Trigger
@@ -570,8 +571,7 @@ export async function adminRoutes(app: FastifyInstance) {
          FROM cached_assets a
          LEFT JOIN cached_asset_meta m ON m.key = a.key
          WHERE a.key LIKE ANY($1) OR m.original_name LIKE ANY($1)
-         ORDER BY a.created_at DESC
-         LIMIT 100`,
+         LIMIT 2000`,
         [patterns]
       );
       return reply.send(res.rows);
@@ -580,6 +580,128 @@ export async function adminRoutes(app: FastifyInstance) {
       req.log.error(e);
       return reply.status(500).send({ error: `Scan failed: ${e.message}` });
     }
+  });
+
+  // ================== UNIFIED ASSET GENERATION ROUTES ==================
+
+  // Job tracking for generation progress
+  const activeJobs = new Map<string, {
+    id: string;
+    status: 'running' | 'complete' | 'failed';
+    total: number;
+    completed: number;
+    failed: number;
+    currentItem: string;
+    startedAt: Date;
+    completedAt?: Date;
+  }>();
+
+  /**
+   * GET /admin/generation/status
+   * Get asset status for all exercises and meals
+   */
+  app.get('/admin/generation/status', { preHandler: adminGuard }, async (req, reply) => {
+    try {
+      const { type = 'both', status = 'all' } = req.query as { type?: string; status?: string };
+      const items: any[] = [];
+
+      // Fetch exercises
+      if (type === 'ex' || type === 'both') {
+        const exercises = await pool.query(`SELECT id, name FROM training_exercises WHERE name IS NOT NULL ORDER BY name LIMIT 100`);
+        for (const ex of exercises.rows) {
+          const assetStatus = await AssetGenerationFacade.getAssetStatus('ex', ex.id);
+          let itemStatus = 'empty';
+          if (assetStatus.complete === assetStatus.total) itemStatus = 'complete';
+          else if (assetStatus.complete > 0) itemStatus = 'partial';
+          else if (assetStatus.failed > 0) itemStatus = 'failed';
+          if (status === 'all' || status === itemStatus) {
+            items.push({ type: 'ex', id: ex.id, name: ex.name, status: itemStatus, assets: assetStatus });
+          }
+        }
+      }
+
+      // Fetch meals
+      if (type === 'meal' || type === 'both') {
+        const meals = await pool.query(`SELECT id, name FROM meals WHERE name IS NOT NULL ORDER BY name LIMIT 100`);
+        for (const meal of meals.rows) {
+          const assetStatus = await AssetGenerationFacade.getAssetStatus('meal', meal.id);
+          let itemStatus = 'empty';
+          if (assetStatus.complete === assetStatus.total) itemStatus = 'complete';
+          else if (assetStatus.complete > 0) itemStatus = 'partial';
+          else if (assetStatus.failed > 0) itemStatus = 'failed';
+          if (status === 'all' || status === itemStatus) {
+            items.push({ type: 'meal', id: meal.id, name: meal.name, status: itemStatus, assets: assetStatus });
+          }
+        }
+      }
+
+      return reply.send({ items, total: items.length });
+    } catch (e: any) {
+      req.log.error({ error: 'generation status error', message: e.message });
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  /**
+   * POST /admin/generation/batch
+   * Start batch asset generation
+   */
+  app.post('/admin/generation/batch', { preHandler: adminGuard }, async (req, reply) => {
+    try {
+      const { mode, type = 'both', ids = [], count = 10, status = 'empty' } = req.body as any;
+      const jobId = `job_${Date.now()}`;
+      let itemsToGenerate: Array<{ type: 'ex' | 'meal', id: string }> = [];
+
+      if (mode === 'selected' && ids.length > 0) {
+        itemsToGenerate = ids.map((item: any) => ({ type: item.type, id: item.id }));
+      } else if (mode === 'next') {
+        const typeFilter = type === 'both' ? ['ex', 'meal'] : [type];
+        for (const t of typeFilter) {
+          const table = t === 'ex' ? 'training_exercises' : 'meals';
+          const items = await pool.query(`SELECT id, name FROM ${table} WHERE name IS NOT NULL ORDER BY created_at DESC LIMIT $1`, [count]);
+          for (const item of items.rows) {
+            const assetStatus = await AssetGenerationFacade.getAssetStatus(t as 'ex' | 'meal', item.id);
+            if ((status === 'empty' && assetStatus.empty > 0) || (status === 'failed' && assetStatus.failed > 0) || status === 'all') {
+              itemsToGenerate.push({ type: t as 'ex' | 'meal', id: item.id });
+            }
+            if (itemsToGenerate.length >= count) break;
+          }
+        }
+      }
+
+      activeJobs.set(jobId, { id: jobId, status: 'running', total: itemsToGenerate.length, completed: 0, failed: 0, currentItem: '', startedAt: new Date() });
+
+      AssetGenerationFacade.generateBatch(itemsToGenerate, {
+        sequential: true,
+        delayMs: 2000,
+        onProgress: (current, total, currentItem) => {
+          const job = activeJobs.get(jobId);
+          if (job) { job.completed = current; job.currentItem = currentItem; }
+        }
+      }).then(result => {
+        const job = activeJobs.get(jobId);
+        if (job) { job.status = 'complete'; job.completed = result.completed; job.failed = result.failed; job.completedAt = new Date(); }
+      }).catch(e => {
+        const job = activeJobs.get(jobId);
+        if (job) { job.status = 'failed'; job.completedAt = new Date(); }
+        req.log.error({ error: 'batch generation failed', message: e.message });
+      });
+
+      return reply.send({ jobId, message: 'Generation started', itemCount: itemsToGenerate.length });
+    } catch (e: any) {
+      req.log.error({ error: 'batch generation error', message: e.message });
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  /**
+   * GET /admin/generation/progress/:jobId
+   */
+  app.get('/admin/generation/progress/:jobId', { preHandler: adminGuard }, async (req, reply) => {
+    const { jobId } = req.params as { jobId: string };
+    const job = activeJobs.get(jobId);
+    if (!job) return reply.status(404).send({ error: 'Job not found' });
+    return reply.send(job);
   });
 
   // ================== ADMIN USER MANAGEMENT ==================
