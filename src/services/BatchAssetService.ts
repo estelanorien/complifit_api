@@ -3,6 +3,51 @@ import { pool } from '../infra/db/pool.js';
 import { generateAsset } from './AssetGenerationService.js';
 import { AssetPromptService } from '../application/services/assetPromptService.js';
 import { TranslationService } from './TranslationService.js';
+import { AiService } from '../application/services/aiService.js';
+
+// Helper to generate instruction text via AI
+async function generateInstructionText(
+    groupName: string,
+    stepLabel: string,
+    groupType: 'exercise' | 'meal',
+    outputType: 'detailed' | 'simple'
+): Promise<string> {
+    const ai = new AiService();
+
+    let prompt = '';
+    if (groupType === 'exercise') {
+        if (outputType === 'detailed') {
+            prompt = `Generate 2 sentences for exercise "${groupName}" - Step: "${stepLabel}".
+            Sentence 1: Clear execution instruction (how to perform this movement).
+            Sentence 2: Safety tip to prevent injury.
+            Use imperative coaching style. No preambles. No step numbers.
+            Example: "Drive through your heels and squeeze glutes at the top. Keep your spine neutral to protect your lower back."`;
+        } else {
+            prompt = `Generate a single short coaching cue (max 8 words) for exercise "${groupName}" - Step: "${stepLabel}".
+            Imperative style. No step numbers. No safety tips.
+            Example: "Drive through heels, squeeze glutes"`;
+        }
+    } else {
+        if (outputType === 'detailed') {
+            prompt = `Generate 2 sentences for meal preparation "${groupName}" - Step: "${stepLabel}".
+            Sentence 1: Clear preparation technique.
+            Sentence 2: Nutrition science tip or food safety tip.
+            Example: "Sear the chicken on high heat until golden brown. High-quality protein supports muscle recovery and satiety."`;
+        } else {
+            prompt = `Generate a single short cooking tip (max 8 words) for meal "${groupName}" - Step: "${stepLabel}".
+            No step numbers.
+            Example: "Sear on high heat for crispiness"`;
+        }
+    }
+
+    try {
+        const result = await ai.generateText({ prompt });
+        return result?.text?.trim() || '';
+    } catch (e) {
+        console.error(`[Batch] Failed to generate ${outputType} instruction for ${stepLabel}:`, e);
+        return '';
+    }
+}
 
 interface GroupAssetGenOptions {
     groupId: string;
@@ -126,7 +171,13 @@ export class BatchAssetService {
                 if (asset.identity === 'atlas') refImage = atlasRef || undefined;
                 if (asset.identity === 'nova') refImage = novaRef || undefined;
 
-                console.log(`[Batch] Generating ${asset.key}...`);
+                // Auto-generate instruction text (detailed and simple)
+                console.log(`[Batch] Generating instructions for ${asset.key}...`);
+                const detailedText = await generateInstructionText(groupName, asset.label || asset.key, groupType, 'detailed');
+                const simpleText = await generateInstructionText(groupName, asset.label || asset.key, groupType, 'simple');
+                console.log(`[Batch] Instructions generated: detailed="${detailedText.substring(0, 50)}..." simple="${simpleText}"`);
+
+                console.log(`[Batch] Generating image for ${asset.key}...`);
                 await generateAsset({
                     mode: 'image',
                     prompt,
@@ -138,7 +189,8 @@ export class BatchAssetService {
                     model: 'models/gemini-3-pro-image-preview',
                     persona: asset.identity as any,
                     stepIndex: asset.subtype === 'step' ? parseInt(asset.key.split('_step_')[1]) : undefined,
-                    textContext: asset.context,
+                    textContext: detailedText || asset.context,
+                    textContextSimple: simpleText,
                     originalName: groupName
                 });
 
