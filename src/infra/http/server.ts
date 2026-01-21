@@ -71,20 +71,13 @@ export function buildServer() {
     trustProxy: true // CRITICAL: Required for Cloud Run/Load Balancers to forward real IPs
   });
 
-  // CORS configuration - production-safe
-  // Handle wildcard '*' correctly for Fastify CORS
-  const isWildcard = env.allowedOrigins && env.allowedOrigins.length === 1 && env.allowedOrigins[0] === '*';
-  const corsOptions = env.nodeEnv === 'production' && env.allowedOrigins
-    ? {
-      origin: isWildcard ? true : env.allowedOrigins,  // 'true' means allow all, array means specific origins
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      credentials: !isWildcard  // credentials can't be used with wildcard origin
-    }
-    : {
-      origin: ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5174', 'http://localhost:3001', 'http://localhost:3005'],
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      credentials: true
-    };
+  // CORS configuration - ALLOW ALL ORIGINS for production (temporary fix)
+  // This is needed because localhost development needs to access the production API
+  const corsOptions = {
+    origin: true,  // Allow ALL origins
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    credentials: false  // Must be false with origin: true for security
+  };
 
   // Security headers
   app.register(helmet, {

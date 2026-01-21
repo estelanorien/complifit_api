@@ -102,7 +102,7 @@ export async function healthRoutes(app: FastifyInstance) {
 
     return reply.status(statusCode).send({
       status: overallStatus,
-      version: '1.0.2-cors-fix',
+      version: '1.0.3-cors-all',
       timestamp: new Date().toISOString(),
       uptime: uptimeSeconds,
       checks,
