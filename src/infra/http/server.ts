@@ -72,11 +72,13 @@ export function buildServer() {
   });
 
   // CORS configuration - production-safe
+  // Handle wildcard '*' correctly for Fastify CORS
+  const isWildcard = env.allowedOrigins && env.allowedOrigins.length === 1 && env.allowedOrigins[0] === '*';
   const corsOptions = env.nodeEnv === 'production' && env.allowedOrigins
     ? {
-      origin: env.allowedOrigins,
+      origin: isWildcard ? true : env.allowedOrigins,  // 'true' means allow all, array means specific origins
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      credentials: true
+      credentials: !isWildcard  // credentials can't be used with wildcard origin
     }
     : {
       origin: ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5174', 'http://localhost:3001', 'http://localhost:3005'],
