@@ -11,11 +11,11 @@ const VITALITY_IMAGE_STYLE = "photorealistic, 8k resolution, cinematic lighting,
 
 const COACH_PROFILES = {
     atlas: {
-        description: "Caucasian male, 28 years old, short faded dark-blonde hair, STRICTLY clean shaven, no facial hair. Wearing a simple grey athletic t-shirt. Maintain identical facial features across all shots.",
+        description: "Caucasian male, 28 years old, SHORT GOLDEN-BLONDE HAIR (NOT black, NOT brown - must be light brownish-gold), STRICTLY clean shaven no facial hair. Wearing a simple grey athletic t-shirt. Maintain identical facial features and HAIR COLOR across all shots.",
         refKey: "system_coach_atlas_ref"
     },
     nova: {
-        description: "Caucasian female, 28 years old, long blonde hair in a high ponytail. Wearing a simple black athletic tank top. Friendly, confident smile, strictly maintain hairstyle and face.",
+        description: "Caucasian female, 28 years old, LONG GOLDEN-BLONDE HAIR in a high ponytail (NOT black, NOT brown - must be light blonde). Wearing a simple black athletic tank top. Friendly, confident smile, strictly maintain hairstyle, HAIR COLOR and face.",
         refKey: "system_coach_nova_ref"
     }
 };

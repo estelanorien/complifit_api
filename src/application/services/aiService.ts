@@ -103,23 +103,31 @@ Return ONLY cleaned visual description.`;
         }
       });
 
-      enhancedPrompt = `MANDATORY IDENTITY REPLICATION - FOLLOW EXACTLY:
+      enhancedPrompt = `CRITICAL IDENTITY REPLICATION INSTRUCTIONS:
 
-🚫 NEVER GENERATE A BALD PERSON - THIS IS STRICTLY FORBIDDEN 🚫
+STEP 1: ANALYZE THE REFERENCE IMAGE ABOVE
+Look at the person in the reference image and note:
+- Their EXACT hair color (blonde/dark blonde/brown/etc)
+- Their EXACT hairstyle (short, medium, long, ponytail, etc)
+- Their facial features
+- Their body type and skin tone
 
-Copy these features EXACTLY from the reference image above:
-1. HAIR - Same hairstyle, color, length, texture (THE PERSON HAS HAIR - REPLICATE IT)
-2. FACE - Same eyes, nose, mouth, facial structure
-3. BODY - Same build, height, physique
-4. SKIN - Same skin tone and ethnicity
+STEP 2: REPLICATE EXACTLY
+Generate an image where the SAME EXACT PERSON is performing an exercise.
+- HAIR COLOR MUST MATCH EXACTLY - if reference has golden/dark blonde hair, output MUST have golden/dark blonde hair (NOT black, NOT brown)
+- HAIR STYLE MUST MATCH - same length, same cut
+- Face MUST match reference
+- NEVER generate a bald person
 
-RULES:
-- Only ONE person in the image
-- No split screens or before/after
-- Hair must match reference exactly - if reference has short dark hair, output must have short dark hair
-- The person is PERFORMING AN EXERCISE, not just standing
+STEP 3: THE ACTION
+The person is performing: ${cleanedPrompt}
 
-EXERCISE ACTION: ${cleanedPrompt}`;
+FORBIDDEN:
+🚫 Black hair when reference has blonde hair
+🚫 Bald head
+🚫 Different person
+🚫 Multiple people
+🚫 Split screen or before/after`;
     }
 
     parts.push({ text: enhancedPrompt });
