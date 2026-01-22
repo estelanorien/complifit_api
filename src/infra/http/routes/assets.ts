@@ -397,6 +397,17 @@ export async function assetsRoutes(app: FastifyInstance) {
       }
       return row;
     });
+
+    // DEBUG: Log what we're returning
+    req.log.info({
+      message: '[by-movement] Returning data',
+      movementId,
+      totalRows: processedRows.length,
+      keys: processedRows.map((r: any) => r.key),
+      hasTextContext: processedRows.filter((r: any) => r.text_context || r.text_context_simple).length,
+      metaJsonKeys: processedRows.filter((r: any) => r.key?.endsWith('_meta') && r.asset_type === 'json').map((r: any) => r.key)
+    });
+
     return processedRows;
   });
 }
