@@ -366,6 +366,8 @@ export async function assetsRoutes(app: FastifyInstance) {
       req.log.warn(`[Assets] Alias resolution failed for ${movementId}, falling back to literal key`);
     }
 
+    // FIX: Search for keys with proper prefixes (ex_ for exercises, meal_ for meals)
+    // The keys are stored as ex_${movementId}_atlas_main, meal_${movementId}_step_1, etc.
     const { rows } = await pool.query(
       `SELECT a.key, a.value, a.asset_type, a.status, a.created_at,
                m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id,
@@ -374,10 +376,13 @@ export async function assetsRoutes(app: FastifyInstance) {
                m.text_context, m.text_context_simple, m.step_index, m.persona
         FROM cached_assets a
         LEFT JOIN cached_asset_meta m ON m.key = a.key
-        WHERE m.movement_id = $1 OR a.key LIKE $2
+        WHERE m.movement_id = $1 
+           OR a.key LIKE $2 
+           OR a.key LIKE $3
+           OR a.key LIKE $4
         ORDER BY a.created_at DESC
-        LIMIT $3`,
-      [movementId, `${movementId}%`, limit]
+        LIMIT $5`,
+      [movementId, `ex_${movementId}%`, `meal_${movementId}%`, `${movementId}%`, limit]
     );
     // Ensure image values have proper data:image prefix for frontend display
     const processedRows = rows.map((row: any) => {
