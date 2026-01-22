@@ -88,7 +88,10 @@ Return ONLY cleaned visual description.`;
     }
   }
 
-  async generateImage({ prompt, model = 'models/gemini-3-pro-image-preview', referenceImage }: GenerateImageParams) {
+  async generateImage({ prompt, model = 'models/imagen-3.0-generate-002', referenceImage }: GenerateImageParams) {
+    console.log(`[AiService] generateImage called with model: ${model}`);
+    console.log(`[AiService] Prompt length: ${prompt?.length}, HasReference: ${!!referenceImage}`);
+
     const parts: any[] = [];
     const cleanedPrompt = await this.cleanImagePrompt(prompt);
     let enhancedPrompt = cleanedPrompt;
@@ -132,36 +135,48 @@ FORBIDDEN:
 
     parts.push({ text: enhancedPrompt });
 
+    console.log(`[AiService] Sending request to: ${this.baseUrl}/${model}:generateContent`);
+
+    const requestBody = {
+      contents: [{ parts }],
+      generationConfig: {
+        responseModalities: ["IMAGE", "TEXT"]
+      }
+    };
+
     const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-goog-api-key': this.apiKey
       },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig: {
-          responseModalities: ["IMAGE"]
-        }
-      })
+      body: JSON.stringify(requestBody)
     });
+
     if (!res.ok) {
       const text = await res.text();
-      const isProduction = process.env.NODE_ENV === 'production';
-      throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini image error: ${res.status} ${text}`);
+      console.error(`[AiService] ❌ API Error: ${res.status} - ${text}`);
+      throw new Error(`Gemini image error: ${res.status} - ${text.substring(0, 500)}`);
     }
 
     const data = await res.json() as any;
+    console.log(`[AiService] Response received. Candidates: ${data?.candidates?.length || 0}`);
 
     // Check for safety blocks
     const candidate = data?.candidates?.[0];
     if (candidate?.finishReason === 'SAFETY') {
+      console.error(`[AiService] ❌ SAFETY BLOCK detected`);
       throw new Error('SAFETY_BLOCK: The generated content was blocked by AI safety filters.');
     }
 
     const part = candidate?.content?.parts?.find((p: any) => p.inlineData?.data);
     const base64 = part?.inlineData?.data;
-    if (!base64) throw new Error('No image data returned');
+    if (!base64) {
+      console.error(`[AiService] ❌ No image data in response:`, JSON.stringify(data).substring(0, 500));
+      throw new Error('No image data returned from API');
+    }
+
+    console.log(`[AiService] ✅ Image generated successfully (base64 length: ${base64.length})`);
     return { base64: `data:image/png;base64,${base64}` };
   }
 

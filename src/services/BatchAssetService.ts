@@ -216,7 +216,7 @@ export class BatchAssetService {
                         status: targetStatus,
                         movementId,
                         imageInput: refImage,
-                        model: 'models/gemini-3-pro-image-preview',
+                        model: 'models/imagen-3.0-generate-002',
                         persona: asset.identity as any,
                         stepIndex: asset.subtype === 'step' ? parseInt(asset.key.split('_step_')[1]) : undefined,
                         textContext: detailedText || asset.context,
