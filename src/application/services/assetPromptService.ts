@@ -67,10 +67,11 @@ export class AssetPromptService {
             label?: string;
             type: 'image' | 'video' | 'json';
             context?: string;
+            backgroundStyle?: string;
         }
     ): Promise<string> {
         const guidelines = await this.getGuidelines();
-        const { key, groupName, groupType, subtype, label, type, context } = options;
+        const { key, groupName, groupType, subtype, label, type, context, backgroundStyle } = options;
 
         let style = "";
         let identity = 'mannequin';
@@ -116,7 +117,7 @@ export class AssetPromptService {
             coreDescription = `HERO POSE: ${groupName}. Full body athletic execution. ${context || "Perfect professional form."}`;
         }
 
-        let prompt = `${style} SUBJECT: ${coreDescription}.`;
+        let prompt = `${style}${backgroundStyle ? " ENVIRONMENT: " + backgroundStyle + "." : ""} SUBJECT: ${coreDescription}.`;
 
         if (groupType === 'meal' && type === 'image') {
             prompt += " CRITICAL: STRICTLY NO TEXT, NO CALORIE LABELS, NO NUMBERS, NO OVERLAYS, NO NUTRITION INFO.";

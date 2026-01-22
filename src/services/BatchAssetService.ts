@@ -130,9 +130,17 @@ export class BatchAssetService {
             await pool.query(`DELETE FROM cached_assets WHERE key = ANY($1)`, [keysToReset]);
         }
 
-        // 4. Sequential Generation Loop (Prevents 429s)
+        // 4. Concurrent Generation Loop (Limit 3)
         const total = assetsToGenerate.length;
         const results = { generated: 0, errors: 0, skipped: 0, total };
+
+        // Instruction Cache for this group (de-duplication)
+        const instructionCache: Record<string, { detailed: string, simple: string }> = {};
+
+        // Shared Background Style (Visual Consistency)
+        const backgroundStyle = groupType === 'exercise'
+            ? "Cinematic high-end professional private gym, dark moody lighting, premium equipment background."
+            : "Kitchen setting, shallow depth of field, high-end studio food photography lighting.";
 
         // Initial Progress Call
         if (options.onProgress) await options.onProgress(results);
@@ -144,71 +152,81 @@ export class BatchAssetService {
             novaRef = (await this.getAssetValue('system_coach_nova_ref')) as string;
         }
 
-        for (const asset of assetsToGenerate) {
-            const exists = await this.checkAssetExists(asset.key);
-            if (exists && !forceRegen) {
-                results.skipped++;
-                // Skip progress update for skipped items to avoid spamming DB, or do sparse updates?
-                // Let's update every 5 skips or if generated changed.
-                continue;
-            }
+        // Split work into chunks of 3 for parallel processing
+        const chunkSize = 3;
+        for (let i = 0; i < assetsToGenerate.length; i += chunkSize) {
+            const chunk = assetsToGenerate.slice(i, i + chunkSize);
 
-            // Mark as generating so Proxy shows spinner
-            await this.cacheAsset(asset.key, '', 'image', 'generating');
+            await Promise.all(chunk.map(async (asset) => {
+                const exists = await this.checkAssetExists(asset.key);
+                if (exists && !forceRegen) {
+                    results.skipped++;
+                    return;
+                }
 
-            try {
-                const prompt = await AssetPromptService.constructPrompt({
-                    key: asset.key,
-                    groupName,
-                    groupType,
-                    subtype: asset.subtype,
-                    label: asset.label,
-                    type: 'image',
-                    context: asset.context
-                });
+                // Mark as generating
+                await this.cacheAsset(asset.key, '', 'image', 'generating');
 
-                let refImage: string | undefined = undefined;
-                if (asset.identity === 'atlas') refImage = atlasRef || undefined;
-                if (asset.identity === 'nova') refImage = novaRef || undefined;
+                try {
+                    const prompt = await AssetPromptService.constructPrompt({
+                        key: asset.key,
+                        groupName,
+                        groupType,
+                        subtype: asset.subtype,
+                        label: asset.label,
+                        type: 'image',
+                        context: asset.context,
+                        backgroundStyle
+                    });
 
-                // Auto-generate instruction text (detailed and simple)
-                console.log(`[Batch] Generating instructions for ${asset.key}...`);
-                const detailedText = await generateInstructionText(groupName, asset.label || asset.key, groupType, 'detailed');
-                const simpleText = await generateInstructionText(groupName, asset.label || asset.key, groupType, 'simple');
-                console.log(`[Batch] Instructions generated: detailed="${detailedText.substring(0, 50)}..." simple="${simpleText}"`);
+                    let refImage: string | undefined = undefined;
+                    if (asset.identity === 'atlas') refImage = atlasRef || undefined;
+                    if (asset.identity === 'nova') refImage = novaRef || undefined;
 
-                console.log(`[Batch] Generating image for ${asset.key}...`);
-                await generateAsset({
-                    mode: 'image',
-                    prompt,
-                    key: asset.key,
-                    status: targetStatus,
-                    movementId,
-                    imageInput: refImage,
-                    // Use Gemini 3 Pro Image (confirmed working)
-                    model: 'models/gemini-3-pro-image-preview',
-                    persona: asset.identity as any,
-                    stepIndex: asset.subtype === 'step' ? parseInt(asset.key.split('_step_')[1]) : undefined,
-                    textContext: detailedText || asset.context,
-                    textContextSimple: simpleText,
-                    originalName: groupName
-                });
+                    // De-duplicated Instruction Generation
+                    const cacheKey = asset.label || asset.key;
+                    if (!instructionCache[cacheKey]) {
+                        console.log(`[Batch] Generating shared instructions for ${cacheKey}...`);
+                        const detailedText = await generateInstructionText(groupName, cacheKey, groupType, 'detailed');
+                        const simpleText = await generateInstructionText(groupName, cacheKey, groupType, 'simple');
+                        instructionCache[cacheKey] = { detailed: detailedText, simple: simpleText };
+                    }
+                    const { detailed: detailedText, simple: simpleText } = instructionCache[cacheKey];
 
-                results.generated++;
-                console.log(`[Batch] Success: ${asset.key}`);
-            } catch (e: any) {
-                console.error(`[Batch] Failed to generate ${asset.key}:`, e.message);
-                results.errors++;
-                await this.cacheAsset(asset.key, '', 'image', 'failed');
-            }
+                    console.log(`[Batch] Generating image for ${asset.key} (Concurrent chunk)...`);
+                    await generateAsset({
+                        mode: 'image',
+                        prompt,
+                        key: asset.key,
+                        status: targetStatus,
+                        movementId,
+                        imageInput: refImage,
+                        model: 'models/gemini-3-pro-image-preview',
+                        persona: asset.identity as any,
+                        stepIndex: asset.subtype === 'step' ? parseInt(asset.key.split('_step_')[1]) : undefined,
+                        textContext: detailedText || asset.context,
+                        textContextSimple: simpleText,
+                        originalName: groupName
+                    });
 
-            // Real-time Progress Update
+                    results.generated++;
+                    console.log(`[Batch] Success: ${asset.key}`);
+                } catch (e: any) {
+                    console.error(`[Batch] Failed to generate ${asset.key}:`, e.message);
+                    results.errors++;
+                    await this.cacheAsset(asset.key, '', 'image', 'failed');
+                }
+            }));
+
+            // Progress Update after each chunk
             if (options.onProgress) {
                 await options.onProgress(results);
             }
 
-            // SAFETY DELAY: 2 seconds between generations to prevent Rate Limiting / Stuck States
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Small safety delay between chunks to avoid transient network issues
+            if (i + chunkSize < assetsToGenerate.length) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
         }
 
         TranslationService.publishAndTranslate(options.groupId, groupName, groupType)
