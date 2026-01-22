@@ -533,10 +533,10 @@ export async function adminRoutes(app: FastifyInstance) {
   // NEW: Get Recent User Content for Admin Review
   app.get('/admin/assets/recent', { preHandler: adminGuard }, async (req, reply) => {
     try {
-      // Fetch distinct movement_ids created in last 24h
-      // Use metadata to group them and include localized name/lang
+      // Fetch distinct movement_ids, sorted globally by most recent generation
       const res = await pool.query(
-        `SELECT DISTINCT ON (movement_id) 
+        `SELECT * FROM (
+          SELECT DISTINCT ON (movement_id) 
             movement_id, 
             source, 
             original_name,
@@ -544,8 +544,10 @@ export async function adminRoutes(app: FastifyInstance) {
             MAX(created_at) OVER (PARTITION BY movement_id) as latest_gen
           FROM cached_asset_meta 
           WHERE movement_id IS NOT NULL 
-          ORDER BY movement_id, latest_gen DESC
-          LIMIT 50`
+          ORDER BY movement_id, created_at DESC
+        ) sub
+        ORDER BY latest_gen DESC
+        LIMIT 500`
       );
       return res.rows;
     } catch (e: any) {
