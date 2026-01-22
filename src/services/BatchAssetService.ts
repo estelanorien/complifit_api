@@ -84,18 +84,28 @@ export class BatchAssetService {
         const metaKey = `${mainKey}_meta`;
 
         let mainInstructions = await this.getAssetValue(metaKey);
+        console.log(`[Batch] Existing instructions found: ${!!mainInstructions}`);
+
         if (!mainInstructions || forceRegen) {
-            console.log(`[Batch] Generating Instructions for ${groupName}`);
+            console.log(`[Batch] Generating NEW Instructions for ${groupName}...`);
             const instructions = await AssetPromptService.generateInstructions(groupName, groupType);
-            if (instructions) {
+            console.log(`[Batch] Instructions generated:`, {
+                hasDescription: !!instructions?.description,
+                stepCount: instructions?.instructions?.length || 0,
+                steps: instructions?.instructions?.map((s: any) => s.label) || []
+            });
+            if (instructions && instructions.instructions?.length > 0) {
                 await this.cacheAsset(metaKey, JSON.stringify(instructions), 'json');
                 mainInstructions = instructions;
+            } else {
+                console.error(`[Batch] ❌ Instruction generation returned empty/invalid result`);
             }
         }
 
         let steps = (mainInstructions as any)?.instructions || (mainInstructions as any)?.steps || [];
+        // IMPORTANT: Only use generated step count if we have actual steps
         const stepCount = steps.length > 0 ? steps.length : (groupType === 'exercise' ? 6 : 4);
-        console.log(`[Batch] Step count: ${stepCount}, Steps array length: ${steps.length}`);
+        console.log(`[Batch] ✅ Using ${stepCount} steps:`, steps.map((s: any) => s.label || s.name || 'unnamed'));
 
         // 2. Collect Assets to Generate
         const assetsToGenerate: {
@@ -161,6 +171,7 @@ export class BatchAssetService {
         if (groupType === 'exercise') {
             atlasRef = (await this.getAssetValue('system_coach_atlas_ref')) as string;
             novaRef = (await this.getAssetValue('system_coach_nova_ref')) as string;
+            console.log(`[Batch] Reference images loaded - Atlas: ${atlasRef ? 'YES (' + atlasRef.substring(0, 50) + '...)' : 'NO'}, Nova: ${novaRef ? 'YES' : 'NO'}`);
         }
 
         // Split work into chunks of 3 for parallel processing
