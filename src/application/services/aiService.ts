@@ -88,7 +88,7 @@ Return ONLY cleaned visual description.`;
     }
   }
 
-  async generateImage({ prompt, model = 'models/imagen-3.0-generate-002', referenceImage }: GenerateImageParams) {
+  async generateImage({ prompt, model = 'models/gemini-2.5-flash-image', referenceImage }: GenerateImageParams) {
     console.log(`[AiService] generateImage called with model: ${model}`);
     console.log(`[AiService] Prompt length: ${prompt?.length}, HasReference: ${!!referenceImage}`);
 
