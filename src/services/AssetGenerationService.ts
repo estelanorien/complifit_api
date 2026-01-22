@@ -24,6 +24,14 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
         persona, stepIndex, textContext, textContextSimple, originalName
     } = options;
 
+    console.log(`[GenAsset] ========== ENTRY ==========`);
+    console.log(`[GenAsset] Key: ${key}`);
+    console.log(`[GenAsset] Mode: ${mode}`);
+    console.log(`[GenAsset] Status: ${status}`);
+    console.log(`[GenAsset] MovementId: ${movementId}`);
+    console.log(`[GenAsset] HasImageInput: ${!!imageInput}`);
+    console.log(`[GenAsset] Prompt length: ${prompt?.length || 0}`);
+
     if (!env.geminiApiKey) throw new Error("GEMINI_API_KEY missing");
 
     const ai = new AiService();
@@ -81,6 +89,7 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
 
     // Cache Result
     if (value && key) {
+        console.log(`[GenAsset] Saving to cached_assets: ${key}`);
         await pool.query(
             `INSERT INTO cached_assets(key, value, asset_type, status)
            VALUES($1, $2, $3, $4)
@@ -88,6 +97,7 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
             [key, value, mode === 'json' ? 'json' : mode, status === 'generating' ? 'active' : status]
         );
 
+        console.log(`[GenAsset] Saving to cached_asset_meta: ${key}`);
         await pool.query(
             `INSERT INTO cached_asset_meta(
                 key, prompt, mode, source, created_by, 
@@ -112,7 +122,11 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
                 textContext || null, textContextSimple || null, originalName || null
             ]
         );
+        console.log(`[GenAsset] ✅ SAVED to DB: ${key}`);
+    } else {
+        console.log(`[GenAsset] ⚠️ No value or key - NOT saving. Key: ${key}, HasValue: ${!!value}`);
     }
 
+    console.log(`[GenAsset] ========== EXIT ==========`);
     return value;
 };

@@ -91,7 +91,24 @@ export class JobProcessor {
        WHERE id = $1 AND user_id = $2`,
             [jobId, userId]
         );
-        return rows[0] || null;
+        if (!rows[0]) return null;
+
+        const job = rows[0];
+
+        // Parse result if it's JSON string
+        let resultData = job.result;
+        if (typeof resultData === 'string') {
+            try { resultData = JSON.parse(resultData); } catch (e) { /* ignore */ }
+        }
+
+        // If PROCESSING, result contains progress data
+        return {
+            id: job.id,
+            status: job.status,
+            result: job.status === 'COMPLETED' ? resultData : undefined,
+            progress: job.status === 'PROCESSING' ? resultData : undefined,
+            error: job.error
+        };
     }
 
     private async processNextJob() {

@@ -67,9 +67,17 @@ export class BatchAssetService {
      * Hardened Flow: Sequential to avoid rate limits, Dual Coach for exercises.
      */
     static async generateGroupAssets(options: GroupAssetGenOptions) {
-        console.log(`[Batch] Starting Group Generation for ${options.groupName} (${options.groupId})`);
+        console.log(`[Batch] ========================================`);
+        console.log(`[Batch] Starting Group Generation`);
+        console.log(`[Batch] GroupName: ${options.groupName}`);
+        console.log(`[Batch] GroupId: ${options.groupId}`);
+        console.log(`[Batch] GroupType: ${options.groupType}`);
+        console.log(`[Batch] ForceRegen: ${options.forceRegen}`);
+        console.log(`[Batch] ========================================`);
+
         const { groupName, groupType, forceRegen, targetStatus = 'auto' } = options;
         const movementId = AssetPromptService.normalizeToId(groupName);
+        console.log(`[Batch] Normalized MovementId: ${movementId}`);
 
         // 1. Instructions & Text (Atomic Meta)
         const mainKey = groupType === 'exercise' ? `ex_${movementId}` : `meal_${movementId}`;
@@ -87,6 +95,7 @@ export class BatchAssetService {
 
         let steps = (mainInstructions as any)?.instructions || (mainInstructions as any)?.steps || [];
         const stepCount = steps.length > 0 ? steps.length : (groupType === 'exercise' ? 6 : 4);
+        console.log(`[Batch] Step count: ${stepCount}, Steps array length: ${steps.length}`);
 
         // 2. Collect Assets to Generate
         const assetsToGenerate: {
@@ -129,6 +138,8 @@ export class BatchAssetService {
             const keysToReset = assetsToGenerate.map(a => a.key);
             await pool.query(`DELETE FROM cached_assets WHERE key = ANY($1)`, [keysToReset]);
         }
+        console.log(`[Batch] Total assets to generate: ${assetsToGenerate.length}`);
+        console.log(`[Batch] Asset keys: ${assetsToGenerate.map(a => a.key).join(', ')}`);
 
         // 4. Concurrent Generation Loop (Limit 3)
         const total = assetsToGenerate.length;
@@ -158,8 +169,12 @@ export class BatchAssetService {
             const chunk = assetsToGenerate.slice(i, i + chunkSize);
 
             await Promise.all(chunk.map(async (asset) => {
+                console.log(`[Batch] Processing asset: ${asset.key}`);
                 const exists = await this.checkAssetExists(asset.key);
+                console.log(`[Batch] Asset ${asset.key} exists: ${exists}, forceRegen: ${forceRegen}`);
+
                 if (exists && !forceRegen) {
+                    console.log(`[Batch] SKIPPING ${asset.key} (exists and no forceRegen)`);
                     results.skipped++;
                     return;
                 }
@@ -193,7 +208,7 @@ export class BatchAssetService {
                     }
                     const { detailed: detailedText, simple: simpleText } = instructionCache[cacheKey];
 
-                    console.log(`[Batch] Generating image for ${asset.key} (Concurrent chunk)...`);
+                    console.log(`[Batch] ✅ Calling generateAsset for ${asset.key}`);
                     await generateAsset({
                         mode: 'image',
                         prompt,
@@ -210,9 +225,9 @@ export class BatchAssetService {
                     });
 
                     results.generated++;
-                    console.log(`[Batch] Success: ${asset.key}`);
+                    console.log(`[Batch] ✅ SUCCESS: ${asset.key} (Total generated: ${results.generated})`);
                 } catch (e: any) {
-                    console.error(`[Batch] Failed to generate ${asset.key}:`, e.message);
+                    console.error(`[Batch] ❌ FAILED ${asset.key}:`, e.message);
                     results.errors++;
                     await this.cacheAsset(asset.key, '', 'image', 'failed');
                 }
