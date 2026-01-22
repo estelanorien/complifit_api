@@ -346,10 +346,11 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   app.post('/assets/by-movement', { preHandler: authGuard }, async (req, reply) => {
-    const body = z.object({ movementId: z.string(), limit: z.number().min(1).max(50).optional() }).parse(req.body || {});
-    const limit = body.limit || 20;
+    const body = z.object({ movementId: z.string(), limit: z.number().min(1).max(100).optional() }).parse(req.body || {});
+    const limit = body.limit || 100; // Increased from 20
 
     let movementId = body.movementId;
+    req.log.info(`[by-movement] Query for movementId: ${movementId}, limit: ${limit}`);
 
     // Resolve alias to canonical ID if possible
     try {
@@ -360,6 +361,7 @@ export async function assetsRoutes(app: FastifyInstance) {
       const cleanName = movementId.replace(/^(meal_|movement_)/, '').replace(/_/g, ' ');
       const canonical = await canonicalService.getCanonicalId(cleanName, type);
       if (canonical && canonical.canonicalId) {
+        req.log.info(`[by-movement] Resolved ${movementId} -> ${canonical.canonicalId}`);
         movementId = canonical.canonicalId;
       }
     } catch (e) {
@@ -368,6 +370,8 @@ export async function assetsRoutes(app: FastifyInstance) {
 
     // FIX: Search for keys with proper prefixes (ex_ for exercises, meal_ for meals)
     // The keys are stored as ex_${movementId}_atlas_main, meal_${movementId}_step_1, etc.
+    req.log.info(`[by-movement] Searching with patterns: ex_${movementId}%, meal_${movementId}%`);
+
     const { rows } = await pool.query(
       `SELECT a.key, a.value, a.asset_type, a.status, a.created_at,
                m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id,
@@ -384,6 +388,8 @@ export async function assetsRoutes(app: FastifyInstance) {
         LIMIT $5`,
       [movementId, `ex_${movementId}%`, `meal_${movementId}%`, `${movementId}%`, limit]
     );
+
+    req.log.info(`[by-movement] Found ${rows.length} rows for ${movementId}`);
     // Ensure image values have proper data:image prefix for frontend display
     const processedRows = rows.map((row: any) => {
       if (row.asset_type === 'image' && row.value && typeof row.value === 'string') {
