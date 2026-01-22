@@ -71,12 +71,13 @@ export function buildServer() {
     trustProxy: true // CRITICAL: Required for Cloud Run/Load Balancers to forward real IPs
   });
 
-  // CORS configuration - ALLOW ALL ORIGINS for production (temporary fix)
-  // This is needed because localhost development needs to access the production API
+  // CORS configuration - ROBUST SETTINGS for production/local interop
+  // explicitly allow necessary headers to prevent preflight failures
   const corsOptions = {
-    origin: true,  // Allow ALL origins
+    origin: '*',  // Allow ALL origins
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    credentials: false  // Must be false with origin: true for security
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-request-id', 'x-goog-api-key', 'x-api-key'],
+    credentials: false
   };
 
   // Security headers
