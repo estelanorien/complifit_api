@@ -4,6 +4,8 @@ import { translationService } from './translationService.js';
 import { canonicalService } from './canonicalService.js';
 import { AssetPromptService } from './assetPromptService.js';
 import { logger } from '../../infra/logger.js';
+import { AssetRepository } from '../../infra/db/repositories/AssetRepository.js';
+import { UnifiedKey } from '../../domain/UnifiedKey.js';
 
 const aiService = new AiService();
 
@@ -176,16 +178,16 @@ export class JobProcessor {
                         try {
                             await pool.query(
                                 `UPDATE generation_jobs SET status = 'PROCESSING', result = $1, updated_at = NOW() WHERE id = $2`,
-                                [JSON.stringify(progress), job.id]
+                                [progress as any, job.id]
                             );
                             logger.info(`[JobProcessor] Job ${job.id} TICK: Generated ${progress.generated}`);
-                        } catch (e) {
+                        } catch (e: any) {
                             logger.warn(`[JobProcessor] Failed to tick progress for ${job.id}`, e);
                         }
                     };
 
                     // Add progress callback to payload for handlers that support it
-                    const result = await this.executeJob(job.type, { ...(job.payload as any), onProgress: tick });
+                    const result = await this.executeJob(job.type, { ...(job.payload as Record<string, any>), onProgress: tick });
 
                     await pool.query(
                         `UPDATE generation_jobs SET status = 'COMPLETED', result = $1, updated_at = now() WHERE id = $2`,
@@ -226,7 +228,7 @@ export class JobProcessor {
             case 'CONTENT_UPGRADE':
                 return this.handleContentUpgrade(payload);
             case 'BATCH_ASSET_GENERATION':
-                return this.handleBatchAssetGeneration(payload);
+                return { success: false, error: 'Legacy Batch Generation is disabled. Use Admin UI with SSE.' };
             default:
                 throw new Error(`Unknown job type: ${type}`);
         }
@@ -401,14 +403,8 @@ export class JobProcessor {
 
     private async getAsset(key: string): Promise<string | null> {
         try {
-            const { rows } = await pool.query(
-                `SELECT value FROM cached_assets WHERE key = $1 LIMIT 1`,
-                [key]
-            );
-            if (rows.length > 0) {
-                return rows[0].value;
-            }
-            return null;
+            const asset = await AssetRepository.findByKey(key);
+            return asset?.buffer?.toString() || null;
         } catch (e) {
             logger.error(`[JobProcessor] Failed to fetch asset ${key}`, e as Error);
             return null;
@@ -569,67 +565,26 @@ export class JobProcessor {
         }
     }
 
-    private async handleBatchAssetGeneration(payload: any): Promise<any> {
-        // This is a wrapper around BatchAssetService logic
-        // We import it dynamically to avoid circular dependency issues if any
-        const { BatchAssetService } = await import('../../services/BatchAssetService.js');
-
-        // Pass the payload directly to the service
-        // The service will now perform the one-by-one generation
-        // IMPORTANT: We need to update the service to be "job-aware" if we want granular progress updates here
-        // For now, let's let it run and return the final report.
-
-        // TODO: Refactor BatchAssetService to take a "progressCallback" if possible, 
-        // OR rely on the fact that it updates the DB row-by-row, so the frontend can polling 
-        // the "assets" table independently if it wants deep granular verification.
-
-        return await BatchAssetService.generateGroupAssets(payload);
-    }
 
     private async saveAsset(key: string, value: string, meta: any) {
         try {
-            // Ensure value has proper format for storage if it's a raw base64
-            let processedValue = value;
-            if (processedValue && !processedValue.startsWith('data:image')) {
-                processedValue = `data:image/png;base64,${processedValue}`;
-            }
+            const uKey = UnifiedKey.parse(key);
+            const buffer = Buffer.from(value.replace(/^data:image\/\w+;base64,/, ""), 'base64');
 
-            // 1. Save to cached_assets
-            await pool.query(
-                `INSERT INTO cached_assets(key, value, asset_type, status)
-                 VALUES($1, $2, 'image', 'active')
-                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, status = 'active'`,
-                [key, processedValue]
-            );
-
-            // 2. Save to cached_asset_meta
-            await pool.query(
-                `INSERT INTO cached_asset_meta(key, prompt, source, mode, movement_id, persona, step_index, created_by, original_name, language)
-                 VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                 ON CONFLICT (key) DO UPDATE SET 
-                    prompt = EXCLUDED.prompt, 
-                    source = EXCLUDED.source, 
-                    mode = EXCLUDED.mode, 
-                    movement_id = EXCLUDED.movement_id,
-                    persona = EXCLUDED.persona,
-                    step_index = EXCLUDED.step_index,
-                    created_by = EXCLUDED.created_by,
-                    original_name = EXCLUDED.original_name,
-                    language = EXCLUDED.language`,
-                [
-                    key,
-                    meta.prompt || null,
-                    meta.source || 'auto-gen',
-                    meta.persona || meta.mode || null,
-                    // Infer movement_id from key if not provided (now handles meals)
-                    meta.movementId || (key.match(/^(movement_|meal_)/) ? key.replace(/_(main|step_\d+.*|atlas|nova)$/, '') : null),
-                    meta.persona || null,
-                    meta.step !== undefined ? meta.step : null,
-                    'system',
-                    meta.originalName || null,
-                    meta.language || null
-                ]
-            );
+            await AssetRepository.save(uKey, {
+                buffer,
+                status: 'active',
+                type: 'image',
+                metadata: {
+                    prompt: meta.prompt || null,
+                    source: meta.source || 'auto-gen',
+                    movement_id: meta.movementId || null,
+                    persona: meta.persona || null,
+                    step_index: meta.step !== undefined ? meta.step : null,
+                    original_name: meta.originalName || null,
+                    language: meta.language || null
+                }
+            });
         } catch (e) {
             logger.error(`[JobProcessor] Failed to save asset ${key}`, e as Error);
         }

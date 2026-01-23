@@ -1,6 +1,4 @@
-
-import { pool } from '../../infra/db/pool.js';
-import { generateAsset } from '../../services/AssetGenerationService.js';
+import { AssetRepository } from '../../infra/db/repositories/AssetRepository.js';
 import { AiService } from './aiService.js';
 
 export interface PromptGuidelines {
@@ -48,9 +46,9 @@ export class AssetPromptService {
 
     static async getGuidelines(): Promise<PromptGuidelines> {
         try {
-            const res = await pool.query(`SELECT value FROM cached_assets WHERE key = 'system_blueprints'`);
-            if (res.rows.length > 0) {
-                const blueprints = JSON.parse(res.rows[0].value);
+            const asset = await AssetRepository.findByKey('system_blueprints');
+            if (asset && asset.buffer) {
+                const blueprints = JSON.parse(asset.buffer.toString());
                 return blueprints.guidelines || DEFAULT_GUIDELINES;
             }
         } catch (e) { }
@@ -69,39 +67,49 @@ export class AssetPromptService {
             context?: string;
             backgroundStyle?: string;
         }
-    ): Promise<string> {
+    ): Promise<{ prompt: string; referenceImage?: string; referenceType: 'identity' | 'environment' }> {
         const guidelines = await this.getGuidelines();
         const { key, groupName, groupType, subtype, label, type, context, backgroundStyle } = options;
 
         let style = "";
-        let identity = 'mannequin';
+        let identity: 'atlas' | 'nova' | 'mannequin' | 'none' = 'none';
+        let refImage: string | undefined = undefined;
+        let refType: 'identity' | 'environment' = 'identity';
 
         const lowerKey = key.toLowerCase();
         const lowerLabel = (label || "").toLowerCase();
 
+        // 1. Resolve Identity and References
         if (lowerKey.includes('atlas') || lowerLabel.includes('atlas')) {
             identity = 'atlas';
+            const asset = await AssetRepository.findByKey('system_coach_atlas_ref');
+            refImage = asset?.buffer?.toString() || undefined;
+            refType = 'identity';
         } else if (lowerKey.includes('nova') || lowerLabel.includes('nova')) {
             identity = 'nova';
+            const asset = await AssetRepository.findByKey('system_coach_nova_ref');
+            refImage = asset?.buffer?.toString() || undefined;
+            refType = 'identity';
+        } else if (groupType === 'exercise') {
+            const asset = await AssetRepository.findByKey('system_background_gym_ref');
+            refImage = asset?.buffer?.toString() || undefined;
+            refType = 'environment';
+        } else if (groupType === 'meal') {
+            const asset = await AssetRepository.findByKey('system_background_kitchen_ref');
+            refImage = asset?.buffer?.toString() || undefined;
+            refType = 'environment';
         }
 
+        // 2. Select Style
         if (type === 'video') {
-            if (groupType === 'exercise') {
-                style = guidelines.styleExerciseVideo;
-                if (identity === 'atlas') style += ` Subject: Coach Atlas.`;
-                else if (identity === 'nova') style += ` Subject: Coach Nova.`;
-            } else {
-                style = guidelines.styleMealVideo;
-            }
+            style = groupType === 'exercise' ? guidelines.styleExerciseVideo : guidelines.styleMealVideo;
         } else {
-            // Image Styles
             if (groupType === 'exercise') {
                 style = guidelines.styleExerciseImage;
                 if (identity === 'atlas') {
-                    // FORCEFUL IDENTITY FOR IMAGEN-3
-                    style += ` Subject: COACH ATLAS. Light-skinned Caucasian athletic male with short dark buzz cut hair and slight facial stubble. Fit athletic build. Wearing a dark grey performance t-shirt and black shorts. High-end professional fitness photography.`;
+                    style += ` Subject: COACH ATLAS. ${guidelines.coachMaleDescription || "Athletic male, professional gym photography."}`;
                 } else if (identity === 'nova') {
-                    style += ` Subject: COACH NOVA. Platinum blonde Caucasian female athlete. HIGH PONYTAIL. Fit athletic build. Wearing an Emerald Green sports bra and black athletic leggings. High-end professional fitness photography.`;
+                    style += ` Subject: COACH NOVA. ${guidelines.coachFemaleDescription || "Athletic female, professional gym photography."}`;
                 } else {
                     style += ` Featuring: ${guidelines.vitalityAvatarDescription}.`;
                 }
@@ -110,22 +118,23 @@ export class AssetPromptService {
             }
         }
 
+        // 3. Core Description
         let coreDescription = "";
         if (subtype === 'step') {
-            coreDescription = `ACTION: ${label || "Active Movement"}. ${context || "Performing the exercise with perfect form."} Single subject centered athletic shot of ${groupName}.`;
+            coreDescription = `ACTION: ${label || "Active Movement"}. ${context || "Performing the exercise with perfect form."} Single subject centered shot of ${groupName}.`;
         } else {
-            coreDescription = `HERO POSE: ${groupName}. Full body athletic execution. ${context || "Perfect professional form."}`;
+            coreDescription = `HERO POSE: ${groupName}. Full body execution. ${context || "Perfect professional form."}`;
         }
 
         let prompt = `${style}${backgroundStyle ? " ENVIRONMENT: " + backgroundStyle + "." : ""} SUBJECT: ${coreDescription}.`;
 
         if (groupType === 'meal' && type === 'image') {
-            prompt += " CRITICAL: STRICTLY NO TEXT, NO CALORIE LABELS, NO NUMBERS, NO OVERLAYS, NO NUTRITION INFO.";
+            prompt += " CRITICAL: STRICTLY NO TEXT, NO CALORIE LABELS, NO OVERLAYS.";
         } else if (type === 'image') {
             prompt += " STRICTLY NO TEXT.";
         }
 
-        return prompt;
+        return { prompt, referenceImage: refImage, referenceType: refType };
     }
 
     static async generateInstructions(name: string, type: 'exercise' | 'meal'): Promise<any> {

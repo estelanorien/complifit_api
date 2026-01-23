@@ -1,8 +1,9 @@
-
 import { pool } from '../infra/db/pool.js';
-import { generateAsset } from './AssetGenerationService.js';
+import { AssetRepository } from '../infra/db/repositories/AssetRepository.js';
 import { env } from '../config/env.js';
 import { AssetPromptService } from '../application/services/assetPromptService.js';
+import { AiService } from '../application/services/aiService.js';
+import { UnifiedKey } from '../domain/UnifiedKey.js';
 
 const TARGET_LANGUAGES = ['es', 'fr', 'de', 'it', 'pt', 'ru', 'tr', 'zh', 'ja', 'ko', 'ar', 'hi'];
 
@@ -24,16 +25,21 @@ export class TranslationService {
             );
         };
 
-        const mainKey = groupType === 'exercise' ? `ex_${movementId}` : `meal_${movementId}`;
-        await promoteAssets(mainKey);
+        // 2. Fetch Text Content for Translation via Repository
+        const slug = AssetPromptService.normalizeToId(groupName);
+        const metaKey = new UnifiedKey({
+            type: groupType === 'exercise' ? 'ex' : 'meal',
+            id: groupId.length > 20 ? groupId : slug,
+            persona: 'none',
+            subtype: 'meta',
+            index: 0
+        });
 
-        // 2. Fetch Text Content for Translation
-        const metaKey = `${mainKey}_meta`;
-        const metaRes = await pool.query(`SELECT value FROM cached_assets WHERE key=$1`, [metaKey]);
+        const asset = await AssetRepository.findByKey(metaKey);
 
-        if (metaRes.rows.length > 0) {
+        if (asset && asset.buffer) {
             try {
-                const meta = JSON.parse(metaRes.rows[0].value);
+                const meta = JSON.parse(asset.buffer.toString());
 
                 // Collect texts to translate
                 const textsToTranslate: { text: string, category: string }[] = [];
@@ -130,14 +136,14 @@ export class TranslationService {
         `;
 
         try {
-            const jsonStr = await generateAsset({
-                mode: 'json',
-                prompt: prompt
-            });
+            const ai = new AiService();
+            const { text: jsonStr } = await ai.generateText({ prompt });
 
-            if (!jsonStr) throw new Error("No response from Gemini");
+            if (!jsonStr) throw new Error("No response from AI");
 
-            const translations = JSON.parse(jsonStr);
+            // Clean JSON in case of markdown blocks
+            const cleanJson = jsonStr.replace(/```json\n?/, '').replace(/```\n?$/, '').trim();
+            const translations = JSON.parse(cleanJson);
 
             // Save to DB
             for (const lang of TARGET_LANGUAGES) {

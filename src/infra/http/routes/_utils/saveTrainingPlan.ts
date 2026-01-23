@@ -1,5 +1,7 @@
 import { TrainingPlan } from '../../../../application/services/trainingService.js';
-import { AssetMiddleware } from '../../../../services/AssetMiddleware.js';
+import { UnifiedAssetService } from '../../../../application/services/UnifiedAssetService.js';
+import { AssetOrchestrator } from '../../../../application/services/AssetOrchestrator.js';
+import { AssetPromptService } from '../../../../application/services/assetPromptService.js';
 
 export const saveTrainingProgram = async (
   client: any,
@@ -57,9 +59,19 @@ export const saveTrainingProgram = async (
   // Ensure assets exist for all exercises (fire-and-forget)
   if (Array.isArray(trainingPlan?.schedule)) {
     const allExercises = trainingPlan.schedule.flatMap(day => day.exercises || []);
-    AssetMiddleware.ensureTrainingPlanAssets(allExercises).catch(e => {
-      console.error('[SavePlan] Asset generation failed:', e);
-    });
+    (async () => {
+      for (const ex of allExercises) {
+        try {
+          const name = ex.name || 'Exercise';
+          const manifest = await UnifiedAssetService.getManifest('ex', AssetPromptService.normalizeToId(name), name);
+          for (const key of manifest) {
+            await AssetOrchestrator.generateAssetForKey(key);
+          }
+        } catch (err) {
+          console.error(`[SavePlan] Asset generation failed for ${ex.name}:`, err);
+        }
+      }
+    })().catch(e => console.error('[SavePlan] Global asset loop failed:', e));
   }
 
   // Get current profile_data to preserve all existing data

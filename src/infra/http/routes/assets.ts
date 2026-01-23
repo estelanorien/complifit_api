@@ -3,6 +3,11 @@ import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
 import { canonicalService } from '../../../application/services/canonicalService.js';
+import { AssetRepository } from '../../db/repositories/AssetRepository.js';
+import { UnifiedKey } from '../../../domain/UnifiedKey.js';
+import { AssetPromptService } from '../../../application/services/assetPromptService.js';
+import { MovementRepository } from '../../db/repositories/MovementRepository.js';
+import { UnifiedAssetService } from '../../../application/services/UnifiedAssetService.js';
 
 const assetSchema = z.object({
   key: z.string(),
@@ -22,78 +27,38 @@ const assetSchema = z.object({
 // No runtime table creation needed
 
 export async function assetsRoutes(app: FastifyInstance) {
-  app.get('/assets', { preHandler: authGuard }, async () => {
+  app.get('/assets', { preHandler: authGuard }, async (req: any, reply: any) => {
     const { rows } = await pool.query(`SELECT key, status, asset_type FROM cached_assets`);
     return rows;
   });
 
 
-  app.get('/assets/:key', { preHandler: authGuard }, async (req, reply) => {
+  app.get('/assets/:key', { preHandler: authGuard }, async (req: any, reply: any) => {
     const { key } = req.params as any;
     try {
       const decodedKey = decodeURIComponent(key);
 
-      // 1. Search for asset
-      let { rows } = await pool.query(
-        `SELECT value, asset_type, status FROM cached_assets WHERE key=$1 LIMIT 1`,
-        [decodedKey]
-      );
+      // 1. Search for asset via Repository
+      const asset = await AssetRepository.findByKey(decodedKey);
 
-      // 1.1 Meta-Fallback: If _meta requested but not found, try to resolve to group-level meta
-      if (rows.length === 0 && decodedKey.endsWith('_meta')) {
-        // IMPROVED: Strip any known suffixes recursively
-        const groupMetaKey = decodedKey.split('_meta')[0]
-          .replace(/_(atlas|nova|mannequin)$/, '')
-          .replace(/_(main|step_\d+|video_.*)$/, '')
-          .replace(/_(atlas|nova|mannequin)$/, '') // Repeat to catch double suffixes
-          + '_meta';
+      if (asset) {
+        let { buffer, asset_type, status, metadata } = asset;
+        let value = buffer ? buffer.toString() : '';
 
-        if (groupMetaKey !== decodedKey) {
-          req.log.info(`[Proxy] Meta-Fallback: ${decodedKey} -> ${groupMetaKey}`);
-          const metaFallback = await pool.query(
-            `SELECT value, asset_type, status FROM cached_assets WHERE key=$1 LIMIT 1`,
-            [groupMetaKey]
-          );
-          if (metaFallback.rows.length > 0) rows = metaFallback.rows;
-        }
-      }
-
-      // 1.2 Return immediately if found and active
-      if (rows.length > 0) {
-        let { value, asset_type, status } = rows[0];
-
-        // Enrichment: If it's an image, try to fetch associated instructions for Admin UI
-        let textContext = '';
-        let textContextSimple = '';
-
-        if (asset_type === 'image' && (status === 'active' || status === 'auto' || status === 'generating')) {
-          const groupMetaKey = decodedKey
-            .replace(/_(atlas|nova|mannequin)_(main|step_\d+|video_.*)$/, '_meta')
-            .replace(/_(main|step_\d+|video_.*)$/, '_meta');
-
-          const metaRes = await pool.query(`SELECT value FROM cached_assets WHERE key=$1 LIMIT 1`, [groupMetaKey]);
-          if (metaRes.rows.length > 0) {
-            try {
-              const meta = JSON.parse(metaRes.rows[0].value);
-              const stepMatch = decodedKey.match(/step_(\d+)$/);
-              if (stepMatch) {
-                const stepNum = parseInt(stepMatch[1]);
-                const instrs = meta.instructions || meta.steps || [];
-                if (instrs[stepNum - 1]) {
-                  const instr = instrs[stepNum - 1];
-                  textContext = instr.detailed || instr.instruction || instr.description || '';
-                  textContextSimple = instr.simple || instr.cue || '';
-                }
-              } else {
-                textContext = meta.description || meta.recipeDescription || meta.textContext || '';
-                textContextSimple = meta.summary || meta.textContextSimple || '';
-              }
-            } catch (e) { /* ignore parse errors */ }
-          }
+        // If image, ensure base64 prefix
+        if (asset_type === 'image' && value && !value.startsWith('data:image')) {
+          value = `data:image/png;base64,${value}`;
         }
 
-        if (status === 'active' || status === 'auto' || status === 'generating') {
-          return { value, assetType: asset_type, status, textContext, textContextSimple };
+        // Return immediately if active/generating
+        if (status === 'active' || status === ('auto' as any) || status === 'generating') {
+          return {
+            value,
+            assetType: asset_type,
+            status,
+            textContext: metadata?.text_context || '',
+            textContextSimple: metadata?.text_context_simple || ''
+          };
         }
       }
 
@@ -114,7 +79,6 @@ export async function assetsRoutes(app: FastifyInstance) {
 
         req.log.info(`[Proxy] Discovery Attempt: ${decodedKey} -> Slug: ${movementSlug}`);
 
-        // ULTRA FUZZY SEARCH
         const groupRes = await pool.query(
           `SELECT id, name FROM ${tableName} 
            WHERE name ILIKE $1 
@@ -130,39 +94,24 @@ export async function assetsRoutes(app: FastifyInstance) {
           const { id, name } = groupRes.rows[0];
           req.log.info(`[Proxy] Discovery SUCCESS: ${name} (${id})`);
 
-          // Trigger generation in background
-          const { BatchAssetService } = await import('../../../services/BatchAssetService.js');
-          BatchAssetService.generateGroupAssets({
-            groupId: id,
-            groupName: name,
-            groupType: isExercise ? 'exercise' : 'meal',
-            targetStatus: 'auto'
-          }).catch((err: any) => req.log.error(`[SmartProxy] Background gen failed for ${name}:`, err));
-
+          // Background generation is handled by Admin explicitly now
           const isMeta = decodedKey.endsWith('_meta');
           return {
             value: isMeta ? {} : '',
             assetType: isMeta ? 'json' : 'image',
             status: 'generating'
           };
-        } else {
-          req.log.warn(`[Proxy] Discovery FAILED: No match in ${tableName} for ${movementSlug}`);
         }
       }
 
       return reply.status(404).send({ error: 'Asset not found' });
     } catch (error: any) {
-      req.log.error({
-        error: 'GET /assets/:key failed',
-        key,
-        message: error.message,
-        requestId: (req as any).requestId
-      });
+      req.log.error({ error: 'GET /assets/:key failed', key, message: error.message });
       return reply.status(500).send({ error: error.message || 'Internal server error' });
     }
   });
 
-  app.post('/assets', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/assets', { preHandler: authGuard }, async (req: any, reply: any) => {
     try {
       const body = assetSchema.parse(req.body);
 
@@ -174,18 +123,16 @@ export async function assetsRoutes(app: FastifyInstance) {
 
       // Insert or update asset
       try {
-        await pool.query(
-          `INSERT INTO cached_assets(key, value, asset_type, status)
-           VALUES($1,$2,$3,$4)
-           ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, asset_type=EXCLUDED.asset_type, status=EXCLUDED.status`,
-          [body.key, body.value, body.type, body.status]
-        );
+        await AssetRepository.save(body.key, {
+          value: body.value,
+          status: body.status as any,
+          type: body.type as any
+        });
       } catch (dbError: any) {
         req.log.error({
-          error: 'Failed to insert/update cached_assets',
+          error: 'Failed to insert/update cached_assets via Repository',
           key: body.key,
           dbError: dbError.message,
-          code: dbError.code,
           requestId: (req as any).requestId
         });
 
@@ -345,7 +292,7 @@ export async function assetsRoutes(app: FastifyInstance) {
     return rows[0];
   });
 
-  app.post('/assets/by-movement', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/assets/by-movement', { preHandler: authGuard }, async (req: any, reply: any) => {
     const body = z.object({ movementId: z.string(), limit: z.number().min(1).max(100).optional() }).parse(req.body || {});
     const limit = body.limit || 100; // Increased from 20
 

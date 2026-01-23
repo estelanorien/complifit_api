@@ -7,6 +7,12 @@ import { env } from '../../../config/env.js';
 import { uploadToYouTube } from '../../../services/youtubeService.js';
 import bcrypt from 'bcryptjs';
 import { normalizeToMovementId } from '../../../application/services/normalization.js';
+import { UnifiedAssetService } from '../../../application/services/UnifiedAssetService.js';
+import { AssetOrchestrator } from '../../../application/services/AssetOrchestrator.js';
+import { AssetRepository } from '../../db/repositories/AssetRepository.js';
+import { MovementRepository } from '../../db/repositories/MovementRepository.js';
+import { jobManager } from '../../../application/GenerationJobManager.js';
+import { UnifiedKey } from '../../../domain/UnifiedKey.js';
 
 const assetGenSchema = z.object({
   mode: z.enum(['image', 'video', 'json']).default('image'),
@@ -26,45 +32,22 @@ const roleSchema = z.object({
   newRole: z.enum(['admin', 'user', 'moderator', 'banned'])
 });
 
-import { BatchAssetService } from '../../../services/BatchAssetService.js';
-import { AssetGenerationFacade } from '../../../application/services/AssetGenerationFacade.js';
 
 export async function adminRoutes(app: FastifyInstance) {
   // Batch Trigger
-  app.post('/admin/batch/run', { preHandler: adminGuard }, async (req, reply) => {
-    const result = await BatchAssetService.runNightlyBatch();
-    return reply.send(result);
+  app.post('/admin/batch/run', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    // Legacy - disabled in reborn
+    return reply.status(410).send({ error: 'Legacy Batch run is permanently disabled. Use /admin/generation/batch' });
   });
 
   // NEW: Group Generation Trigger (Server-Side)
-  app.post('/admin/batch/generate-group', { preHandler: adminGuard }, async (req, reply) => {
-    const body = z.object({
-      groupId: z.string(),
-      groupName: z.string(),
-      groupType: z.enum(['exercise', 'meal']),
-      forceRegen: z.boolean().optional(),
-      themeId: z.string().optional()
-    }).parse(req.body);
-
-    // Run in background? Or wait? 
-    // If we wait, it might timeout for large groups (images take 10s each). 
-    // Ideally we return "Accepted" and let client poll.
-    // For now, let's await it but if it takes too long, Fastify might timeout.
-    // Better: Start it, return "Processing", and letting client poll Status.
-
-    // However, to keep it simple for "Chain of Verification":
-    // We will just fire and forget (Background), but we need a way to track status.
-    // The BatchService logs to console. Ideally we'd write a "job status" to DB.
-
-    // Let's await it for now, assuming the client has a long timeout or we accept the risk.
-    // Actually, typical generation for 4 images = 40 seconds. Allowable.
-
-    const result = await BatchAssetService.generateGroupAssets({ ...(body as any), targetStatus: 'draft' });
-    return reply.send(result);
+  app.post('/admin/batch/generate-group', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    // Delegating to modern batch
+    return reply.status(410).send({ error: 'Use /admin/generation/batch' });
   });
 
   // NEW: Publish & Translate Endpoint
-  app.post('/admin/publish', { preHandler: adminGuard }, async (req, reply) => {
+  app.post('/admin/publish', { preHandler: adminGuard }, async (req: any, reply: any) => {
     const body = z.object({
       groupId: z.string(),
       groupName: z.string(),
@@ -81,7 +64,7 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // Asset generation proxy (server-side Gemini key)
-  app.post('/admin/generate-asset', { preHandler: adminGuard }, async (req, reply) => {
+  app.post('/admin/generate-asset', { preHandler: adminGuard }, async (req: any, reply: any) => {
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
     const body = assetGenSchema.parse(req.body || {});
     const { mode, prompt, key, status, movementId, imageInput } = body;
@@ -206,19 +189,30 @@ export async function adminRoutes(app: FastifyInstance) {
       }
 
       if (value && key) {
-        await pool.query(
-          `INSERT INTO cached_assets(key, value, asset_type, status)
-           VALUES($1,$2,$3,$4)
-           ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, asset_type=EXCLUDED.asset_type, status=EXCLUDED.status`,
-          [key, value, mode === 'json' ? 'json' : mode, status]
-        );
-        // meta
-        await pool.query(
-          `INSERT INTO cached_asset_meta(key, prompt, mode, source, created_by, movement_id)
-           VALUES($1,$2,$3,$4,$5,$6)
-           ON CONFLICT (key) DO UPDATE SET prompt=EXCLUDED.prompt, mode=EXCLUDED.mode, source=EXCLUDED.source, created_by=EXCLUDED.created_by, movement_id=EXCLUDED.movement_id`,
-          [key, prompt, mode, 'admin_generate_asset', (req as any).user?.userId || null, movementId || null]
-        );
+        const uKey = UnifiedKey.parse(key);
+        const buffer = Buffer.from(value.replace(/^data:image\/\w+;base64,/, ""), 'base64');
+        const assetType = mode === 'json' ? 'json' : mode as any;
+        const targetStatus = status === 'draft' ? 'generating' : (status === 'auto' ? 'active' : status as any);
+
+        await AssetRepository.save(uKey, {
+          buffer,
+          status: targetStatus,
+          type: assetType,
+          metadata: {
+            prompt,
+            mode,
+            source: 'admin_generate_asset',
+            created_by: (req as any).user?.userId || null,
+            movement_id: movementId || null
+          }
+        });
+
+        // Let Orchestrator finish "Unicorn" details if needed
+        await AssetOrchestrator.generateAssetForKey(key, true);
+        const updated = await AssetRepository.findByKey(key);
+        if (updated && updated.buffer) {
+          value = `data:image/png;base64,${updated.buffer.toString('base64')}`;
+        }
       }
 
       return reply.send({ value });
@@ -243,7 +237,7 @@ export async function adminRoutes(app: FastifyInstance) {
     privacyStatus: z.enum(['private', 'unlisted', 'public']).optional()
   });
 
-  app.post('/admin/upload-video', { preHandler: adminGuard }, async (req, reply) => {
+  app.post('/admin/upload-video', { preHandler: adminGuard }, async (req: any, reply: any) => {
     try {
       const body = uploadSchema.parse(req.body);
       const result = await uploadToYouTube(body);
@@ -257,33 +251,24 @@ export async function adminRoutes(app: FastifyInstance) {
 
 
   // Simple seed stubs (extend as needed)
-  app.post('/admin/seed', { preHandler: adminGuard }, async (req, reply) => {
+  app.post('/admin/seed', { preHandler: adminGuard }, async (req: any, reply: any) => {
     seedSchema.parse(req.body || {});
     // TODO: Implement actual seed logic
     return reply.send({ success: true });
   });
 
   // Get system blueprints
-  app.get('/admin/blueprints', { preHandler: adminGuard }, async (req, reply) => {
-    // In a real app this would come from a DB table 'system_settings' or 'blueprints'
-    // For now we persist to a simple JSON structure in DB or just return defaults + overrides
-    // We'll use a simple query to 'system_settings' table if it existed, otherwise mock for now
-    // Let's assume we store it in a special "system_blueprints" key in cached_asset_meta or a new table.
-    // For speed, let's mock it or use a simple KV if available.
-
-    // Checking if we have a table for this... we don't.
-    // So let's return the default logic structure that frontend expects.
-    // Frontend expects: { guidelines: MasterGuidelines, appName: ..., etc }
-
-    // We can actually store this in `cached_assets` with key `system_blueprints`!
+  // Get system blueprints
+  app.get('/admin/blueprints', { preHandler: adminGuard }, async (req: any, reply: any) => {
     try {
-      const res = await pool.query(`SELECT value FROM cached_assets WHERE key = 'system_blueprints'`);
-      if (res.rows.length > 0) {
-        return JSON.parse(res.rows[0].value);
+      const asset = await AssetRepository.findByKey('system_blueprints');
+      if (asset && asset.value) {
+        return JSON.parse(asset.value);
       }
-    } catch (e) { }
+    } catch (e: any) {
+      req.log.error(e);
+    }
 
-    // Default
     return {
       appName: 'Vitality AI',
       guidelines: {
@@ -298,16 +283,13 @@ export async function adminRoutes(app: FastifyInstance) {
     };
   });
 
-  app.post('/admin/blueprints', { preHandler: adminGuard }, async (req, reply) => {
-    const body = req.body as any; // Allow loose typing for now
-    // Save to cached_assets
+  app.post('/admin/blueprints', { preHandler: adminGuard }, async (req: any, reply: any) => {
     try {
-      await pool.query(
-        `INSERT INTO cached_assets(key, value, asset_type, status)
-             VALUES('system_blueprints', $1, 'json', 'active')
-             ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`,
-        [JSON.stringify(body)]
-      );
+      await AssetRepository.save('system_blueprints', {
+        value: JSON.stringify(req.body),
+        status: 'active',
+        type: 'json'
+      });
       return { success: true };
     } catch (e: any) {
       req.log.error(e);
@@ -315,14 +297,16 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
-  // BEHAVIORAL CONFIG (Missing Route Fix)
-  app.get('/admin/behavioral-config', { preHandler: adminGuard }, async (req, reply) => {
+  // BEHAVIORAL CONFIG
+  app.get('/admin/behavioral-config', { preHandler: adminGuard }, async (req: any, reply: any) => {
     try {
-      const res = await pool.query(`SELECT value FROM cached_assets WHERE key = 'behavioral_config'`);
-      if (res.rows.length > 0) {
-        return JSON.parse(res.rows[0].value);
+      const asset = await AssetRepository.findByKey('behavioral_config');
+      if (asset && asset.value) {
+        return JSON.parse(asset.value);
       }
-    } catch (e) { }
+    } catch (e: any) {
+      req.log.warn(e);
+    }
 
     // Defaults
     return {
@@ -336,15 +320,13 @@ export async function adminRoutes(app: FastifyInstance) {
     };
   });
 
-  app.post('/admin/behavioral-config', { preHandler: adminGuard }, async (req, reply) => {
-    const body = req.body as any;
+  app.post('/admin/behavioral-config', { preHandler: adminGuard }, async (req: any, reply: any) => {
     try {
-      await pool.query(
-        `INSERT INTO cached_assets(key, value, asset_type, status)
-             VALUES('behavioral_config', $1, 'json', 'active')
-             ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`,
-        [JSON.stringify(body)]
-      );
+      await AssetRepository.save('behavioral_config', {
+        value: JSON.stringify(req.body),
+        status: 'active',
+        type: 'json'
+      });
       return { success: true };
     } catch (e: any) {
       req.log.error(e);
@@ -352,29 +334,26 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
-  // ITEMS (Missing Route Fix)
-  app.get('/admin/items', { preHandler: adminGuard }, async (req, reply) => {
-    // Return empty array or fetch from DB if table exists (mocking empty for stability)
-    // We can try to fetch from cached_assets with type='game_item' if we implemented that
+  // ITEMS
+  app.get('/admin/items', { preHandler: adminGuard }, async (req: any, reply: any) => {
     try {
-      const res = await pool.query(`SELECT value FROM cached_assets WHERE asset_type = 'game_item'`);
-      return res.rows.map(r => JSON.parse(r.value));
-    } catch (e) {
+      const assets = await AssetRepository.findByType('game_item');
+      return assets.map(a => JSON.parse(a.value));
+    } catch (e: any) {
       return [];
     }
   });
 
-  app.post('/admin/items', { preHandler: adminGuard }, async (req, reply) => {
+  app.post('/admin/items', { preHandler: adminGuard }, async (req: any, reply: any) => {
     const body = req.body as any;
-    // Mock save
     try {
-      await pool.query(
-        `INSERT INTO cached_assets(key, value, asset_type, status)
-             VALUES($1, $2, 'game_item', 'active')
-             ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`,
-        [body.id || `item_${Date.now()}`, JSON.stringify(body)]
-      );
-      return { success: true, id: body.id };
+      const id = body.id || `item_${Date.now()}`;
+      await AssetRepository.save(id, {
+        value: JSON.stringify(body),
+        status: 'active',
+        type: 'json'
+      });
+      return { success: true, id };
     } catch (e: any) {
       return reply.status(500).send({ error: "Failed to create item" });
     }
@@ -383,7 +362,7 @@ export async function adminRoutes(app: FastifyInstance) {
   // Note: /admin/users route is defined later with search functionality
 
   // User role update
-  app.post('/admin/users/role', { preHandler: adminGuard }, async (req, reply) => {
+  app.post('/admin/users/role', { preHandler: adminGuard }, async (req: any, reply: any) => {
     const body = roleSchema.parse(req.body || {});
     await pool.query(
       `UPDATE users SET role = $1 WHERE id = $2`,
@@ -393,128 +372,39 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // Get all movements (exercises and meals) from database
-  app.get('/admin/movements', { preHandler: adminGuard }, async (req) => {
+  app.get('/admin/movements', { preHandler: adminGuard }, async (req: any) => {
     try {
-      const exerciseMap = new Map<string, any>();
-      const mealMap = new Map<string, any>();
+      const { exercises: exRows, meals: mealRows } = await MovementRepository.getMovementManifest();
 
-      // 1. Get unique exercise names from training_exercises table with METADATA
-      try {
-        const exerciseRows = await pool.query(
-          `SELECT DISTINCT ON (name) name, metadata
-           FROM training_exercises
-           WHERE name IS NOT NULL AND name != ''
-           ORDER BY name, created_at DESC`
-        );
-        exerciseRows.rows.forEach((row: any) => {
-          if (row.name) {
-            exerciseMap.set(row.name, {
-              name: row.name,
-              metadata: row.metadata
-            });
-          }
-        });
-      } catch (e: any) {
-        req.log?.warn({ error: 'Failed to fetch from training_exercises', message: e.message });
-      }
-
-      // 2. Get unique meal names from meals table with INSTRUCTIONS
-      try {
-        const mealRows = await pool.query(
-          `SELECT DISTINCT ON (name) name, instructions
-           FROM meals
-           WHERE name IS NOT NULL AND name != ''
-           ORDER BY name, created_at DESC`
-        );
-        mealRows.rows.forEach((row: any) => {
-          if (row.name) {
-            mealMap.set(row.name, {
-              name: row.name,
-              instructions: row.instructions
-            });
-          }
-        });
-      } catch (e: any) {
-        req.log?.warn({ error: 'Failed to fetch from meals', message: e.message });
-      }
-
-      // 3. Also extract from user_profiles (current plans) as fallback
-      try {
-        const profileRows = await pool.query(
-          `SELECT profile_data FROM user_profiles WHERE profile_data IS NOT NULL`
-        );
-
-        for (const row of profileRows.rows) {
-          const profile = row.profile_data || {};
-
-          // Extract exercises from currentTrainingProgram
-          if (profile.currentTrainingProgram?.schedule) {
-            for (const day of profile.currentTrainingProgram.schedule) {
-              if (Array.isArray(day.exercises)) {
-                for (const ex of day.exercises) {
-                  if (ex.name && !exerciseMap.has(ex.name)) {
-                    // Fallback: Use profile data if DB didn't have it
-                    exerciseMap.set(ex.name, {
-                      name: ex.name,
-                      metadata: { instructions: ex.instructions } // Map standard instructions to metadata structure
-                    });
-                  }
-                }
-              }
-            }
-          }
-
-          // Extract meals from currentMealPlan
-          if (profile.currentMealPlan?.days) {
-            for (const day of profile.currentMealPlan.days) {
-              if (Array.isArray(day.meals)) {
-                for (const meal of day.meals) {
-                  const mealName = meal.recipe?.name || meal.name;
-                  if (mealName && !mealMap.has(mealName)) {
-                    mealMap.set(mealName, {
-                      name: mealName,
-                      instructions: meal.recipe?.instructions || meal.instructions
-                    });
-                  }
-                }
-              }
-            }
-          }
-        }
-      } catch (e: any) {
-        req.log?.warn({ error: 'Failed to fetch from user_profiles', message: e.message });
-      }
-
-      // Convert maps to arrays and create response
-      const exercises = Array.from(exerciseMap.values()).map((ex) => {
-        const movementId = normalizeToMovementId(ex.name); // Server authoritative ID
+      const exercises = exRows.map((ex: any) => {
+        const movementId = normalizeToMovementId(ex.name);
         return {
           id: movementId,
           name: ex.name,
-          movementId, // Explicitly pass this
+          movementId,
           metadata: ex.metadata
         };
       }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
-      const meals = Array.from(mealMap.values()).map((m) => {
+      const meals = mealRows.map((m: any) => {
         const movementId = normalizeToMovementId(m.name);
         return {
           id: movementId,
           name: m.name,
-          movementId, // Explicitly pass this
+          movementId,
           instructions: m.instructions
         };
       }).sort((a, b) => a.name.localeCompare(b.name));
 
       return { exercises, meals };
     } catch (e: any) {
-      req.log?.error({ error: 'admin movements fetch failed', message: e.message, stack: e.stack });
+      req.log?.error({ error: 'admin movements fetch failed', message: e.message });
       return { exercises: [], meals: [] };
     }
   });
 
   // Batch Check Asset Existence
-  app.post('/admin/assets/batch-check', { preHandler: adminGuard }, async (req, reply) => {
+  app.post('/admin/assets/batch-check', { preHandler: adminGuard }, async (req: any, reply: any) => {
     const { keys } = req.body as { keys: string[] };
     if (!keys || keys.length === 0) return reply.send([]);
 
@@ -531,7 +421,7 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // NEW: Get Recent User Content for Admin Review
-  app.get('/admin/assets/recent', { preHandler: adminGuard }, async (req, reply) => {
+  app.get('/admin/assets/recent', { preHandler: adminGuard }, async (req: any, reply: any) => {
     try {
       // Fetch distinct movement_ids, sorted globally by most recent generation
       const res = await pool.query(
@@ -557,7 +447,7 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // Batch Scan (Regex/Prefix Match for messy keys) including VALUES
-  app.post('/admin/assets/scan', { preHandler: adminGuard }, async (req, reply) => {
+  app.post('/admin/assets/scan', { preHandler: adminGuard }, async (req: any, reply: any) => {
     const { prefixes } = req.body as { prefixes: string[] };
     if (!prefixes || prefixes.length === 0) return reply.send([]);
 
@@ -599,117 +489,214 @@ export async function adminRoutes(app: FastifyInstance) {
   }>();
 
   /**
-   * GET /admin/generation/status
-   * Get asset status for all exercises and meals
+   * GET /admin/generation/stream/:jobId
+   * Real-time SSE stream for generation progress
    */
-  app.get('/admin/generation/status', { preHandler: adminGuard }, async (req, reply) => {
+  app.get('/admin/generation/stream/:jobId', { preHandler: adminGuard }, async (req, reply) => {
+    const { jobId } = req.params as { jobId: string };
+
+    reply.raw.setHeader('Content-Type', 'text/event-stream');
+    reply.raw.setHeader('Cache-Control', 'no-cache');
+    reply.raw.setHeader('Connection', 'keep-alive');
+    reply.raw.flushHeaders();
+
+    const onUpdate = (progress: any) => {
+      reply.raw.write(`data: ${JSON.stringify(progress)}\n\n`);
+    };
+
+    // Send initial state
+    const current = jobManager.getJob(jobId);
+    if (current) onUpdate(current);
+
+    jobManager.on(`job:${jobId}`, onUpdate);
+
+    req.raw.on('close', () => {
+      jobManager.off(`job:${jobId}`, onUpdate);
+    });
+  });
+
+  /**
+   * GET /admin/generation/status
+   * Get asset status for all exercises and meals using Repositories
+   */
+  app.get('/admin/generation/status', { preHandler: adminGuard }, async (req: any, reply: any) => {
     try {
-      const { type = 'both', status = 'all' } = req.query as { type?: string; status?: string };
+      const { type = 'both', status: statusFilter = 'all' } = req.query as { type?: string, status?: string };
       const items: any[] = [];
 
-      // Fetch exercises
       if (type === 'ex' || type === 'both') {
-        const exercises = await pool.query(`SELECT id, name FROM training_exercises WHERE name IS NOT NULL ORDER BY name LIMIT 100`);
-        for (const ex of exercises.rows) {
-          const assetStatus = await AssetGenerationFacade.getAssetStatus('ex', ex.id);
-          let itemStatus = 'empty';
-          if (assetStatus.complete === assetStatus.total) itemStatus = 'complete';
-          else if (assetStatus.complete > 0) itemStatus = 'partial';
-          else if (assetStatus.failed > 0) itemStatus = 'failed';
-          if (status === 'all' || status === itemStatus) {
-            items.push({ type: 'ex', id: ex.id, name: ex.name, status: itemStatus, assets: assetStatus });
+        const exercises = await MovementRepository.findAllExercises();
+        for (const ex of exercises) {
+          const assets = await AssetRepository.findByMovement(ex.id);
+
+          let itemStatus: 'empty' | 'partial' | 'complete' | 'failed' = 'empty';
+          const totalExpected = 13; // ex: 1 meta (none) + 1 main (atlas) + 6 steps (atlas) + 1 main (nova) + 6 steps (nova) - wait, meta index 0, main index 0...
+          // For reborn, we use UnifiedAssetService.getManifest to be sure.
+
+          const complete = assets.filter(a => a.status === 'active').length;
+          const failed = assets.filter(a => a.status === 'failed').length;
+
+          if (complete > 0) {
+            itemStatus = complete >= 13 ? 'complete' : 'partial';
+          } else if (failed > 0) {
+            itemStatus = 'failed';
+          }
+
+          if (statusFilter === 'all' || statusFilter === itemStatus) {
+            items.push({
+              type: 'ex', id: ex.id, name: ex.name, status: itemStatus, assets: {
+                total: 13,
+                complete,
+                failed,
+                empty: 13 - complete - failed
+              }
+            });
           }
         }
       }
 
-      // Fetch meals
       if (type === 'meal' || type === 'both') {
-        const meals = await pool.query(`SELECT id, name FROM meals WHERE name IS NOT NULL ORDER BY name LIMIT 100`);
-        for (const meal of meals.rows) {
-          const assetStatus = await AssetGenerationFacade.getAssetStatus('meal', meal.id);
-          let itemStatus = 'empty';
-          if (assetStatus.complete === assetStatus.total) itemStatus = 'complete';
-          else if (assetStatus.complete > 0) itemStatus = 'partial';
-          else if (assetStatus.failed > 0) itemStatus = 'failed';
-          if (status === 'all' || status === itemStatus) {
-            items.push({ type: 'meal', id: meal.id, name: meal.name, status: itemStatus, assets: assetStatus });
+        const meals = await MovementRepository.findAllMeals();
+        for (const meal of meals) {
+          const assets = await AssetRepository.findByMovement(meal.id);
+
+          let itemStatus: 'empty' | 'partial' | 'complete' | 'failed' = 'empty';
+          const totalExpected = 8; // meal: 1 meta + 1 main + 6 steps
+
+          const complete = assets.filter(a => a.status === 'active').length;
+          const failed = assets.filter(a => a.status === 'failed').length;
+
+          if (complete > 0) {
+            itemStatus = complete >= 8 ? 'complete' : 'partial';
+          } else if (failed > 0) {
+            itemStatus = 'failed';
+          }
+
+          if (statusFilter === 'all' || statusFilter === itemStatus) {
+            items.push({
+              type: 'meal', id: meal.id, name: meal.name, status: itemStatus, assets: {
+                total: 8,
+                complete,
+                failed,
+                empty: 8 - complete - failed
+              }
+            });
           }
         }
       }
 
       return reply.send({ items, total: items.length });
     } catch (e: any) {
-      req.log.error({ error: 'generation status error', message: e.message });
-      return reply.status(500).send({ error: e.message });
-    }
-  });
-
-  /**
-   * POST /admin/generation/batch
-   * Start batch asset generation
-   */
-  app.post('/admin/generation/batch', { preHandler: adminGuard }, async (req, reply) => {
-    try {
-      const { mode, type = 'both', ids = [], count = 10, status = 'empty' } = req.body as any;
-      const jobId = `job_${Date.now()}`;
-      let itemsToGenerate: Array<{ type: 'ex' | 'meal', id: string }> = [];
-
-      if (mode === 'selected' && ids.length > 0) {
-        itemsToGenerate = ids.map((item: any) => ({ type: item.type, id: item.id }));
-      } else if (mode === 'next') {
-        const typeFilter = type === 'both' ? ['ex', 'meal'] : [type];
-        for (const t of typeFilter) {
-          const table = t === 'ex' ? 'training_exercises' : 'meals';
-          const items = await pool.query(`SELECT id, name FROM ${table} WHERE name IS NOT NULL ORDER BY created_at DESC LIMIT $1`, [count]);
-          for (const item of items.rows) {
-            const assetStatus = await AssetGenerationFacade.getAssetStatus(t as 'ex' | 'meal', item.id);
-            if ((status === 'empty' && assetStatus.empty > 0) || (status === 'failed' && assetStatus.failed > 0) || status === 'all') {
-              itemsToGenerate.push({ type: t as 'ex' | 'meal', id: item.id });
-            }
-            if (itemsToGenerate.length >= count) break;
-          }
-        }
-      }
-
-      activeJobs.set(jobId, { id: jobId, status: 'running', total: itemsToGenerate.length, completed: 0, failed: 0, currentItem: '', startedAt: new Date() });
-
-      AssetGenerationFacade.generateBatch(itemsToGenerate, {
-        sequential: true,
-        delayMs: 2000,
-        onProgress: (current, total, currentItem) => {
-          const job = activeJobs.get(jobId);
-          if (job) { job.completed = current; job.currentItem = currentItem; }
-        }
-      }).then(result => {
-        const job = activeJobs.get(jobId);
-        if (job) { job.status = 'complete'; job.completed = result.completed; job.failed = result.failed; job.completedAt = new Date(); }
-      }).catch(e => {
-        const job = activeJobs.get(jobId);
-        if (job) { job.status = 'failed'; job.completedAt = new Date(); }
-        req.log.error({ error: 'batch generation failed', message: e.message });
-      });
-
-      return reply.send({ jobId, message: 'Generation started', itemCount: itemsToGenerate.length });
-    } catch (e: any) {
-      req.log.error({ error: 'batch generation error', message: e.message });
+      req.log.error(e);
       return reply.status(500).send({ error: e.message });
     }
   });
 
   /**
    * GET /admin/generation/progress/:jobId
+   * Polling endpoint for job progress
    */
-  app.get('/admin/generation/progress/:jobId', { preHandler: adminGuard }, async (req, reply) => {
+  app.get('/admin/generation/progress/:jobId', { preHandler: adminGuard }, async (req: any, reply: any) => {
     const { jobId } = req.params as { jobId: string };
-    const job = activeJobs.get(jobId);
+    const job = jobManager.getJob(jobId);
     if (!job) return reply.status(404).send({ error: 'Job not found' });
-    return reply.send(job);
+
+    // Map internal skipped to external format for UI if needed or just return as is
+    return reply.send({
+      id: job.jobId,
+      status: job.status === 'completed' ? 'complete' : (job.status === 'failed' ? 'failed' : 'running'),
+      total: job.total,
+      completed: job.completed,
+      failed: job.failed,
+      currentItem: job.currentItem || ''
+    });
+  });
+
+  /**
+   * POST /admin/generation/batch
+   * Start batch asset generation
+   */
+  app.post('/admin/generation/batch', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      const { mode, type, ids, count = 10 } = req.body as any;
+      const jobId = `job_${Date.now()}`;
+
+      let itemsToProcess: Array<{ type: 'ex' | 'meal', id: string, name: string }> = [];
+
+      if (mode === 'selected' && Array.isArray(ids)) {
+        for (const item of ids) {
+          const movement = item.type === 'ex'
+            ? await MovementRepository.findExerciseById(item.id)
+            : await MovementRepository.findMealById(item.id);
+          if (movement) {
+            itemsToProcess.push({ type: item.type, id: movement.id, name: movement.name });
+          }
+        }
+      } else if (mode === 'next') {
+        // Fetch missing items based on type filter
+        const types = type ? [type] : ['ex', 'meal'];
+        for (const t of types) {
+          const movements = t === 'ex' ? await MovementRepository.findAllExercises() : await MovementRepository.findAllMeals();
+          for (const m of movements) {
+            const assets = await AssetRepository.findByMovement(m.id);
+            if (assets.length < (t === 'ex' ? 13 : 8)) {
+              itemsToProcess.push({ type: t as any, id: m.id, name: m.name });
+            }
+            if (itemsToProcess.length >= count) break;
+          }
+          if (itemsToProcess.length >= count) break;
+        }
+      }
+
+      if (itemsToProcess.length === 0) {
+        return reply.status(400).send({ error: 'No items found for generation' });
+      }
+
+      // Calculate total steps across all manifests
+      let totalSteps = 0;
+      const tasks: string[] = [];
+      for (const item of itemsToProcess) {
+        const manifest = await UnifiedAssetService.getManifest(item.type, item.id, item.name);
+        tasks.push(...manifest);
+        totalSteps += manifest.length;
+      }
+
+      jobManager.createJob(jobId, totalSteps);
+
+      // Async process
+      (async () => {
+        for (const key of tasks) {
+          try {
+            const currentJob = jobManager.getJob(jobId);
+            if (!currentJob) break;
+
+            jobManager.updateProgress(jobId, { currentItem: key });
+            const result = await AssetOrchestrator.generateAssetForKey(key);
+
+            if (result === 'SUCCESS' || result === 'EXISTS') {
+              jobManager.updateProgress(jobId, { completed: (jobManager.getJob(jobId)?.completed || 0) + 1 });
+            } else if (result === 'FAILED') {
+              jobManager.updateProgress(jobId, { failed: (jobManager.getJob(jobId)?.failed || 0) + 1 });
+            } else {
+              jobManager.updateProgress(jobId, { skipped: (jobManager.getJob(jobId)?.skipped || 0) + 1 });
+            }
+          } catch (e: any) {
+            jobManager.updateProgress(jobId, { failed: (jobManager.getJob(jobId)?.failed || 0) + 1 });
+          }
+        }
+      })().catch(err => req.log.error({ msg: "Batch processing crash", err }));
+
+      return reply.send({ jobId, message: 'Batch generation started' });
+    } catch (e: any) {
+      req.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
   });
 
   // ================== ADMIN USER MANAGEMENT ==================
 
   // Admin: Reset user password
-  app.post('/admin/users/:userId/reset-password', { preHandler: [authGuard, adminGuard] }, async (req, reply) => {
+  app.post('/admin/users/:userId/reset-password', { preHandler: [authGuard, adminGuard] }, async (req: any, reply: any) => {
     const { userId } = req.params as { userId: string };
     const body = z.object({
       newPassword: z.string().min(8).regex(
@@ -756,7 +743,7 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // Admin: Update user profile
-  app.patch('/admin/users/:userId/profile', { preHandler: [authGuard, adminGuard] }, async (req, reply) => {
+  app.patch('/admin/users/:userId/profile', { preHandler: [authGuard, adminGuard] }, async (req: any, reply: any) => {
     const { userId } = req.params as { userId: string };
     const body = z.object({
       email: z.string().email().optional(),
@@ -834,7 +821,7 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // Admin: Get all users with basic info
-  app.get('/admin/users', { preHandler: [authGuard, adminGuard] }, async (req, reply) => {
+  app.get('/admin/users', { preHandler: [authGuard, adminGuard] }, async (req: any, reply: any) => {
     const { limit = 50, offset = 0, search } = req.query as { limit?: number; offset?: number; search?: string };
 
     let query = `

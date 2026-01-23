@@ -1,6 +1,6 @@
 
 import { pool } from '../../infra/db/pool.js';
-import { AssetPromptService } from './assetPromptService.ts';
+import { AssetPromptService } from './assetPromptService.js';
 
 export type EntityType = 'ex' | 'meal';
 export type PersonaType = 'atlas' | 'nova' | 'mannequin' | 'none';
