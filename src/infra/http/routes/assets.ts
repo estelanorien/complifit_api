@@ -342,9 +342,9 @@ export async function assetsRoutes(app: FastifyInstance) {
       req.log.warn(`[Assets] Alias resolution failed for ${movementId}, falling back to literal key`);
     }
 
-    // FIX: Search for keys with proper prefixes (ex_ for exercises, meal_ for meals)
-    // The keys are stored as ex_${movementId}_atlas_main, meal_${movementId}_step_1, etc.
-    req.log.info(`[by-movement] Searching with patterns: ex_${movementId}%, meal_${movementId}%`);
+    // FIX: Search for keys with COLON separators (UnifiedKey format: type:id:persona:subtype:index)
+    // Keys are stored as ex:movement_id:atlas:main:0, meal:movement_id:none:step:1, etc.
+    req.log.info(`[by-movement] Searching with patterns: ex:${movementId}:%, meal:${movementId}:%`);
 
     const { rows } = await pool.query(
       `SELECT a.key, a.value, a.asset_type, a.status, a.created_at,
@@ -358,9 +358,11 @@ export async function assetsRoutes(app: FastifyInstance) {
            OR a.key LIKE $2 
            OR a.key LIKE $3
            OR a.key LIKE $4
+           OR a.key LIKE $5
+           OR a.key LIKE $6
         ORDER BY a.created_at DESC
-        LIMIT $5`,
-      [movementId, `ex_${movementId}%`, `meal_${movementId}%`, `${movementId}%`, limit]
+        LIMIT $7`,
+      [movementId, `ex:${movementId}:%`, `meal:${movementId}:%`, `ex_${movementId}%`, `meal_${movementId}%`, `${movementId}%`, limit]
     );
 
     req.log.info(`[by-movement] Found ${rows.length} rows for ${movementId}`);
