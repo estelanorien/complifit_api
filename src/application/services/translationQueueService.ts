@@ -222,10 +222,10 @@ export class TranslationQueueService {
         }
 
         // #region agent log
-        const fs = await import('fs/promises');
-        const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
-        const logEntry = JSON.stringify({location:'translationQueueService.ts:177',message:'Texts to translate extracted',data:{assetKey,textsToTranslateCount:textsToTranslate.length,textsByContext:textsToTranslate.reduce((acc,t)=>{acc[t.context]=(acc[t.context]||0)+1;return acc;},{})},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.3'}) + '\n';
-        fs.appendFile(logPath, logEntry).catch(()=>{});
+        const fsLog = await import('fs/promises');
+        const logPathExtract = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
+        const logEntryExtract = JSON.stringify({location:'translationQueueService.ts:177',message:'Texts to translate extracted',data:{assetKey,textsToTranslateCount:textsToTranslate.length,textsByContext:textsToTranslate.reduce((acc,t)=>{acc[t.context]=(acc[t.context]||0)+1;return acc;},{})},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.3'}) + '\n';
+        fsLog.appendFile(logPathExtract, logEntryExtract).catch(()=>{});
         // #endregion
 
         if (textsToTranslate.length === 0) return;
@@ -289,10 +289,10 @@ export class TranslationQueueService {
             }
         }
         // #region agent log
-        const fs = await import('fs/promises');
-        const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
-        const logEntry = JSON.stringify({location:'translationQueueService.ts:230',message:'Translations saved',data:{assetKey,languagesCount:Object.keys(parsed).length,savedTranslationsCount:savedCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.4'}) + '\n';
-        fs.appendFile(logPath, logEntry).catch(()=>{});
+        const fsSave = await import('fs/promises');
+        const logPathSave = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
+        const logEntrySave = JSON.stringify({location:'translationQueueService.ts:230',message:'Translations saved',data:{assetKey,languagesCount:Object.keys(parsed).length,savedTranslationsCount:savedCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.4'}) + '\n';
+        fsSave.appendFile(logPathSave, logEntrySave).catch(()=>{});
         // #endregion
     }
 

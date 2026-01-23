@@ -274,7 +274,7 @@ export async function adminRoutes(app: FastifyInstance) {
               value = updated.value;
             }
           } catch (orchestratorError: any) {
-            req.log.warn({ error: 'Orchestrator enhancement failed', key, error: orchestratorError.message });
+            req.log.warn({ error: 'Orchestrator enhancement failed', key, errorMessage: orchestratorError.message });
             // #region agent log
             fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:249',message:'Orchestrator error',data:{key,error:orchestratorError.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.3'})}).catch(()=>{});
             // #endregion
