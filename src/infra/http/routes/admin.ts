@@ -560,9 +560,15 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/admin/generation/stream/:jobId', { preHandler: adminGuard }, async (req, reply) => {
     const { jobId } = req.params as { jobId: string };
 
+    // FIX: Add CORS headers for Server-Sent Events (required for cross-origin SSE)
+    const origin = req.headers.origin || '*';
+    reply.raw.setHeader('Access-Control-Allow-Origin', origin);
+    reply.raw.setHeader('Access-Control-Allow-Credentials', 'false');
+    reply.raw.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
     reply.raw.setHeader('Content-Type', 'text/event-stream');
     reply.raw.setHeader('Cache-Control', 'no-cache');
     reply.raw.setHeader('Connection', 'keep-alive');
+    reply.raw.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering for SSE
     reply.raw.flushHeaders();
 
     const onUpdate = (progress: any) => {
