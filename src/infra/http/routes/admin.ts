@@ -172,8 +172,8 @@ export async function adminRoutes(app: FastifyInstance) {
         value = text;
       } else {
         // Attempt Real Veo Generation
-        // Note: 'veo-001-preview' is the model name for private preview
-        const model = 'models/veo-001-preview';
+        // Use veo-3.1-generate-preview (latest) or fallback to veo-3.0-generate-preview
+        const model = 'models/veo-3.1-generate-preview';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
 
         const res = await fetch(genEndpoint, {

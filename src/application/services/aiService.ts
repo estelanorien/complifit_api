@@ -206,31 +206,56 @@ FORBIDDEN:
     return { base64: `data:image/png;base64,${base64}` };
   }
 
-  async generateVideo({ prompt, model = 'models/veo-001-preview' }: { prompt: string, model?: string }): Promise<string> {
-    const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': this.apiKey
-      },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }]
-      })
-    });
+  async generateVideo({ prompt, model = 'models/veo-3.1-generate-preview' }: { prompt: string, model?: string }): Promise<string> {
+    // Try veo-3.1 first, fallback to veo-3.0 if not available
+    let lastError: Error | null = null;
+    const modelsToTry = ['models/veo-3.1-generate-preview', 'models/veo-3.0-generate-preview'];
+    
+    for (const modelToTry of modelsToTry) {
+      try {
+        const res = await fetch(`${this.baseUrl}/${modelToTry}:generateContent`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': this.apiKey
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }]
+          })
+        });
 
-    if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`Veo API error (${res.status}): ${errorText}`);
+        if (!res.ok) {
+          const errorText = await res.text();
+          lastError = new Error(`Veo API error (${res.status}): ${errorText}`);
+          // If 404, try next model; otherwise throw immediately
+          if (res.status === 404 && modelsToTry.indexOf(modelToTry) < modelsToTry.length - 1) {
+            continue;
+          }
+          throw lastError;
+        }
+
+        const data = await res.json() as any;
+        const videoUri = data?.candidates?.[0]?.content?.parts?.[0]?.fileData?.fileUri;
+
+        if (!videoUri) {
+          throw new Error("Veo API returned no video URI. Response: " + JSON.stringify(data));
+        }
+
+        return videoUri;
+      } catch (e: any) {
+        lastError = e;
+        // If it's a 404 and we have more models to try, continue
+        if (e.message?.includes('404') && modelsToTry.indexOf(modelToTry) < modelsToTry.length - 1) {
+          continue;
+        }
+        // Otherwise, if it's the last model or a different error, throw
+        if (modelsToTry.indexOf(modelToTry) === modelsToTry.length - 1) {
+          throw e;
+        }
+      }
     }
-
-    const data = await res.json() as any;
-    const videoUri = data?.candidates?.[0]?.content?.parts?.[0]?.fileData?.fileUri;
-
-    if (!videoUri) {
-      throw new Error("Veo API returned no video URI. Response: " + JSON.stringify(data));
-    }
-
-    return videoUri;
+    
+    throw lastError || new Error('Video generation failed: No models available');
   }
 }
 

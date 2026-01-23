@@ -250,20 +250,47 @@ export class AssetPromptService {
             "allergens": ["..."]
         }`;
 
-        try {
-            const res = await ai.generateText({ prompt: fullPrompt });
-            const cleaned = cleanJson(res.text);
-            const parsed = JSON.parse(cleaned);
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:176',message:'generateInstructions success',data:{name,type,hasDescription:!!parsed.description,instructionsCount:parsed.instructions?.length||0,hasSafetyWarnings:!!parsed.safety_warnings,safetyWarningsCount:parsed.safety_warnings?.length||0,hasProTips:!!parsed.pro_tips,proTipsCount:parsed.pro_tips?.length||0,hasNutritionScience:!!parsed.nutrition_science,hasPrepTips:!!parsed.prep_tips,prepTipsCount:parsed.prep_tips?.length||0,firstInstructionHasSimple:!!parsed.instructions?.[0]?.simple,firstInstructionHasDetailed:!!parsed.instructions?.[0]?.detailed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'})}).catch(()=>{});
-            // #endregion
-            return parsed;
-        } catch (e) {
-            console.error("[AssetPromptService] Failed to generate instructions:", e);
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:178',message:'generateInstructions error',data:{name,type,error:(e as Error).message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'})}).catch(()=>{});
-            // #endregion
-            return { description: name, instructions: [] };
+        // Retry logic for API overload errors
+        let lastError: Error | null = null;
+        const maxRetries = 3;
+        const retryDelay = 2000; // 2 seconds
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                // #region agent log
+                if (attempt > 1) {
+                    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:253',message:'generateInstructions retry',data:{name,type,attempt,maxRetries},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'})}).catch(()=>{});
+                }
+                // #endregion
+                
+                const res = await ai.generateText({ prompt: fullPrompt });
+                const cleaned = cleanJson(res.text);
+                const parsed = JSON.parse(cleaned);
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:260',message:'generateInstructions success',data:{name,type,attempt,hasDescription:!!parsed.description,instructionsCount:parsed.instructions?.length||0,hasSafetyWarnings:!!parsed.safety_warnings,safetyWarningsCount:parsed.safety_warnings?.length||0,hasProTips:!!parsed.pro_tips,proTipsCount:parsed.pro_tips?.length||0,hasNutritionScience:!!parsed.nutrition_science,hasPrepTips:!!parsed.prep_tips,prepTipsCount:parsed.prep_tips?.length||0,firstInstructionHasSimple:!!parsed.instructions?.[0]?.simple,firstInstructionHasDetailed:!!parsed.instructions?.[0]?.detailed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'})}).catch(()=>{});
+                // #endregion
+                return parsed;
+            } catch (e: any) {
+                lastError = e;
+                const isOverloadError = e.message?.includes('503') || e.message?.includes('overloaded');
+                
+                if (isOverloadError && attempt < maxRetries) {
+                    // Wait before retrying
+                    await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
+                    continue;
+                }
+                
+                // If not overload error or last attempt, break
+                if (!isOverloadError || attempt === maxRetries) {
+                    break;
+                }
+            }
         }
+        
+        console.error("[AssetPromptService] Failed to generate instructions after retries:", lastError);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:278',message:'generateInstructions error after retries',data:{name,type,error:lastError?.message,attempts:maxRetries},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'})}).catch(()=>{});
+        // #endregion
+        return { description: name, instructions: [] };
     }
 }
