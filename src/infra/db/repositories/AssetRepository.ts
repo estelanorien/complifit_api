@@ -33,6 +33,10 @@ export class AssetRepository {
         const keyStr = key.toString();
         const { value = '', buffer, status, type, metadata = {} } = data;
 
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AssetRepository.ts:33',message:'save entry',data:{keyStr,type,status,hasValue:!!value,valueLength:value?.length||0,hasBuffer:!!buffer,bufferLength:buffer?.length||0,hasMetadata:!!metadata,metadataKeys:Object.keys(metadata||{}),movementId:metadata?.movementId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'})}).catch(()=>{});
+        // #endregion
+
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -50,8 +54,11 @@ export class AssetRepository {
 
             // 1b. Upsert cached_asset_meta if movement_id is provided in metadata
             if (metadata.movementId) {
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AssetRepository.ts:52',message:'cached_asset_meta insert START',data:{keyStr,movementId:metadata.movementId,type,source:metadata.source},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'})}).catch(()=>{});
+                // #endregion
                 try {
-                    await client.query(`
+                    const metaResult = await client.query(`
                         INSERT INTO cached_asset_meta (key, prompt, mode, source, created_by, movement_id)
                         VALUES ($1, $2, $3, $4, $5, $6)
                         ON CONFLICT (key) DO UPDATE 
@@ -67,10 +74,20 @@ export class AssetRepository {
                         metadata.created_by || null,
                         metadata.movementId
                     ]);
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AssetRepository.ts:70',message:'cached_asset_meta insert SUCCESS',data:{keyStr,movementId:metadata.movementId,rowCount:metaResult.rowCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'})}).catch(()=>{});
+                    // #endregion
                 } catch (metaError: any) {
                     // Don't fail the whole transaction if meta insert fails
                     console.warn(`[AssetRepository] Failed to insert cached_asset_meta for ${keyStr}: ${metaError.message}`);
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AssetRepository.ts:74',message:'cached_asset_meta insert FAILED',data:{keyStr,movementId:metadata.movementId,error:metaError.message,errorCode:metaError.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'})}).catch(()=>{});
+                    // #endregion
                 }
+            } else {
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AssetRepository.ts:78',message:'cached_asset_meta SKIPPED - no movementId',data:{keyStr,type,hasMetadata:!!metadata,metadataKeys:Object.keys(metadata||{})},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'})}).catch(()=>{});
+                // #endregion
             }
 
             // 2. Upsert Blob if provided (only for image types that need binary storage)
@@ -98,8 +115,14 @@ export class AssetRepository {
             }
 
             await client.query('COMMIT');
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AssetRepository.ts:95',message:'save COMMIT success',data:{keyStr,type,status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4.1'})}).catch(()=>{});
+            // #endregion
         } catch (e: any) {
             await client.query('ROLLBACK');
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AssetRepository.ts:99',message:'save ROLLBACK error',data:{keyStr,type,error:e.message,errorStack:e.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4.1'})}).catch(()=>{});
+            // #endregion
             // Enhance error message with context
             const enhancedError = new Error(`Failed to save asset ${keyStr}: ${e.message}`);
             (enhancedError as any).originalError = e;

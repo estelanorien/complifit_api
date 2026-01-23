@@ -168,7 +168,14 @@ async function generateStepImage(name: string, type: 'exercise' | 'meal', moveme
     const baseKey = type === 'exercise' ? `ex_${movementId}` : `meal_${movementId}`;
     const stepKey = coach ? `${baseKey}_${coach}_step_${stepIndex}` : `${baseKey}_step_${stepIndex}`;
     
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'test_asset_generation_verification.ts:167',message:'generateStepImage entry',data:{name,type,movementId,stepIndex,instructionLength:instruction?.length||0,coach,baseKey,stepKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.1'})}).catch(()=>{});
+    // #endregion
+    
     try {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'test_asset_generation_verification.ts:172',message:'generateStepImage before constructPrompt',data:{stepKey,name,type,subtype:'step',label:instruction},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.1'})}).catch(()=>{});
+        // #endregion
         const { prompt, referenceImage } = await AssetPromptService.constructPrompt({
             key: stepKey,
             groupName: name,
@@ -178,6 +185,9 @@ async function generateStepImage(name: string, type: 'exercise' | 'meal', moveme
             type: 'image',
             context: instruction
         });
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'test_asset_generation_verification.ts:182',message:'generateStepImage after constructPrompt',data:{stepKey,promptLength:prompt?.length||0,hasReferenceImage:!!referenceImage,referenceImageLength:referenceImage?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.1'})}).catch(()=>{});
+        // #endregion
 
         const result = await aiService.generateImage({
             prompt,
@@ -187,6 +197,12 @@ async function generateStepImage(name: string, type: 'exercise' | 'meal', moveme
         });
 
         if (result.base64) {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'test_asset_generation_verification.ts:199',message:'generateStepImage image generated',data:{stepKey,hasBase64:!!result.base64,base64Length:result.base64?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.1'})}).catch(()=>{});
+            // #endregion
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'test_asset_generation_verification.ts:200',message:'generateStepImage before save',data:{stepKey,type:'image',status:'active',hasMetadata:true,movementId,step:stepIndex},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.2'})}).catch(()=>{});
+            // #endregion
             await AssetRepository.save(stepKey, {
                 value: result.base64,
                 buffer: Buffer.from(result.base64.replace(/^data:image\/\w+;base64,/, ""), 'base64'),
@@ -194,10 +210,20 @@ async function generateStepImage(name: string, type: 'exercise' | 'meal', moveme
                 type: 'image',
                 metadata: { prompt, source: 'test_verification', movementId, step: stepIndex }
             });
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'test_asset_generation_verification.ts:207',message:'generateStepImage save SUCCESS',data:{stepKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.2'})}).catch(()=>{});
+            // #endregion
             return result.base64;
+        } else {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'test_asset_generation_verification.ts:211',message:'generateStepImage no base64 result',data:{stepKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.1'})}).catch(()=>{});
+            // #endregion
         }
     } catch (e: any) {
         console.error(`   ❌ Step ${stepIndex} failed: ${e.message}`);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'test_asset_generation_verification.ts:214',message:'generateStepImage ERROR',data:{stepKey,error:e.message,errorStack:e.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.3'})}).catch(()=>{});
+        // #endregion
     }
     return null;
 }

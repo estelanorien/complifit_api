@@ -123,6 +123,9 @@ ${trimmedText}`;
             );
 
             // 2. Find JSON assets that need translation
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translationService.ts:125',message:'Translation query START',data:{groupId,query:'Find JSON assets for translation'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.2'})}).catch(()=>{});
+            // #endregion
             const { rows: jsonRows } = await pool.query(
                 `SELECT cached_assets.key 
                  FROM cached_assets 
@@ -131,9 +134,15 @@ ${trimmedText}`;
                  AND cached_assets.asset_type = 'json'`,
                 [groupId]
             );
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translationService.ts:133',message:'Translation query RESULT',data:{groupId,jsonRowsCount:jsonRows.length,jsonKeys:jsonRows.map((r:any)=>r.key)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.2'})}).catch(()=>{});
+            // #endregion
 
             console.log(`[TranslationService] Enqueueing translations for ${jsonRows.length} assets`);
             for (const row of jsonRows) {
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translationService.ts:137',message:'Enqueueing translation job',data:{groupId,assetKey:row.key},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'})}).catch(()=>{});
+                // #endregion
                 await translationQueue.enqueue(row.key);
             }
 
