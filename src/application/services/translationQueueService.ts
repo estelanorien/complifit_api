@@ -257,7 +257,7 @@ export class TranslationQueueService {
 
         const { text: jsonResult } = await aiService.generateText({
             prompt,
-            model: 'models/gemini-2.0-flash' // Fast model
+            model: 'models/gemini-2.5-flash' // Stable model (gemini-2.0-flash retires March 2026)
         });
 
         let parsed;
