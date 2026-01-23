@@ -162,13 +162,51 @@ export class AssetOrchestrator {
                 }
             }
 
-            // 4. Generate
-            const result = await AssetOrchestrator.ai.generateImage({
-                prompt: finalPrompt,
-                referenceImage: referenceImage,
-                referenceType: referenceType,
-                model: 'models/gemini-2.0-flash-exp'
-            });
+            // 4. Generate with retry logic for rate limits and transient errors
+            // FIX: Use gemini-2.5-flash-image which supports image generation (not gemini-2.0-flash-exp)
+            let result: { base64: string } | null = null;
+            let lastError: Error | null = null;
+            const maxRetries = 3;
+            const retryDelay = 3000; // 3 seconds base delay
+            
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    console.log(`[Orchestrator] Generation attempt ${attempt}/${maxRetries} for ${uKey.toString()}`);
+                    
+                    result = await AssetOrchestrator.ai.generateImage({
+                        prompt: finalPrompt,
+                        referenceImage: referenceImage,
+                        referenceType: referenceType,
+                        model: 'models/gemini-2.5-flash-image'
+                    });
+                    
+                    break; // Success, exit retry loop
+                    
+                } catch (e: any) {
+                    lastError = e;
+                    const isRetryable = e.message?.includes('429') || 
+                                       e.message?.includes('503') || 
+                                       e.message?.includes('overloaded') ||
+                                       e.message?.includes('quota') ||
+                                       e.message?.includes('rate');
+                    
+                    console.warn(`[Orchestrator] Attempt ${attempt} failed for ${uKey.toString()}: ${e.message}`);
+                    
+                    if (isRetryable && attempt < maxRetries) {
+                        const delay = retryDelay * attempt; // Exponential backoff
+                        console.log(`[Orchestrator] Retrying in ${delay}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    }
+                    
+                    // Non-retryable error or max retries reached
+                    throw e;
+                }
+            }
+            
+            if (!result) {
+                throw lastError || new Error('Image generation failed after retries');
+            }
 
             // 5. Store via Repository
             const buffer = Buffer.from(result.base64.replace(/^data:image\/\w+;base64,/, ""), 'base64');
@@ -184,6 +222,28 @@ export class AssetOrchestrator {
 
         } catch (e: any) {
             console.error(`[Orchestrator] Failed ${uKey.toString()}:`, e.message);
+            
+            // Log more details for debugging
+            const fs = await import('fs/promises');
+            const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
+            const errorLog = JSON.stringify({
+                location: 'AssetOrchestrator.ts:CATCH',
+                message: 'Generation failed',
+                data: { 
+                    keyStr, 
+                    error: e.message, 
+                    stack: e.stack?.substring(0, 300),
+                    isSafetyBlock: e.message?.includes('SAFETY'),
+                    isRateLimit: e.message?.includes('429') || e.message?.includes('quota'),
+                    isModelError: e.message?.includes('model') || e.message?.includes('404')
+                },
+                timestamp: Date.now(),
+                sessionId: 'debug-session',
+                runId: 'run1',
+                hypothesisId: 'H6.1'
+            }) + '\n';
+            fs.appendFile(logPath, errorLog).catch(() => {});
+            
             await AssetRepository.save(uKey, {
                 status: 'failed',
                 type: 'image',
