@@ -767,6 +767,8 @@ export async function adminRoutes(app: FastifyInstance) {
 
       // Async process
       (async () => {
+        const processedMovementIds = new Set<string>();
+        
         for (const key of tasks) {
           try {
             const currentJob = jobManager.getJob(jobId);
@@ -777,6 +779,17 @@ export async function adminRoutes(app: FastifyInstance) {
 
             if (result === 'SUCCESS' || result === 'EXISTS') {
               jobManager.updateProgress(jobId, { completed: (jobManager.getJob(jobId)?.completed || 0) + 1 });
+              
+              // Track movement IDs for translation triggering
+              try {
+                const uKey = UnifiedKey.parse(key);
+                if (uKey) {
+                  const movementId = AssetPromptService.normalizeToId(uKey.id);
+                  processedMovementIds.add(movementId);
+                }
+              } catch (e) {
+                // Ignore key parsing errors
+              }
             } else if (result === 'FAILED') {
               jobManager.updateProgress(jobId, { failed: (jobManager.getJob(jobId)?.failed || 0) + 1 });
             } else {
@@ -784,6 +797,30 @@ export async function adminRoutes(app: FastifyInstance) {
             }
           } catch (e: any) {
             jobManager.updateProgress(jobId, { failed: (jobManager.getJob(jobId)?.failed || 0) + 1 });
+          }
+        }
+        
+        // FIX: Trigger translations for all processed movements
+        if (processedMovementIds.size > 0) {
+          try {
+            const { TranslationService } = await import('../../../application/services/translationService.js');
+            const translationService = new TranslationService();
+            
+            for (const movementId of processedMovementIds) {
+              // Determine type from first item
+              const firstItem = itemsToProcess[0];
+              const groupType = firstItem.type === 'ex' ? 'exercise' : 'meal';
+              const groupName = firstItem.name;
+              
+              // Trigger translations in background (don't await to avoid blocking)
+              translationService.publishAndTranslate(movementId, groupName, groupType).catch((e: any) => {
+                req.log.warn({ msg: `Failed to trigger translations for ${movementId}`, error: e.message });
+              });
+            }
+            
+            req.log.info({ msg: `Triggered translations for ${processedMovementIds.size} movements` });
+          } catch (e: any) {
+            req.log.warn({ msg: 'Failed to trigger translations after batch', error: e.message });
           }
         }
       })().catch(err => req.log.error({ msg: "Batch processing crash", err }));
