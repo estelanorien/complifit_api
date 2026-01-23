@@ -769,22 +769,35 @@ export async function adminRoutes(app: FastifyInstance) {
         totalSteps += manifest.length;
       }
 
+      req.log.info({ msg: 'Creating batch job', jobId, totalSteps, taskCount: tasks.length, itemsCount: itemsToProcess.length });
       jobManager.createJob(jobId, totalSteps);
 
-      // Async process
+      // Async process with comprehensive error handling and logging
       (async () => {
         const processedMovementIds = new Set<string>();
+        let processedCount = 0;
+        
+        req.log.info({ msg: 'Batch processing started', jobId, totalTasks: tasks.length });
         
         for (const key of tasks) {
           try {
             const currentJob = jobManager.getJob(jobId);
-            if (!currentJob) break;
+            if (!currentJob) {
+              req.log.warn({ msg: 'Job not found, stopping batch', jobId });
+              break;
+            }
 
+            processedCount++;
+            req.log.info({ msg: 'Processing asset', jobId, key, progress: `${processedCount}/${tasks.length}` });
             jobManager.updateProgress(jobId, { currentItem: key });
+            
             const result = await AssetOrchestrator.generateAssetForKey(key);
+            req.log.info({ msg: 'Asset generation result', jobId, key, result });
 
             if (result === 'SUCCESS' || result === 'EXISTS') {
-              jobManager.updateProgress(jobId, { completed: (jobManager.getJob(jobId)?.completed || 0) + 1 });
+              const currentCompleted = (jobManager.getJob(jobId)?.completed || 0) + 1;
+              jobManager.updateProgress(jobId, { completed: currentCompleted });
+              req.log.info({ msg: 'Asset completed', jobId, key, completed: currentCompleted, total: totalSteps });
               
               // Track movement IDs for translation triggering
               try {
@@ -794,17 +807,26 @@ export async function adminRoutes(app: FastifyInstance) {
                   processedMovementIds.add(movementId);
                 }
               } catch (e) {
-                // Ignore key parsing errors
+                req.log.warn({ msg: 'Key parsing error', key, error: (e as any).message });
               }
             } else if (result === 'FAILED') {
-              jobManager.updateProgress(jobId, { failed: (jobManager.getJob(jobId)?.failed || 0) + 1 });
+              const currentFailed = (jobManager.getJob(jobId)?.failed || 0) + 1;
+              jobManager.updateProgress(jobId, { failed: currentFailed });
+              req.log.warn({ msg: 'Asset generation failed', jobId, key, failed: currentFailed });
             } else {
-              jobManager.updateProgress(jobId, { skipped: (jobManager.getJob(jobId)?.skipped || 0) + 1 });
+              const currentSkipped = (jobManager.getJob(jobId)?.skipped || 0) + 1;
+              jobManager.updateProgress(jobId, { skipped: currentSkipped });
+              req.log.info({ msg: 'Asset skipped', jobId, key, result, skipped: currentSkipped });
             }
           } catch (e: any) {
-            jobManager.updateProgress(jobId, { failed: (jobManager.getJob(jobId)?.failed || 0) + 1 });
+            const currentFailed = (jobManager.getJob(jobId)?.failed || 0) + 1;
+            jobManager.updateProgress(jobId, { failed: currentFailed });
+            req.log.error({ msg: 'Asset generation exception', jobId, key, error: e.message, stack: e.stack });
           }
         }
+        
+        const finalJob = jobManager.getJob(jobId);
+        req.log.info({ msg: 'Batch processing completed', jobId, finalStatus: finalJob?.status, completed: finalJob?.completed, failed: finalJob?.failed, skipped: finalJob?.skipped });
         
         // FIX: Trigger translations for all processed movements
         if (processedMovementIds.size > 0) {
@@ -829,7 +851,13 @@ export async function adminRoutes(app: FastifyInstance) {
             req.log.warn({ msg: 'Failed to trigger translations after batch', error: e.message });
           }
         }
-      })().catch(err => req.log.error({ msg: "Batch processing crash", err }));
+      })().catch(err => {
+        req.log.error({ msg: "Batch processing crash", jobId, error: err.message, stack: err.stack });
+        const currentJob = jobManager.getJob(jobId);
+        if (currentJob) {
+          jobManager.updateProgress(jobId, { status: 'failed', error: err.message });
+        }
+      });
 
       return reply.send({ jobId, message: 'Batch generation started' });
     } catch (e: any) {
