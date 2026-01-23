@@ -59,8 +59,9 @@ const globalRateLimitConfig = {
 };
 
 // Auth endpoint rate limit (stricter for security)
+// FIX: Increase limit for development to prevent login issues
 const authRateLimitConfig = {
-  max: 20,
+  max: env.nodeEnv === 'production' ? 20 : 100, // Higher limit in dev
   timeWindow: '1 minute',
 
   // ✅ Smaller cache for auth

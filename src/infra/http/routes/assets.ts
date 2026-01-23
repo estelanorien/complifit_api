@@ -205,12 +205,39 @@ export async function assetsRoutes(app: FastifyInstance) {
   app.post('/assets/batch', { preHandler: authGuard }, async (req) => {
     const { keys } = req.body as any;
     if (!Array.isArray(keys) || keys.length === 0) return {};
+    
+    // FIX: Return full asset data including status and metadata for frontend
     const { rows } = await pool.query(
-      `SELECT key, value FROM cached_assets WHERE key = ANY($1) AND status IN ('active','auto','draft')`,
+      `SELECT 
+        a.key, 
+        a.value, 
+        a.asset_type,
+        a.status,
+        m.text_context,
+        m.text_context_simple
+      FROM cached_assets a
+      LEFT JOIN cached_asset_meta m ON m.key = a.key
+      WHERE a.key = ANY($1) AND a.status IN ('active','auto','draft','generating')
+      LIMIT 100`,
       [keys]
     );
-    const result: Record<string, string> = {};
-    rows.forEach(r => { result[r.key] = r.value; });
+    
+    const result: Record<string, any> = {};
+    rows.forEach((r: any) => {
+      let value = r.value || '';
+      // If image, ensure base64 prefix
+      if (r.asset_type === 'image' && value && !value.startsWith('data:image')) {
+        value = `data:image/png;base64,${value}`;
+      }
+      
+      result[r.key] = {
+        value,
+        assetType: r.asset_type,
+        status: r.status,
+        textContext: r.text_context || '',
+        textContextSimple: r.text_context_simple || ''
+      };
+    });
     return result;
   });
 
