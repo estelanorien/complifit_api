@@ -48,6 +48,31 @@ export class AssetRepository {
                     updated_at = now()
             `, [keyStr, value, type, status, JSON.stringify(metadata)]);
 
+            // 1b. Upsert cached_asset_meta if movement_id is provided in metadata
+            if (metadata.movementId) {
+                try {
+                    await client.query(`
+                        INSERT INTO cached_asset_meta (key, prompt, mode, source, created_by, movement_id)
+                        VALUES ($1, $2, $3, $4, $5, $6)
+                        ON CONFLICT (key) DO UPDATE 
+                        SET prompt = COALESCE(EXCLUDED.prompt, cached_asset_meta.prompt),
+                            mode = COALESCE(EXCLUDED.mode, cached_asset_meta.mode),
+                            source = COALESCE(EXCLUDED.source, cached_asset_meta.source),
+                            movement_id = COALESCE(EXCLUDED.movement_id, cached_asset_meta.movement_id)
+                    `, [
+                        keyStr,
+                        metadata.prompt || null,
+                        metadata.mode || null,
+                        metadata.source || null,
+                        metadata.created_by || null,
+                        metadata.movementId
+                    ]);
+                } catch (metaError: any) {
+                    // Don't fail the whole transaction if meta insert fails
+                    console.warn(`[AssetRepository] Failed to insert cached_asset_meta for ${keyStr}: ${metaError.message}`);
+                }
+            }
+
             // 2. Upsert Blob if provided (only for image types that need binary storage)
             // For video and json, we store the value as string, no blob needed
             if (buffer && buffer.length > 0) {

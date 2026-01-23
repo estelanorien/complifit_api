@@ -69,7 +69,7 @@ export class AssetPromptService {
         }
     ): Promise<{ prompt: string; referenceImage?: string; referenceType: 'identity' | 'environment' }> {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:59',message:'constructPrompt entry',data:{key,groupName,groupType,subtype,type},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.4'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:59',message:'constructPrompt entry',data:{key:options.key,groupName:options.groupName,groupType:options.groupType,subtype:options.subtype,type:options.type},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.4'})}).catch(()=>{});
         // #endregion
 
         const guidelines = await this.getGuidelines();
@@ -87,17 +87,29 @@ export class AssetPromptService {
         if (lowerKey.includes('atlas') || lowerLabel.includes('atlas')) {
             identity = 'atlas';
             const asset = await AssetRepository.findByKey('system_coach_atlas_ref');
-            refImage = asset?.buffer?.toString() || undefined;
+            // FIX: Try buffer first, then value (base64 string), then convert value to base64 if needed
+            if (asset?.buffer) {
+                refImage = `data:image/png;base64,${asset.buffer.toString('base64')}`;
+            } else if (asset?.value) {
+                // Value might already be base64 or data URI
+                refImage = asset.value.startsWith('data:image') ? asset.value : `data:image/png;base64,${asset.value}`;
+            }
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:85',message:'Atlas reference lookup',data:{key,hasAsset:!!asset,hasBuffer:!!asset?.buffer,bufferLength:asset?.buffer?.length||0,hasRefImage:!!refImage,refImageLength:refImage?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.2'})}).catch(()=>{});
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:85',message:'Atlas reference lookup',data:{key,hasAsset:!!asset,hasBuffer:!!asset?.buffer,hasValue:!!asset?.value,bufferLength:asset?.buffer?.length||0,valueLength:asset?.value?.length||0,hasRefImage:!!refImage,refImageLength:refImage?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.2'})}).catch(()=>{});
             // #endregion
             refType = 'identity';
         } else if (lowerKey.includes('nova') || lowerLabel.includes('nova')) {
             identity = 'nova';
             const asset = await AssetRepository.findByKey('system_coach_nova_ref');
-            refImage = asset?.buffer?.toString() || undefined;
+            // FIX: Try buffer first, then value (base64 string), then convert value to base64 if needed
+            if (asset?.buffer) {
+                refImage = `data:image/png;base64,${asset.buffer.toString('base64')}`;
+            } else if (asset?.value) {
+                // Value might already be base64 or data URI
+                refImage = asset.value.startsWith('data:image') ? asset.value : `data:image/png;base64,${asset.value}`;
+            }
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:90',message:'Nova reference lookup',data:{key,hasAsset:!!asset,hasBuffer:!!asset?.buffer,bufferLength:asset?.buffer?.length||0,hasRefImage:!!refImage,refImageLength:refImage?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.2'})}).catch(()=>{});
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:90',message:'Nova reference lookup',data:{key,hasAsset:!!asset,hasBuffer:!!asset?.buffer,hasValue:!!asset?.value,bufferLength:asset?.buffer?.length||0,valueLength:asset?.value?.length||0,hasRefImage:!!refImage,refImageLength:refImage?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.2'})}).catch(()=>{});
             // #endregion
             refType = 'identity';
         } else if (groupType === 'exercise') {
