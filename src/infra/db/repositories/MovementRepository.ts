@@ -66,6 +66,28 @@ export class MovementRepository {
     }
 
     /**
+     * Find a single exercise by Name (Fallback for batch operations).
+     */
+    static async findExerciseByName(name: string): Promise<any | null> {
+        const res = await pool.query(
+            `SELECT id, name, metadata, equipment FROM training_exercises WHERE name = $1`,
+            [name]
+        );
+        return res.rows[0] || null;
+    }
+
+    /**
+     * Find a single meal by Name (Fallback for batch operations).
+     */
+    static async findMealByName(name: string): Promise<any | null> {
+        const res = await pool.query(
+            `SELECT id, name, instructions, metadata FROM meals WHERE name = $1`,
+            [name]
+        );
+        return res.rows[0] || null;
+    }
+
+    /**
      * Get unique movements (exercises and meals) for admin listing.
      * Consolidates logic from multiple tables.
      */

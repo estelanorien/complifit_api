@@ -613,12 +613,28 @@ export async function adminRoutes(app: FastifyInstance) {
       let itemsToProcess: Array<{ type: 'ex' | 'meal', id: string, name: string }> = [];
 
       if (mode === 'selected' && Array.isArray(ids)) {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
         for (const item of ids) {
-          const movement = item.type === 'ex'
-            ? await MovementRepository.findExerciseById(item.id)
-            : await MovementRepository.findMealById(item.id);
+          let movement = null;
+          const isUUID = uuidRegex.test(item.id);
+
+          if (isUUID) {
+            movement = item.type === 'ex'
+              ? await MovementRepository.findExerciseById(item.id)
+              : await MovementRepository.findMealById(item.id);
+          } else {
+            // Fallback: Try to find by NAME if ID isn't a UUID
+            // (Fixes "invalid input syntax for type uuid" when frontend sends names)
+            movement = item.type === 'ex'
+              ? await MovementRepository.findExerciseByName(item.id)
+              : await MovementRepository.findMealByName(item.id);
+          }
+
           if (movement) {
             itemsToProcess.push({ type: item.type, id: movement.id, name: movement.name });
+          } else {
+            req.log.warn(`Batch item not found: ${item.id} (Type: ${item.type})`);
           }
         }
       } else if (mode === 'next') {
