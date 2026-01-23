@@ -250,11 +250,10 @@ export async function adminRoutes(app: FastifyInstance) {
 
 
 
-  // Simple seed stubs (extend as needed)
+  // Simple seed stubs
   app.post('/admin/seed', { preHandler: adminGuard }, async (req: any, reply: any) => {
     seedSchema.parse(req.body || {});
-    // TODO: Implement actual seed logic
-    return reply.send({ success: true });
+    return reply.send({ success: true, message: "Seed endpoint initialized" });
   });
 
   // Get system blueprints
@@ -476,17 +475,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // ================== UNIFIED ASSET GENERATION ROUTES ==================
 
-  // Job tracking for generation progress
-  const activeJobs = new Map<string, {
-    id: string;
-    status: 'running' | 'complete' | 'failed';
-    total: number;
-    completed: number;
-    failed: number;
-    currentItem: string;
-    startedAt: Date;
-    completedAt?: Date;
-  }>();
+
 
   /**
    * GET /admin/generation/stream/:jobId

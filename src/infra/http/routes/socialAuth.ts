@@ -196,16 +196,34 @@ export async function socialAuthRoutes(app: FastifyInstance) {
 
         try {
             // Decode Apple identity token (JWT)
-            // Note: In production, you should verify the signature with Apple's public keys
             const decoded = jwt.decode(body.identityToken) as {
                 sub: string;
                 email?: string;
                 email_verified?: string;
+                iss?: string;
+                aud?: string;
+                exp?: number;
             } | null;
 
             if (!decoded || !decoded.sub) {
-                return reply.status(401).send({ error: 'Invalid Apple token' });
+                return reply.status(401).send({ error: 'Invalid Apple token: Missing sub' });
             }
+
+            // --- SECURITY HARDENING ---
+            // 1. Verify Issuer
+            if (decoded.iss !== 'https://appleid.apple.com') {
+                return reply.status(401).send({ error: 'Invalid Apple token: Incorrect issuer' });
+            }
+            // 2. Verify Audience (Client ID)
+            if (decoded.aud !== env.oauth.apple.clientId) {
+                return reply.status(401).send({ error: 'Invalid Apple token: Incorrect audience' });
+            }
+            // 3. Verify Expiration
+            const now = Math.floor(Date.now() / 1000);
+            if (decoded.exp && decoded.exp < now) {
+                return reply.status(401).send({ error: 'Invalid Apple token: Expired' });
+            }
+            // NOTE: Signature verification should be implemented with jwks-rsa in production
 
             // Apple may not always provide email (only on first login)
             const email = decoded.email || body.user?.email;
