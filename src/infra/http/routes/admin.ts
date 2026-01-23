@@ -86,8 +86,8 @@ export async function adminRoutes(app: FastifyInstance) {
       parts.push({ text: prompt });
 
       if (mode === 'image') {
-        const model = 'gemini-2.5-flash-image';
-        const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+        const model = 'models/gemini-2.5-flash-image';
+        const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
 
         const res = await fetch(genEndpoint, {
           method: 'POST',
@@ -190,11 +190,36 @@ export async function adminRoutes(app: FastifyInstance) {
 
       if (value && key) {
         const uKey = UnifiedKey.parse(key);
-        const buffer = Buffer.from(value.replace(/^data:image\/\w+;base64,/, ""), 'base64');
         const assetType = mode === 'json' ? 'json' : mode as any;
+        
+        // Validate status
+        const validStatuses = ['active', 'draft', 'generating', 'failed', 'rejected', 'auto'];
         const targetStatus = status === 'draft' ? 'generating' : (status === 'auto' ? 'active' : status as any);
+        if (!validStatuses.includes(targetStatus)) {
+          throw new Error(`Invalid status: ${targetStatus}. Must be one of: ${validStatuses.join(', ')}`);
+        }
+
+        // Handle different asset types correctly
+        let buffer: Buffer | undefined = undefined;
+        let storedValue = value;
+
+        if (mode === 'image') {
+          // Image: Extract base64 from data URI and store as buffer
+          const base64Data = value.replace(/^data:image\/\w+;base64,/, "");
+          buffer = Buffer.from(base64Data, 'base64');
+          storedValue = value; // Keep full data URI in value field
+        } else if (mode === 'video') {
+          // Video: Store URI as string, no buffer
+          storedValue = value; // Video URI string
+          buffer = undefined; // No buffer for video URIs
+        } else if (mode === 'json') {
+          // JSON: Store as string, no buffer
+          storedValue = value; // JSON text string
+          buffer = undefined; // No buffer for JSON
+        }
 
         await AssetRepository.save(uKey, {
+          value: storedValue,
           buffer,
           status: targetStatus,
           type: assetType,
@@ -207,11 +232,23 @@ export async function adminRoutes(app: FastifyInstance) {
           }
         });
 
-        // Let Orchestrator finish "Unicorn" details if needed
-        await AssetOrchestrator.generateAssetForKey(key, true);
-        const updated = await AssetRepository.findByKey(key);
-        if (updated && updated.buffer) {
-          value = `data:image/png;base64,${updated.buffer.toString('base64')}`;
+        // Only call Orchestrator for specific asset types that need enhancement
+        // Skip for admin-generated assets to avoid double generation
+        // Orchestrator is mainly for auto-generated "Unicorn" assets
+        const shouldEnhance = key.includes('_meta') || key.includes('system_');
+        if (shouldEnhance) {
+          try {
+            await AssetOrchestrator.generateAssetForKey(key, true);
+            const updated = await AssetRepository.findByKey(key);
+            if (updated && updated.buffer && mode === 'image') {
+              value = `data:image/png;base64,${updated.buffer.toString('base64')}`;
+            } else if (updated && updated.value && mode !== 'image') {
+              value = updated.value;
+            }
+          } catch (orchestratorError: any) {
+            req.log.warn({ error: 'Orchestrator enhancement failed', key, error: orchestratorError.message });
+            // Continue with original value if orchestrator fails
+          }
         }
       }
 

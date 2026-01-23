@@ -38,7 +38,7 @@ export class AssetRepository {
             await client.query('BEGIN');
 
             // 1. Upsert Metadata & Index
-            await client.query(`
+            const metadataResult = await client.query(`
                 INSERT INTO cached_assets (key, value, asset_type, status, metadata, updated_at)
                 VALUES ($1, $2, $3, $4, $5, now())
                 ON CONFLICT (key) DO UPDATE 
@@ -48,19 +48,39 @@ export class AssetRepository {
                     updated_at = now()
             `, [keyStr, value, type, status, JSON.stringify(metadata)]);
 
-            // 2. Upsert Blob if provided
+            // 2. Upsert Blob if provided (only for image types that need binary storage)
+            // For video and json, we store the value as string, no blob needed
             if (buffer && buffer.length > 0) {
-                await client.query(`
-                    INSERT INTO asset_blob_storage (key, data)
-                    VALUES ($1, $2)
-                    ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data
-                `, [keyStr, buffer]);
+                if (type !== 'image') {
+                    // Log warning if buffer provided for non-image type
+                    console.warn(`[AssetRepository] Buffer provided for non-image type ${type}. Storing value only.`);
+                } else {
+                    const blobResult = await client.query(`
+                        INSERT INTO asset_blob_storage (key, data)
+                        VALUES ($1, $2)
+                        ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data
+                    `, [keyStr, buffer]);
+                    
+                    // Verify blob was inserted
+                    if (blobResult.rowCount === 0) {
+                        throw new Error(`Failed to insert blob for key: ${keyStr}`);
+                    }
+                }
+            } else if (type === 'image' && !value) {
+                // For images, we should have either buffer or value
+                // If neither, log a warning but don't fail (might be updating status only)
+                console.warn(`[AssetRepository] No buffer or value provided for image asset: ${keyStr}`);
             }
 
             await client.query('COMMIT');
         } catch (e: any) {
             await client.query('ROLLBACK');
-            throw e;
+            // Enhance error message with context
+            const enhancedError = new Error(`Failed to save asset ${keyStr}: ${e.message}`);
+            (enhancedError as any).originalError = e;
+            (enhancedError as any).key = keyStr;
+            (enhancedError as any).type = type;
+            throw enhancedError;
         } finally {
             client.release();
         }
