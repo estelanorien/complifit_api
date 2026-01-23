@@ -572,12 +572,27 @@ export async function adminRoutes(app: FastifyInstance) {
     reply.raw.flushHeaders();
 
     const onUpdate = (progress: any) => {
-      reply.raw.write(`data: ${JSON.stringify(progress)}\n\n`);
+      // FIX: Wrap progress in SSE message format expected by frontend
+      const message = {
+        type: progress.status === 'completed' ? 'complete' : (progress.status === 'failed' ? 'error' : 'progress'),
+        total: progress.total,
+        completed: progress.completed,
+        failed: progress.failed,
+        currentItem: progress.currentItem || '',
+        error: progress.error
+      };
+      reply.raw.write(`data: ${JSON.stringify(message)}\n\n`);
     };
 
     // Send initial state
     const current = jobManager.getJob(jobId);
-    if (current) onUpdate(current);
+    if (current) {
+      req.log.info({ msg: 'SSE stream started', jobId, initialStatus: current.status });
+      onUpdate(current);
+    } else {
+      req.log.warn({ msg: 'Job not found for SSE stream', jobId });
+      reply.raw.write(`data: ${JSON.stringify({ type: 'error', error: 'Job not found' })}\n\n`);
+    }
 
     jobManager.on(`job:${jobId}`, onUpdate);
 
