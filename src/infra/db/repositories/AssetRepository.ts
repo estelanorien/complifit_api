@@ -59,20 +59,24 @@ export class AssetRepository {
                 // #endregion
                 try {
                     const metaResult = await client.query(`
-                        INSERT INTO cached_asset_meta (key, prompt, mode, source, created_by, movement_id)
-                        VALUES ($1, $2, $3, $4, $5, $6)
+                        INSERT INTO cached_asset_meta (key, prompt, mode, source, created_by, movement_id, persona, step_index)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                         ON CONFLICT (key) DO UPDATE 
                         SET prompt = COALESCE(EXCLUDED.prompt, cached_asset_meta.prompt),
                             mode = COALESCE(EXCLUDED.mode, cached_asset_meta.mode),
                             source = COALESCE(EXCLUDED.source, cached_asset_meta.source),
-                            movement_id = COALESCE(EXCLUDED.movement_id, cached_asset_meta.movement_id)
+                            movement_id = COALESCE(EXCLUDED.movement_id, cached_asset_meta.movement_id),
+                            persona = COALESCE(EXCLUDED.persona, cached_asset_meta.persona),
+                            step_index = COALESCE(EXCLUDED.step_index, cached_asset_meta.step_index)
                     `, [
                         keyStr,
                         metadata.prompt || null,
                         metadata.mode || null,
                         metadata.source || null,
                         metadata.created_by || null,
-                        metadata.movementId
+                        metadata.movementId,
+                        metadata.persona || null,
+                        metadata.stepIndex || null
                     ]);
                     // #region agent log
                     fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AssetRepository.ts:70',message:'cached_asset_meta insert SUCCESS',data:{keyStr,movementId:metadata.movementId,rowCount:metaResult.rowCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'})}).catch(()=>{});

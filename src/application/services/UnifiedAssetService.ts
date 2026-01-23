@@ -44,8 +44,9 @@ export class UnifiedAssetService {
     static async getManifest(entityType: EntityType, entityId: string, name: string, stepCount: number = 6): Promise<string[]> {
         const keys: string[] = [];
         const slug = AssetPromptService.normalizeToId(name);
-        // Use ID if provided and UUID-like, otherwise slug
-        const idPart = entityId.length > 20 ? entityId : slug;
+        // ALWAYS use slug for consistent, human-readable, searchable keys
+        // This ensures frontend can search by slug and find assets
+        const idPart = slug;
 
         if (entityType === 'ex') {
             // Meta

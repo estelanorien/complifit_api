@@ -105,7 +105,8 @@ export class AssetOrchestrator {
                         await AssetRepository.save(metaKey, {
                             buffer: Buffer.from(JSON.stringify(newInstr)),
                             status: 'active',
-                            type: 'json'
+                            type: 'json',
+                            metadata: { movementId: id }
                         });
                         instructions = newInstr;
 
@@ -214,7 +215,12 @@ export class AssetOrchestrator {
                 buffer,
                 status: 'active',
                 type: 'image',
-                metadata: { prompt: finalPrompt }
+                metadata: { 
+                    prompt: finalPrompt,
+                    movementId: id, // Save the slug for searchability (camelCase for AssetRepository)
+                    persona: persona,
+                    stepIndex: subtype === 'step' ? index : null
+                }
             });
 
             console.log(`[Orchestrator] Success: ${uKey.toString()}`);
