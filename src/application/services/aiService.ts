@@ -10,6 +10,7 @@ type GenerateImageParams = {
   prompt: string;
   model?: string;
   referenceImage?: string; // Base64
+  referenceType?: 'identity' | 'environment';
 };
 
 export class AiService {
@@ -88,8 +89,8 @@ Return ONLY cleaned visual description.`;
     }
   }
 
-  async generateImage({ prompt, model = 'models/gemini-2.5-flash-image', referenceImage }: GenerateImageParams) {
-    console.log(`[AiService] generateImage called with model: ${model}`);
+  async generateImage({ prompt, model = 'models/gemini-2.5-flash-image', referenceImage, referenceType = 'identity' }: GenerateImageParams) {
+    console.log(`[AiService] generateImage called with model: ${model}, type: ${referenceType}`);
     console.log(`[AiService] Prompt length: ${prompt?.length}, HasReference: ${!!referenceImage}`);
 
     const parts: any[] = [];
@@ -106,7 +107,31 @@ Return ONLY cleaned visual description.`;
         }
       });
 
-      enhancedPrompt = `CRITICAL IDENTITY REPLICATION INSTRUCTIONS:
+      if (referenceType === 'environment') {
+        enhancedPrompt = `CRITICAL ENVIRONMENT REPLICATION INSTRUCTIONS:
+
+STEP 1: ANALYZE THE REFERENCE SETTING ABOVE
+Note the:
+- Background environment (gym, kitchen, etc.)
+- Lighting style (dark, moody, bright, natural)
+- Specific equipment or decor visible
+- Overall color palette and atmosphere
+
+STEP 2: REPLICATE THE SETTING
+Generate an image where the subject is performing the requested action, but placed in the EXACT SAME environment shown above.
+- LIGHTING MUST MATCH - if reference is dark and moody, output MUST be dark and moody.
+- BACKGROUND DETAILS MUST MATCH - replicate the floor style, equipment presence, and wall textures.
+- ATMOSPHERE MUST MATCH
+
+STEP 3: THE ACTION
+Action to generate: ${cleanedPrompt}
+
+FORBIDDEN:
+🚫 Changing the environment or lighting
+🚫 Adding unexpected background elements
+🚫 Low resolution or blurry backgrounds`;
+      } else {
+        enhancedPrompt = `CRITICAL IDENTITY REPLICATION INSTRUCTIONS:
 
 STEP 1: ANALYZE THE REFERENCE IMAGE ABOVE
 Look at the person in the reference image and note:
@@ -131,6 +156,7 @@ FORBIDDEN:
 🚫 Different person
 🚫 Multiple people
 🚫 Split screen or before/after`;
+      }
     }
 
     parts.push({ text: enhancedPrompt });

@@ -10,6 +10,7 @@ export interface AssetGenOptions {
     status?: 'active' | 'draft' | 'auto' | 'generating' | 'failed';
     movementId?: string;
     imageInput?: string; // Base64
+    imageInputType?: 'identity' | 'environment';
     model?: string;
     persona?: 'atlas' | 'nova' | 'mannequin';
     stepIndex?: number;
@@ -20,7 +21,7 @@ export interface AssetGenOptions {
 
 export const generateAsset = async (options: AssetGenOptions): Promise<string | null> => {
     const {
-        mode, prompt, key, status = 'active', movementId, imageInput, model,
+        mode, prompt, key, status = 'active', movementId, imageInput, imageInputType = 'identity', model,
         persona, stepIndex, textContext, textContextSimple, originalName
     } = options;
 
@@ -49,6 +50,7 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
                 const result = await ai.generateImage({
                     prompt,
                     referenceImage: currentImageInput,
+                    referenceType: imageInputType,
                     model
                 });
                 value = result.base64;

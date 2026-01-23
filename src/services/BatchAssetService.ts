@@ -168,10 +168,17 @@ export class BatchAssetService {
 
         let atlasRef: string | null = null;
         let novaRef: string | null = null;
+        let gymRef: string | null = null;
+        let kitchenRef: string | null = null;
+
         if (groupType === 'exercise') {
             atlasRef = (await this.getAssetValue('system_coach_atlas_ref')) as string;
             novaRef = (await this.getAssetValue('system_coach_nova_ref')) as string;
-            console.log(`[Batch] Reference images loaded - Atlas: ${atlasRef ? 'YES (' + atlasRef.substring(0, 50) + '...)' : 'NO'}, Nova: ${novaRef ? 'YES' : 'NO'}`);
+            gymRef = (await this.getAssetValue('system_background_gym_ref')) as string;
+            console.log(`[Batch] Exercise references loaded - Atlas: ${!!atlasRef}, Nova: ${!!novaRef}, Gym: ${!!gymRef}`);
+        } else {
+            kitchenRef = (await this.getAssetValue('system_background_kitchen_ref')) as string;
+            console.log(`[Batch] Meal references loaded - Kitchen: ${!!kitchenRef}`);
         }
 
         // Split work into chunks of 3 for parallel processing
@@ -206,8 +213,21 @@ export class BatchAssetService {
                     });
 
                     let refImage: string | undefined = undefined;
-                    if (asset.identity === 'atlas') refImage = atlasRef || undefined;
-                    if (asset.identity === 'nova') refImage = novaRef || undefined;
+                    let refType: 'identity' | 'environment' = 'identity';
+
+                    if (asset.identity === 'atlas') {
+                        refImage = atlasRef || undefined;
+                        refType = 'identity';
+                    } else if (asset.identity === 'nova') {
+                        refImage = novaRef || undefined;
+                        refType = 'identity';
+                    } else if (groupType === 'exercise') {
+                        refImage = gymRef || undefined;
+                        refType = 'environment';
+                    } else if (groupType === 'meal') {
+                        refImage = kitchenRef || undefined;
+                        refType = 'environment';
+                    }
 
                     // De-duplicated Instruction Generation
                     const cacheKey = asset.label || asset.key;
@@ -227,6 +247,7 @@ export class BatchAssetService {
                         status: targetStatus,
                         movementId,
                         imageInput: refImage,
+                        imageInputType: refType,
                         model: 'models/gemini-2.5-flash-image',
                         persona: asset.identity as any,
                         stepIndex: asset.subtype === 'step' ? parseInt(asset.key.split('_step_')[1]) : undefined,

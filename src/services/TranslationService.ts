@@ -38,15 +38,51 @@ export class TranslationService {
                 // Collect texts to translate
                 const textsToTranslate: { text: string, category: string }[] = [];
 
-                if (meta.textContext) textsToTranslate.push({ text: meta.textContext, category: 'description' });
-                if (meta.textContextSimple) textsToTranslate.push({ text: meta.textContextSimple, category: 'cue' });
+                if (meta.description) textsToTranslate.push({ text: meta.description, category: 'description' });
 
-                if (meta.steps && Array.isArray(meta.steps)) {
-                    meta.steps.forEach((step: any, idx: number) => {
-                        if (step.instruction) {
+                // Exercise specific fields
+                if (meta.safety_warnings && Array.isArray(meta.safety_warnings)) {
+                    meta.safety_warnings.forEach((text: string, idx: number) => {
+                        textsToTranslate.push({ text, category: `safety_${idx + 1}` });
+                    });
+                }
+                if (meta.pro_tips && Array.isArray(meta.pro_tips)) {
+                    meta.pro_tips.forEach((text: string, idx: number) => {
+                        textsToTranslate.push({ text, category: `pro_tip_${idx + 1}` });
+                    });
+                }
+                if (meta.common_mistakes && Array.isArray(meta.common_mistakes)) {
+                    meta.common_mistakes.forEach((text: string, idx: number) => {
+                        textsToTranslate.push({ text, category: `mistake_${idx + 1}` });
+                    });
+                }
+
+                // Meal specific fields
+                if (meta.nutrition_science) textsToTranslate.push({ text: meta.nutrition_science, category: 'nutrition' });
+                if (meta.prep_tips && Array.isArray(meta.prep_tips)) {
+                    meta.prep_tips.forEach((text: string, idx: number) => {
+                        textsToTranslate.push({ text, category: `prep_tip_${idx + 1}` });
+                    });
+                }
+
+                if (meta.instructions && Array.isArray(meta.instructions)) {
+                    meta.instructions.forEach((step: any, idx: number) => {
+                        if (step.label) {
                             textsToTranslate.push({
-                                text: step.instruction,
-                                category: `step_${idx + 1}`
+                                text: step.label,
+                                category: `step_label_${idx + 1}`
+                            });
+                        }
+                        if (step.detailed) {
+                            textsToTranslate.push({
+                                text: step.detailed,
+                                category: `step_detailed_${idx + 1}`
+                            });
+                        }
+                        if (step.simple) {
+                            textsToTranslate.push({
+                                text: step.simple,
+                                category: `step_simple_${idx + 1}`
                             });
                         }
                     });
