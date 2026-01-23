@@ -25,23 +25,51 @@ export class AssetOrchestrator {
      * 5. STORE
      */
     static async generateAssetForKey(keyStr: string, force = false): Promise<string | null> {
+        // #region agent log
+        const fs = await import('fs/promises');
+        const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
+        const logEntry = JSON.stringify({location:'AssetOrchestrator.ts:27',message:'generateAssetForKey entry',data:{keyStr,force},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'}) + '\n';
+        fs.appendFile(logPath, logEntry).catch(()=>{});
+        // #endregion
+
         let uKey: UnifiedKey;
         try {
             uKey = UnifiedKey.parse(keyStr);
         } catch (e: any) {
             console.error(`[Orchestrator] ${e.message}`);
+            // #region agent log
+            const logEntry2 = JSON.stringify({location:'AssetOrchestrator.ts:32',message:'Key parse error',data:{keyStr,error:e.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'}) + '\n';
+            fs.appendFile(logPath, logEntry2).catch(()=>{});
+            // #endregion
             return null;
         }
 
         const { type, id, persona, subtype, index } = uKey;
 
+        // #region agent log
+        const logEntry3 = JSON.stringify({location:'AssetOrchestrator.ts:36',message:'Key parsed',data:{keyStr,type,id,persona,subtype,index,keyContainsAtlas:keyStr.toLowerCase().includes('atlas'),keyContainsNova:keyStr.toLowerCase().includes('nova')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.1'}) + '\n';
+        fs.appendFile(logPath, logEntry3).catch(()=>{});
+        // #endregion
+
         // 1. Atomic Check via Repository
         const existing = await AssetRepository.findByKey(uKey);
         if (existing) {
-            if (existing.status === 'active' && !force) return 'EXISTS';
+            if (existing.status === 'active' && !force) {
+                // #region agent log
+                const logEntry4 = JSON.stringify({location:'AssetOrchestrator.ts:40',message:'Asset exists, skipping',data:{keyStr,status:existing.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'}) + '\n';
+                fs.appendFile(logPath, logEntry4).catch(()=>{});
+                // #endregion
+                return 'EXISTS';
+            }
             if (existing.status === 'generating') {
                 const diff = (new Date().getTime() - new Date(existing.updated_at).getTime()) / 1000 / 60;
-                if (diff < 10) return 'GENERATING';
+                if (diff < 10) {
+                    // #region agent log
+                    const logEntry5 = JSON.stringify({location:'AssetOrchestrator.ts:43',message:'Asset generating, skipping',data:{keyStr,status:existing.status,minutesSinceStart:diff},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.2'}) + '\n';
+                    fs.appendFile(logPath, logEntry5).catch(()=>{});
+                    // #endregion
+                    return 'GENERATING';
+                }
             }
         }
 
@@ -111,6 +139,13 @@ export class AssetOrchestrator {
                 type: 'image',
                 context: instruction
             });
+
+            // #region agent log
+            const fs = await import('fs/promises');
+            const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
+            const logEntry = JSON.stringify({location:'AssetOrchestrator.ts:113',message:'Prompt constructed',data:{keyStr,promptLength:prompt.length,hasReferenceImage:!!referenceImage,referenceType,referenceImageLength:referenceImage?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.2'}) + '\n';
+            fs.appendFile(logPath, logEntry).catch(()=>{});
+            // #endregion
 
             // Equipment Enrichment via Repository
             let finalPrompt = prompt;

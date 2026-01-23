@@ -68,6 +68,10 @@ export class AssetPromptService {
             backgroundStyle?: string;
         }
     ): Promise<{ prompt: string; referenceImage?: string; referenceType: 'identity' | 'environment' }> {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:59',message:'constructPrompt entry',data:{key,groupName,groupType,subtype,type},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.4'})}).catch(()=>{});
+        // #endregion
+
         const guidelines = await this.getGuidelines();
         const { key, groupName, groupType, subtype, label, type, context, backgroundStyle } = options;
 
@@ -84,19 +88,31 @@ export class AssetPromptService {
             identity = 'atlas';
             const asset = await AssetRepository.findByKey('system_coach_atlas_ref');
             refImage = asset?.buffer?.toString() || undefined;
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:85',message:'Atlas reference lookup',data:{key,hasAsset:!!asset,hasBuffer:!!asset?.buffer,bufferLength:asset?.buffer?.length||0,hasRefImage:!!refImage,refImageLength:refImage?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.2'})}).catch(()=>{});
+            // #endregion
             refType = 'identity';
         } else if (lowerKey.includes('nova') || lowerLabel.includes('nova')) {
             identity = 'nova';
             const asset = await AssetRepository.findByKey('system_coach_nova_ref');
             refImage = asset?.buffer?.toString() || undefined;
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:90',message:'Nova reference lookup',data:{key,hasAsset:!!asset,hasBuffer:!!asset?.buffer,bufferLength:asset?.buffer?.length||0,hasRefImage:!!refImage,refImageLength:refImage?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.2'})}).catch(()=>{});
+            // #endregion
             refType = 'identity';
         } else if (groupType === 'exercise') {
             const asset = await AssetRepository.findByKey('system_background_gym_ref');
             refImage = asset?.buffer?.toString() || undefined;
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:94',message:'Gym background lookup',data:{key,groupType,hasAsset:!!asset,hasBuffer:!!asset?.buffer,bufferLength:asset?.buffer?.length||0,hasRefImage:!!refImage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.4'})}).catch(()=>{});
+            // #endregion
             refType = 'environment';
         } else if (groupType === 'meal') {
             const asset = await AssetRepository.findByKey('system_background_kitchen_ref');
             refImage = asset?.buffer?.toString() || undefined;
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:98',message:'Kitchen background lookup',data:{key,groupType,hasAsset:!!asset,hasBuffer:!!asset?.buffer,bufferLength:asset?.buffer?.length||0,hasRefImage:!!refImage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.4'})}).catch(()=>{});
+            // #endregion
             refType = 'environment';
         }
 
@@ -134,10 +150,18 @@ export class AssetPromptService {
             prompt += " STRICTLY NO TEXT.";
         }
 
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:137',message:'constructPrompt return',data:{key,identity,refType,hasRefImage:!!refImage,refImageLength:refImage?.length||0,promptLength:prompt.length,groupType},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.2'})}).catch(()=>{});
+        // #endregion
+
         return { prompt, referenceImage: refImage, referenceType: refType };
     }
 
     static async generateInstructions(name: string, type: 'exercise' | 'meal'): Promise<any> {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:140',message:'generateInstructions entry',data:{name,type},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'})}).catch(()=>{});
+        // #endregion
+
         const ai = new AiService();
         const fullPrompt = `You are an expert fitness coach and nutritionist. Generate detailed instructions for the ${type === 'exercise' ? 'exercise' : 'meal'}: "${name}".
         
@@ -173,9 +197,16 @@ export class AssetPromptService {
         try {
             const res = await ai.generateText({ prompt: fullPrompt });
             const cleaned = cleanJson(res.text);
-            return JSON.parse(cleaned);
+            const parsed = JSON.parse(cleaned);
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:176',message:'generateInstructions success',data:{name,type,hasDescription:!!parsed.description,instructionsCount:parsed.instructions?.length||0,hasSafetyWarnings:!!parsed.safety_warnings,safetyWarningsCount:parsed.safety_warnings?.length||0,hasProTips:!!parsed.pro_tips,proTipsCount:parsed.pro_tips?.length||0,hasNutritionScience:!!parsed.nutrition_science,hasPrepTips:!!parsed.prep_tips,prepTipsCount:parsed.prep_tips?.length||0,firstInstructionHasSimple:!!parsed.instructions?.[0]?.simple,firstInstructionHasDetailed:!!parsed.instructions?.[0]?.detailed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'})}).catch(()=>{});
+            // #endregion
+            return parsed;
         } catch (e) {
             console.error("[AssetPromptService] Failed to generate instructions:", e);
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:178',message:'generateInstructions error',data:{name,type,error:(e as Error).message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'})}).catch(()=>{});
+            // #endregion
             return { description: name, instructions: [] };
         }
     }

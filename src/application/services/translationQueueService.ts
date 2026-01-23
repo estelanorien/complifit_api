@@ -31,6 +31,12 @@ export class TranslationQueueService {
      * Enqueue a translation job for an asset.
      */
     async enqueue(assetKey: string, languages: string[] = ['es', 'fr', 'de', 'it', 'pt', 'ru', 'tr', 'zh', 'ja', 'ko', 'ar', 'hi']): Promise<string> {
+        // #region agent log
+        const fs = await import('fs/promises');
+        const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
+        const logEntry = JSON.stringify({location:'translationQueueService.ts:33',message:'Translation job enqueued',data:{assetKey,languagesCount:languages.length,languages},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'}) + '\n';
+        fs.appendFile(logPath, logEntry).catch(()=>{});
+        // #endregion
         try {
             const { rows } = await pool.query(
                 `INSERT INTO translation_jobs(asset_key, target_languages, status)
@@ -97,6 +103,12 @@ export class TranslationQueueService {
 
                 // 2. Execute Translation
                 try {
+                    // #region agent log
+                    const fs = await import('fs/promises');
+                    const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
+                    const logEntry = JSON.stringify({location:'translationQueueService.ts:100',message:'Translation execution start',data:{jobId:job.id,assetKey:job.asset_key,languagesCount:job.target_languages?.length||0,languages:job.target_languages},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'}) + '\n';
+                    fs.appendFile(logPath, logEntry).catch(()=>{});
+                    // #endregion
                     await this.executeTranslation(job.asset_key, job.target_languages);
 
                     // Success
@@ -109,9 +121,19 @@ export class TranslationQueueService {
                         [job.asset_key]
                     );
                     logger.info(`[TranslationQueue] Job ${job.id} COMPLETED`);
+                    // #region agent log
+                    const logEntry2 = JSON.stringify({location:'translationQueueService.ts:111',message:'Translation job completed',data:{jobId:job.id,assetKey:job.asset_key},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'}) + '\n';
+                    fs.appendFile(logPath, logEntry2).catch(()=>{});
+                    // #endregion
 
                 } catch (err: any) {
                     logger.error(`[TranslationQueue] Job ${job.id} FAILED`, err);
+                    // #region agent log
+                    const fs = await import('fs/promises');
+                    const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
+                    const logEntry = JSON.stringify({location:'translationQueueService.ts:114',message:'Translation job failed',data:{jobId:job.id,assetKey:job.asset_key,error:err.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.2'}) + '\n';
+                    fs.appendFile(logPath, logEntry).catch(()=>{});
+                    // #endregion
 
                     // Retry logic? For now just fail. V2.1 can add retries.
                     await pool.query(
@@ -154,6 +176,12 @@ export class TranslationQueueService {
 
         if (asset_type === 'json') {
             const data = JSON.parse(value);
+            // #region agent log
+            const fs = await import('fs/promises');
+            const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
+            const logEntry = JSON.stringify({location:'translationQueueService.ts:152',message:'Text extraction from JSON',data:{assetKey,hasInstructions:!!data.instructions,instructionsCount:data.instructions?.length||0,hasSafetyWarnings:!!data.safety_warnings,safetyWarningsCount:data.safety_warnings?.length||0,hasProTips:!!data.pro_tips,proTipsCount:data.pro_tips?.length||0,hasNutritionScience:!!data.nutrition_science,hasPrepTips:!!data.prep_tips,prepTipsCount:data.prep_tips?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.3'}) + '\n';
+            fs.appendFile(logPath, logEntry).catch(()=>{});
+            // #endregion
             // Heuristic extraction
             if (data.instructions && Array.isArray(data.instructions)) {
                 data.instructions.forEach((s: any) => {
@@ -162,6 +190,25 @@ export class TranslationQueueService {
                 });
             }
             // Add other logical fields if needed (ingredients, etc if passed in JSON asset)
+            // Extract safety_warnings, pro_tips, nutrition_science, prep_tips
+            if (data.safety_warnings && Array.isArray(data.safety_warnings)) {
+                data.safety_warnings.forEach((text: string) => {
+                    if (text) textsToTranslate.push({ original: text, context: 'Safety Warning' });
+                });
+            }
+            if (data.pro_tips && Array.isArray(data.pro_tips)) {
+                data.pro_tips.forEach((text: string) => {
+                    if (text) textsToTranslate.push({ original: text, context: 'Pro Tip' });
+                });
+            }
+            if (data.nutrition_science && typeof data.nutrition_science === 'string') {
+                textsToTranslate.push({ original: data.nutrition_science, context: 'Nutrition Science' });
+            }
+            if (data.prep_tips && Array.isArray(data.prep_tips)) {
+                data.prep_tips.forEach((text: string) => {
+                    if (text) textsToTranslate.push({ original: text, context: 'Prep Tip' });
+                });
+            }
         } else if (asset_type === 'image') {
             // Images don't have text content usually, UNLESS we translate the metadata prompt?
             // Usually we only translate "Movements" (which are groups).
@@ -173,6 +220,13 @@ export class TranslationQueueService {
             // If it's an image, maybe we just complete it?
             return;
         }
+
+        // #region agent log
+        const fs = await import('fs/promises');
+        const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
+        const logEntry = JSON.stringify({location:'translationQueueService.ts:177',message:'Texts to translate extracted',data:{assetKey,textsToTranslateCount:textsToTranslate.length,textsByContext:textsToTranslate.reduce((acc,t)=>{acc[t.context]=(acc[t.context]||0)+1;return acc;},{})},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.3'}) + '\n';
+        fs.appendFile(logPath, logEntry).catch(()=>{});
+        // #endregion
 
         if (textsToTranslate.length === 0) return;
 
@@ -214,6 +268,7 @@ export class TranslationQueueService {
         }
 
         // 4. Save to content_translations
+        let savedCount = 0;
         for (const lang of Object.keys(parsed)) {
             const translations = parsed[lang];
             for (const idKey of Object.keys(translations)) {
@@ -229,9 +284,16 @@ export class TranslationQueueService {
                          ON CONFLICT (original_text, language) DO UPDATE SET translated_text = EXCLUDED.translated_text`,
                         [original, lang, translated, contentHash]
                     );
+                    savedCount++;
                 }
             }
         }
+        // #region agent log
+        const fs = await import('fs/promises');
+        const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
+        const logEntry = JSON.stringify({location:'translationQueueService.ts:230',message:'Translations saved',data:{assetKey,languagesCount:Object.keys(parsed).length,savedTranslationsCount:savedCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.4'}) + '\n';
+        fs.appendFile(logPath, logEntry).catch(()=>{});
+        // #endregion
     }
 
     private getContentHash(text: string): string {

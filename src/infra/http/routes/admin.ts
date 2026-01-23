@@ -69,6 +69,10 @@ export async function adminRoutes(app: FastifyInstance) {
     const body = assetGenSchema.parse(req.body || {});
     const { mode, prompt, key, status, movementId, imageInput } = body;
 
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:67',message:'Admin generate-asset entry',data:{mode,key,status,movementId,hasImageInput:!!imageInput,imageInputLength:imageInput?.length||0,keyContainsAtlas:key?.toLowerCase().includes('atlas'),keyContainsNova:key?.toLowerCase().includes('nova')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.1'})}).catch(()=>{});
+    // #endregion
+
     let value: string | null = null;
     try {
       // Helper to prepare parts
@@ -76,6 +80,9 @@ export async function adminRoutes(app: FastifyInstance) {
       if (imageInput) {
         // Strip prefix if present (data:image/png;base64,)
         const base64Data = imageInput.replace(/^data:image\/\w+;base64,/, "");
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:78',message:'Reference image processed',data:{hasImageInput:true,base64Length:base64Data.length,strippedPrefix:imageInput!==base64Data},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.5'})}).catch(()=>{});
+        // #endregion
         parts.push({
           inlineData: {
             mimeType: "image/png",
@@ -88,6 +95,10 @@ export async function adminRoutes(app: FastifyInstance) {
       if (mode === 'image') {
         const model = 'models/gemini-2.5-flash-image';
         const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:89',message:'Before image API call',data:{model,promptLength:prompt.length,hasReferenceImage:parts.length>1,partsCount:parts.length,key},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.1'})}).catch(()=>{});
+        // #endregion
 
         const res = await fetch(genEndpoint, {
           method: 'POST',
@@ -127,6 +138,9 @@ export async function adminRoutes(app: FastifyInstance) {
         const data: any = await res.json();
         const resParts = data?.candidates?.[0]?.content?.parts || [];
         const inline = resParts.find((p: any) => p.inlineData?.data);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:130',message:'After image API response',data:{hasData:!!data,hasCandidates:!!data?.candidates,candidatesCount:data?.candidates?.length||0,hasInlineData:!!inline?.inlineData?.data,valueLength:inline?.inlineData?.data?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.1'})}).catch(()=>{});
+        // #endregion
         if (inline?.inlineData?.data) {
           value = `data:image/png;base64,${inline.inlineData.data}`;
         }
@@ -203,6 +217,10 @@ export async function adminRoutes(app: FastifyInstance) {
         let buffer: Buffer | undefined = undefined;
         let storedValue = value;
 
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:202',message:'Before buffer conversion',data:{mode,valueType:typeof value,valueLength:value?.length||0,valueStartsWith:value?.substring(0,20)||''},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.2'})}).catch(()=>{});
+        // #endregion
+
         if (mode === 'image') {
           // Image: Extract base64 from data URI and store as buffer
           const base64Data = value.replace(/^data:image\/\w+;base64,/, "");
@@ -217,6 +235,10 @@ export async function adminRoutes(app: FastifyInstance) {
           storedValue = value; // JSON text string
           buffer = undefined; // No buffer for JSON
         }
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:219',message:'After buffer conversion',data:{mode,hasBuffer:!!buffer,bufferLength:buffer?.length||0,storedValueType:typeof storedValue,storedValueLength:storedValue?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.2'})}).catch(()=>{});
+        // #endregion
 
         await AssetRepository.save(uKey, {
           value: storedValue,
@@ -236,10 +258,16 @@ export async function adminRoutes(app: FastifyInstance) {
         // Skip for admin-generated assets to avoid double generation
         // Orchestrator is mainly for auto-generated "Unicorn" assets
         const shouldEnhance = key.includes('_meta') || key.includes('system_');
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:238',message:'Orchestrator decision',data:{key,shouldEnhance,keyIncludesMeta:key.includes('_meta'),keyIncludesSystem:key.includes('system_')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.3'})}).catch(()=>{});
+        // #endregion
         if (shouldEnhance) {
           try {
             await AssetOrchestrator.generateAssetForKey(key, true);
             const updated = await AssetRepository.findByKey(key);
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:242',message:'After orchestrator',data:{key,hasUpdated:!!updated,updatedHasBuffer:!!updated?.buffer,updatedHasValue:!!updated?.value},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.3'})}).catch(()=>{});
+            // #endregion
             if (updated && updated.buffer && mode === 'image') {
               value = `data:image/png;base64,${updated.buffer.toString('base64')}`;
             } else if (updated && updated.value && mode !== 'image') {
@@ -247,11 +275,17 @@ export async function adminRoutes(app: FastifyInstance) {
             }
           } catch (orchestratorError: any) {
             req.log.warn({ error: 'Orchestrator enhancement failed', key, error: orchestratorError.message });
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:249',message:'Orchestrator error',data:{key,error:orchestratorError.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.3'})}).catch(()=>{});
+            // #endregion
             // Continue with original value if orchestrator fails
           }
         }
       }
 
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:255',message:'Admin generate-asset success',data:{key,mode,hasValue:!!value,valueLength:value?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1.1'})}).catch(()=>{});
+      // #endregion
       return reply.send({ value });
     } catch (e: any) {
       const isProduction = process.env.NODE_ENV === 'production';
@@ -260,6 +294,10 @@ export async function adminRoutes(app: FastifyInstance) {
       // Always show rate limit errors to the user
       const errorMessage = e.message || 'generation failed';
       const isRateLimitError = errorMessage.includes('Rate limit') || errorMessage.includes('quota');
+
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:256',message:'Admin generate-asset error',data:{key,mode,error:errorMessage,isRateLimitError,stack:e.stack?.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4.1'})}).catch(()=>{});
+      // #endregion
 
       return reply.status(500).send({
         error: (isRateLimitError || !isProduction) ? errorMessage : 'Asset generation service unavailable'
