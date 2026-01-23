@@ -751,8 +751,11 @@ export async function adminRoutes(app: FastifyInstance) {
       }
 
       if (itemsToProcess.length === 0) {
+        req.log.warn({ msg: 'Batch generation: No items to process', mode, type, ids, count });
         return reply.status(400).send({ error: 'No items found for generation' });
       }
+
+      req.log.info({ msg: 'Batch generation: Processing items', itemCount: itemsToProcess.length, items: itemsToProcess.map(i => ({ type: i.type, name: i.name })) });
 
       // Calculate total steps across all manifests - DYNAMIC based on instructions
       let totalSteps = 0;
