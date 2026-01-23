@@ -13,6 +13,7 @@ import { AssetRepository } from '../../db/repositories/AssetRepository.js';
 import { MovementRepository } from '../../db/repositories/MovementRepository.js';
 import { jobManager } from '../../../application/GenerationJobManager.js';
 import { UnifiedKey } from '../../../domain/UnifiedKey.js';
+import { AssetPromptService } from '../../../application/services/assetPromptService.js';
 
 const assetGenSchema = z.object({
   mode: z.enum(['image', 'video', 'json']).default('image'),
@@ -732,11 +733,32 @@ export async function adminRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'No items found for generation' });
       }
 
-      // Calculate total steps across all manifests
+      // Calculate total steps across all manifests - DYNAMIC based on instructions
       let totalSteps = 0;
       const tasks: string[] = [];
       for (const item of itemsToProcess) {
-        const manifest = await UnifiedAssetService.getManifest(item.type, item.id, item.name);
+        // FIX: Load instructions first to get dynamic step count
+        let stepCount = 6; // Default fallback
+        try {
+          const movementId = AssetPromptService.normalizeToId(item.name);
+          const metaKey = item.type === 'ex' ? `ex_${movementId}_meta` : `meal_${movementId}_meta`;
+          const metaAsset = await AssetRepository.findByKey(metaKey);
+          if (metaAsset?.value) {
+            const parsed = JSON.parse(metaAsset.value);
+            if (parsed.instructions && Array.isArray(parsed.instructions)) {
+              stepCount = parsed.instructions.length;
+            }
+          } else if (metaAsset?.buffer) {
+            const parsed = JSON.parse(metaAsset.buffer.toString());
+            if (parsed.instructions && Array.isArray(parsed.instructions)) {
+              stepCount = parsed.instructions.length;
+            }
+          }
+        } catch (e) {
+          // If meta doesn't exist yet, use default - will be generated first
+        }
+        
+        const manifest = await UnifiedAssetService.getManifest(item.type, item.id, item.name, stepCount);
         tasks.push(...manifest);
         totalSteps += manifest.length;
       }
