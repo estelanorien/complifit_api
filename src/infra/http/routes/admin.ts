@@ -172,47 +172,83 @@ export async function adminRoutes(app: FastifyInstance) {
         // Gemini often wraps JSON in backticks
         value = text;
       } else {
-        // Attempt Real Veo Generation
-        // Use veo-3.1-generate-preview (latest) or fallback to veo-3.0-generate-preview
-        const model = 'models/veo-3.1-generate-preview';
-        const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
+        // Attempt Real Veo Generation with fallback
+        const modelsToTry = ['models/veo-3.0-generate-preview', 'models/veo-2.0-generate-001'];
+        let lastError: Error | null = null;
+        let videoUri: string | null = null;
 
-        // #region agent log - VIDEO GENERATION DEBUG
-        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:VIDEO_START',message:'Video generation starting',data:{mode,model,promptLength:prompt.length,promptPreview:prompt.substring(0,100),key,hasImageInput:!!imageInput,partsCount:parts.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H_VIDEO_1'})}).catch(()=>{});
-        // #endregion
+        console.log(`[Admin] Starting video generation for mode=${mode}, key=${key}`);
 
-        const res = await fetch(genEndpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': env.geminiApiKey
-          },
-          body: JSON.stringify({
-            contents: [{ parts }] // Send image to Veo if provided
-          })
-        });
+        for (const model of modelsToTry) {
+          try {
+            const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
+            console.log(`[Admin] Trying Veo model: ${model}`);
 
-        // #region agent log - VIDEO RESPONSE
-        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:VIDEO_RESPONSE',message:'Veo API responded',data:{status:res.status,ok:res.ok,key},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H_VIDEO_2'})}).catch(()=>{});
-        // #endregion
+            // #region agent log - VIDEO GENERATION DEBUG
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:VIDEO_START',message:'Video generation starting',data:{mode,model,promptLength:prompt.length,promptPreview:prompt.substring(0,100),key,hasImageInput:!!imageInput,partsCount:parts.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H_VIDEO_1'})}).catch(()=>{});
+            // #endregion
 
-        if (!res.ok) {
-          const errorText = await res.text();
-          // #region agent log - VIDEO ERROR
-          fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:VIDEO_ERROR',message:'Veo API error',data:{status:res.status,errorPreview:errorText.substring(0,200),key},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H_VIDEO_3'})}).catch(()=>{});
-          // #endregion
-          throw new Error(`Veo API error (${res.status}): ${errorText}`);
+            const res = await fetch(genEndpoint, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': env.geminiApiKey
+              },
+              body: JSON.stringify({
+                contents: [{ parts }]
+              })
+            });
+
+            console.log(`[Admin] Veo response: status=${res.status}, ok=${res.ok}`);
+
+            // #region agent log - VIDEO RESPONSE
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:VIDEO_RESPONSE',message:'Veo API responded',data:{status:res.status,ok:res.ok,key,model},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H_VIDEO_2'})}).catch(()=>{});
+            // #endregion
+
+            if (!res.ok) {
+              const errorText = await res.text();
+              console.error(`[Admin] Veo error (${model}): ${res.status} - ${errorText.substring(0, 200)}`);
+              
+              // If 404 (model not found), try next model
+              if (res.status === 404) {
+                lastError = new Error(`Model ${model} not found`);
+                continue;
+              }
+              
+              // #region agent log - VIDEO ERROR
+              fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:VIDEO_ERROR',message:'Veo API error',data:{status:res.status,errorPreview:errorText.substring(0,200),key,model},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H_VIDEO_3'})}).catch(()=>{});
+              // #endregion
+              throw new Error(`Veo API error (${res.status}): ${errorText}`);
+            }
+
+            const data: any = await res.json();
+            videoUri = data?.candidates?.[0]?.content?.parts?.[0]?.fileData?.fileUri;
+
+            console.log(`[Admin] Veo result: hasVideoUri=${!!videoUri}, candidatesCount=${data?.candidates?.length || 0}`);
+
+            // #region agent log - VIDEO RESULT
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:VIDEO_RESULT',message:'Veo API result parsed',data:{hasVideoUri:!!videoUri,videoUriLength:videoUri?.length||0,videoUriPreview:videoUri?.substring(0,50)||'none',candidatesCount:data?.candidates?.length||0,key,model},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H_VIDEO_4'})}).catch(()=>{});
+            // #endregion
+
+            if (videoUri) {
+              console.log(`[Admin] Video generated successfully with model ${model}`);
+              break; // Success!
+            } else {
+              lastError = new Error(`Veo API returned no video URI with model ${model}`);
+              continue; // Try next model
+            }
+          } catch (e: any) {
+            console.error(`[Admin] Veo attempt failed (${model}):`, e.message);
+            lastError = e;
+            // If it's a 404, continue to next model
+            if (e.message?.includes('404')) continue;
+            // For other errors, throw immediately
+            throw e;
+          }
         }
 
-        const data: any = await res.json();
-        const videoUri = data?.candidates?.[0]?.content?.parts?.[0]?.fileData?.fileUri;
-
-        // #region agent log - VIDEO RESULT
-        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:VIDEO_RESULT',message:'Veo API result parsed',data:{hasVideoUri:!!videoUri,videoUriLength:videoUri?.length||0,videoUriPreview:videoUri?.substring(0,50)||'none',candidatesCount:data?.candidates?.length||0,key},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H_VIDEO_4'})}).catch(()=>{});
-        // #endregion
-
         if (!videoUri) {
-          throw new Error(`Veo API returned no video URI. Response: ${JSON.stringify(data)}`);
+          throw lastError || new Error('Video generation failed: No Veo models available');
         }
 
         value = videoUri;
