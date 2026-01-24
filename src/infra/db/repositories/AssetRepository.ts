@@ -150,18 +150,44 @@ export class AssetRepository {
 
     /**
      * Retrieves a complete asset record.
+     * CRITICAL: Joins cached_asset_meta to get text_context fields for backfill checks
      */
     static async findByKey(key: UnifiedKey | string): Promise<AssetRecord | null> {
         const keyStr = key.toString();
         const res = await pool.query(`
-            SELECT a.key, a.value, a.status, a.asset_type, a.metadata, a.updated_at, b.data as buffer
+            SELECT a.key, a.value, a.status, a.asset_type, a.metadata, a.updated_at, b.data as buffer,
+                   m.text_context, m.text_context_simple, m.movement_id, m.persona, m.step_index
             FROM cached_assets a
             LEFT JOIN asset_blob_storage b ON a.key = b.key
+            LEFT JOIN cached_asset_meta m ON a.key = m.key
             WHERE a.key = $1
         `, [keyStr]);
 
         if (res.rows.length === 0) return null;
-        return res.rows[0];
+        
+        // Merge cached_asset_meta fields into metadata for consistent access
+        const row = res.rows[0];
+        if (row.metadata) {
+            try {
+                const parsed = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+                row.metadata = {
+                    ...parsed,
+                    text_context: row.text_context || parsed.text_context,
+                    text_context_simple: row.text_context_simple || parsed.text_context_simple
+                };
+            } catch {
+                row.metadata = {
+                    text_context: row.text_context,
+                    text_context_simple: row.text_context_simple
+                };
+            }
+        } else {
+            row.metadata = {
+                text_context: row.text_context,
+                text_context_simple: row.text_context_simple
+            };
+        }
+        return row;
     }
 
     /**
