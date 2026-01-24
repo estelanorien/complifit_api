@@ -248,7 +248,16 @@ export async function adminRoutes(app: FastifyInstance) {
         }
 
         if (!videoUri) {
-          throw lastError || new Error('Video generation failed: No Veo models available');
+          // Provide helpful error message about Veo requirements
+          const veoError = new Error(
+            'Video generation requires Veo API access. ' +
+            'Please ensure: (1) Vertex AI API is enabled in Google Cloud Console, ' +
+            '(2) Your API key has video generation permissions, ' +
+            '(3) Veo is available in your region. ' +
+            'Original error: ' + (lastError?.message || 'No Veo models available')
+          );
+          console.error('[Admin] Veo not available:', veoError.message);
+          throw veoError;
         }
 
         value = videoUri;
@@ -343,16 +352,18 @@ export async function adminRoutes(app: FastifyInstance) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error({ error: 'admin generate asset failed', e, requestId: (req as any).requestId });
 
-      // Always show rate limit errors to the user
+      // Always show rate limit errors and video errors to the user (they need to know about Veo requirements)
       const errorMessage = e.message || 'generation failed';
       const isRateLimitError = errorMessage.includes('Rate limit') || errorMessage.includes('quota');
+      const isVideoError = errorMessage.includes('Veo') || errorMessage.includes('video') || mode === 'video';
 
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:256',message:'Admin generate-asset error',data:{key,mode,error:errorMessage,isRateLimitError,stack:e.stack?.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4.1'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:256',message:'Admin generate-asset error',data:{key,mode,error:errorMessage,isRateLimitError,isVideoError,stack:e.stack?.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4.1'})}).catch(()=>{});
       // #endregion
 
+      // Show helpful errors for video generation (Veo requirements), rate limits, and in dev mode
       return reply.status(500).send({
-        error: (isRateLimitError || !isProduction) ? errorMessage : 'Asset generation service unavailable'
+        error: (isRateLimitError || isVideoError || !isProduction) ? errorMessage : 'Asset generation service unavailable'
       });
     }
   });
