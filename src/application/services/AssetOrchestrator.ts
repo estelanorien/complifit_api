@@ -75,7 +75,8 @@ export class AssetOrchestrator {
                         if (!instructions.instructions || !Array.isArray(instructions.instructions) || instructions.instructions.length === 0) {
                             console.log(`[Orchestrator] Meta empty/broken for ${id}, regenerating...`);
                             const newInstr = await AssetPromptService.generateInstructions(id.replace(/_/g, ' '), type === 'ex' ? 'exercise' : 'meal');
-                            if (newInstr && newInstr.instructions) {
+                            // SAFEGUARD: Only save if we got actual instructions (not empty array)
+                            if (newInstr && Array.isArray(newInstr.instructions) && newInstr.instructions.length > 0) {
                                 await AssetRepository.save(metaKey, {
                                     buffer: Buffer.from(JSON.stringify(newInstr)),
                                     status: 'active',
@@ -83,7 +84,9 @@ export class AssetOrchestrator {
                                     metadata: { movementId: id }
                                 });
                                 instructions = newInstr;
-                                console.log(`[Orchestrator] Meta regenerated for ${id} with ${instructions.instructions?.length || 0} steps`);
+                                console.log(`[Orchestrator] Meta regenerated for ${id} with ${instructions.instructions.length} steps`);
+                            } else {
+                                console.warn(`[Orchestrator] Meta regeneration returned empty for ${id}, keeping existing`);
                             }
                         }
                         
@@ -169,7 +172,8 @@ export class AssetOrchestrator {
                 if (!instructions.instructions || !Array.isArray(instructions.instructions) || instructions.instructions.length === 0) {
                     console.log(`[Orchestrator] Missing/empty instructions for ${id}, generating meta...`);
                     const newInstr = await AssetPromptService.generateInstructions(id.replace(/_/g, ' '), type === 'ex' ? 'exercise' : 'meal');
-                    if (newInstr) {
+                    // SAFEGUARD: Only save if we got actual instructions (not empty array)
+                    if (newInstr && Array.isArray(newInstr.instructions) && newInstr.instructions.length > 0) {
                         await AssetRepository.save(metaKey, {
                             buffer: Buffer.from(JSON.stringify(newInstr)),
                             status: 'active',
@@ -177,6 +181,7 @@ export class AssetOrchestrator {
                             metadata: { movementId: id }
                         });
                         instructions = newInstr;
+                        console.log(`[Orchestrator] Meta generated for ${id} with ${instructions.instructions.length} steps`);
 
                         // SYNC TO ENTITY TABLE (Critical for App UI) via MovementRepository
                         try {
@@ -185,6 +190,8 @@ export class AssetOrchestrator {
                         } catch (e: any) {
                             console.error(`[Orchestrator] Entity sync failed: ${e.message}`);
                         }
+                    } else {
+                        console.warn(`[Orchestrator] Meta generation returned empty for ${id}`);
                     }
                 }
 
