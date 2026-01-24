@@ -55,8 +55,51 @@ export class AssetOrchestrator {
         const existing = await AssetRepository.findByKey(uKey);
         if (existing) {
             if (existing.status === 'active' && !force) {
+                // BACKFILL: Even if asset exists, update text_context if missing
+                const needsTextBackfill = !existing.metadata?.text_context && !existing.metadata?.text_context_simple;
+                if (needsTextBackfill && (type === 'ex' || type === 'meal')) {
+                    console.log(`[Orchestrator] Backfilling text for existing asset ${keyStr}`);
+                    try {
+                        // Fetch instructions from meta
+                        const metaKey = uKey.toMetaKey();
+                        const metaAsset = await AssetRepository.findByKey(metaKey);
+                        let instructions: any = {};
+                        if (metaAsset && metaAsset.buffer) {
+                            try { instructions = JSON.parse(metaAsset.buffer.toString()); } catch {}
+                        }
+                        
+                        let textDetailed = '';
+                        let textSimple = '';
+                        if (subtype === 'main') {
+                            textDetailed = instructions.description || '';
+                            textSimple = id.replace(/_/g, ' ');
+                        } else if (subtype === 'step') {
+                            const stepData = instructions.instructions?.[index - 1];
+                            textDetailed = stepData?.detailed || stepData?.instruction || '';
+                            textSimple = stepData?.simple || '';
+                        }
+                        
+                        if (textDetailed || textSimple) {
+                            await AssetRepository.save(uKey, {
+                                status: 'active',
+                                type: existing.asset_type || 'image',
+                                metadata: {
+                                    ...existing.metadata,
+                                    movementId: id,
+                                    persona: persona,
+                                    stepIndex: subtype === 'step' ? index : null,
+                                    textContext: textDetailed,
+                                    textContextSimple: textSimple
+                                }
+                            });
+                            console.log(`[Orchestrator] Text backfilled for ${keyStr}: "${textSimple}" / "${textDetailed.substring(0,50)}..."`);
+                        }
+                    } catch (e: any) {
+                        console.warn(`[Orchestrator] Text backfill failed for ${keyStr}: ${e.message}`);
+                    }
+                }
                 // #region agent log
-                const logEntry4 = JSON.stringify({location:'AssetOrchestrator.ts:40',message:'Asset exists, skipping',data:{keyStr,status:existing.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'}) + '\n';
+                const logEntry4 = JSON.stringify({location:'AssetOrchestrator.ts:40',message:'Asset exists',data:{keyStr,status:existing.status,needsTextBackfill},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'}) + '\n';
                 fs.appendFile(logPath, logEntry4).catch(()=>{});
                 // #endregion
                 return 'EXISTS';
@@ -86,6 +129,10 @@ export class AssetOrchestrator {
             // 2. Resolve Context/Prompt
             let instruction = "";
             let context = "";
+            
+            // IMPORTANT: Declare text variables at try-block scope so they're accessible when saving
+            let textDetailed = '';
+            let textSimple = '';
 
             if (type === 'ex' || type === 'meal') {
                 // Fetch Meta Asset
@@ -120,21 +167,18 @@ export class AssetOrchestrator {
                     }
                 }
 
-            // Get Step/Main Text - capture both detailed and simple for DB storage
-            let textDetailed = '';
-            let textSimple = '';
-            
-            if (subtype === 'main') {
-                instruction = instructions.description || `${id.replace(/_/g, ' ')} main hero shot.`;
-                textDetailed = instructions.description || '';
-                textSimple = id.replace(/_/g, ' ');
-            } else if (subtype === 'step') {
-                const stepData = instructions.instructions?.[index - 1];
-                instruction = stepData?.detailed || stepData?.instruction || `Step ${index}`;
-                textDetailed = stepData?.detailed || stepData?.instruction || '';
-                textSimple = stepData?.simple || '';
+                // Get Step/Main Text - capture both detailed and simple for DB storage
+                if (subtype === 'main') {
+                    instruction = instructions.description || `${id.replace(/_/g, ' ')} main hero shot.`;
+                    textDetailed = instructions.description || '';
+                    textSimple = id.replace(/_/g, ' ');
+                } else if (subtype === 'step') {
+                    const stepData = instructions.instructions?.[index - 1];
+                    instruction = stepData?.detailed || stepData?.instruction || `Step ${index}`;
+                    textDetailed = stepData?.detailed || stepData?.instruction || '';
+                    textSimple = stepData?.simple || '';
+                }
             }
-        }
 
 
             // 3. Construct Prompt with Unified Logic
