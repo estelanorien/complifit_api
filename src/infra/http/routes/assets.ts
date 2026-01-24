@@ -321,30 +321,17 @@ export async function assetsRoutes(app: FastifyInstance) {
 
   app.post('/assets/by-movement', { preHandler: authGuard }, async (req: any, reply: any) => {
     const body = z.object({ movementId: z.string(), limit: z.number().min(1).max(100).optional() }).parse(req.body || {});
-    const limit = body.limit || 100; // Increased from 20
+    const limit = body.limit || 100;
 
-    let movementId = body.movementId;
-    req.log.info(`[by-movement] Query for movementId: ${movementId}, limit: ${limit}`);
-
-    // Resolve alias to canonical ID if possible
-    try {
-      const isMeal = movementId.startsWith('meal_');
-      const isExercise = movementId.startsWith('movement_');
-      const type = isMeal ? 'meal' : (isExercise ? 'exercise' : 'meal'); // Default to meal if uncertain
-
-      const cleanName = movementId.replace(/^(meal_|movement_)/, '').replace(/_/g, ' ');
-      const canonical = await canonicalService.getCanonicalId(cleanName, type);
-      if (canonical && canonical.canonicalId) {
-        req.log.info(`[by-movement] Resolved ${movementId} -> ${canonical.canonicalId}`);
-        movementId = canonical.canonicalId;
-      }
-    } catch (e) {
-      req.log.warn(`[Assets] Alias resolution failed for ${movementId}, falling back to literal key`);
-    }
+    // CRITICAL FIX: Keep original movementId for pattern searches
+    // The canonical service was changing the ID which caused searches to fail
+    const originalMovementId = body.movementId;
+    req.log.info(`[by-movement] Query for movementId: ${originalMovementId}, limit: ${limit}`);
 
     // FIX: Search for keys with COLON separators (UnifiedKey format: type:id:persona:subtype:index)
     // Keys are stored as ex:movement_id:atlas:main:0, meal:movement_id:none:step:1, etc.
-    req.log.info(`[by-movement] Searching with patterns: ex:${movementId}:%, meal:${movementId}:%`);
+    // Use ORIGINAL movementId for ALL pattern matches - don't let canonical service change it
+    req.log.info(`[by-movement] Searching with patterns: ex:${originalMovementId}:%, meal:${originalMovementId}:%`);
 
     const { rows } = await pool.query(
       `SELECT a.key, a.value, a.asset_type, a.status, a.created_at,
@@ -362,10 +349,10 @@ export async function assetsRoutes(app: FastifyInstance) {
            OR a.key LIKE $6
         ORDER BY a.created_at DESC
         LIMIT $7`,
-      [movementId, `ex:${movementId}:%`, `meal:${movementId}:%`, `ex_${movementId}%`, `meal_${movementId}%`, `${movementId}%`, limit]
+      [originalMovementId, `ex:${originalMovementId}:%`, `meal:${originalMovementId}:%`, `ex_${originalMovementId}%`, `meal_${originalMovementId}%`, `${originalMovementId}%`, limit]
     );
 
-    req.log.info(`[by-movement] Found ${rows.length} rows for ${movementId}`);
+    req.log.info(`[by-movement] Found ${rows.length} rows for ${originalMovementId}`);
     // Ensure image values have proper data:image prefix for frontend display
     const processedRows = rows.map((row: any) => {
       if (row.asset_type === 'image' && row.value && typeof row.value === 'string') {
@@ -383,11 +370,11 @@ export async function assetsRoutes(app: FastifyInstance) {
     // DEBUG: Log what we're returning
     req.log.info({
       message: '[by-movement] Returning data',
-      movementId,
+      movementId: originalMovementId,
       totalRows: processedRows.length,
       keys: processedRows.map((r: any) => r.key),
       hasTextContext: processedRows.filter((r: any) => r.text_context || r.text_context_simple).length,
-      metaJsonKeys: processedRows.filter((r: any) => r.key?.endsWith('_meta') && r.asset_type === 'json').map((r: any) => r.key)
+      metaJsonKeys: processedRows.filter((r: any) => r.key?.includes(':meta:') || r.key?.endsWith('_meta')).map((r: any) => r.key)
     });
 
     return processedRows;

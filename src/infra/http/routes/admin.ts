@@ -765,7 +765,10 @@ export async function adminRoutes(app: FastifyInstance) {
         let stepCount = 6; // Default fallback
         try {
           const movementId = AssetPromptService.normalizeToId(item.name);
-          const metaKey = item.type === 'ex' ? `ex_${movementId}_meta` : `meal_${movementId}_meta`;
+          // CRITICAL FIX: Use UnifiedKey format for meta key (was using old underscore format)
+          const metaKey = item.type === 'ex' 
+            ? `ex:${movementId}:none:meta:0` 
+            : `meal:${movementId}:none:meta:0`;
           const metaAsset = await AssetRepository.findByKey(metaKey);
           if (metaAsset?.value) {
             const parsed = JSON.parse(metaAsset.value);
