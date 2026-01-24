@@ -120,14 +120,21 @@ export class AssetOrchestrator {
                     }
                 }
 
-                // Get Step/Main Text
-                if (subtype === 'main') {
-                    instruction = instructions.description || `${id.replace(/_/g, ' ')} main hero shot.`;
-                } else if (subtype === 'step') {
-                    const stepData = instructions.instructions?.[index - 1];
-                    instruction = stepData?.detailed || stepData?.instruction || `Step ${index}`;
-                }
+            // Get Step/Main Text - capture both detailed and simple for DB storage
+            let textDetailed = '';
+            let textSimple = '';
+            
+            if (subtype === 'main') {
+                instruction = instructions.description || `${id.replace(/_/g, ' ')} main hero shot.`;
+                textDetailed = instructions.description || '';
+                textSimple = id.replace(/_/g, ' ');
+            } else if (subtype === 'step') {
+                const stepData = instructions.instructions?.[index - 1];
+                instruction = stepData?.detailed || stepData?.instruction || `Step ${index}`;
+                textDetailed = stepData?.detailed || stepData?.instruction || '';
+                textSimple = stepData?.simple || '';
             }
+        }
 
 
             // 3. Construct Prompt with Unified Logic
@@ -209,7 +216,7 @@ export class AssetOrchestrator {
                 throw lastError || new Error('Image generation failed after retries');
             }
 
-            // 5. Store via Repository
+            // 5. Store via Repository - include text_context for UI display
             const buffer = Buffer.from(result.base64.replace(/^data:image\/\w+;base64,/, ""), 'base64');
             await AssetRepository.save(uKey, {
                 buffer,
@@ -219,7 +226,9 @@ export class AssetOrchestrator {
                     prompt: finalPrompt,
                     movementId: id, // Save the slug for searchability (camelCase for AssetRepository)
                     persona: persona,
-                    stepIndex: subtype === 'step' ? index : null
+                    stepIndex: subtype === 'step' ? index : null,
+                    textContext: textDetailed, // Detailed narration text
+                    textContextSimple: textSimple // Simple cue text
                 }
             });
 
