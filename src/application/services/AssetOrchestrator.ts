@@ -71,7 +71,8 @@ export class AssetOrchestrator {
                         }
                         
                         // CRITICAL: If meta is empty/broken, REGENERATE it
-                        if (!instructions.instructions || !Array.isArray(instructions.instructions)) {
+                        // FIX: Also check for EMPTY arrays (length === 0)
+                        if (!instructions.instructions || !Array.isArray(instructions.instructions) || instructions.instructions.length === 0) {
                             console.log(`[Orchestrator] Meta empty/broken for ${id}, regenerating...`);
                             const newInstr = await AssetPromptService.generateInstructions(id.replace(/_/g, ' '), type === 'ex' ? 'exercise' : 'meal');
                             if (newInstr && newInstr.instructions) {
@@ -164,9 +165,9 @@ export class AssetOrchestrator {
                     try { instructions = JSON.parse(metaContent); } catch { }
                 }
 
-                // Auto-Generate Meta if missing
-                if (!instructions.instructions || !Array.isArray(instructions.instructions)) {
-                    console.log(`[Orchestrator] Missing instructions for ${id}, generating meta...`);
+                // Auto-Generate Meta if missing (also regenerate if empty array)
+                if (!instructions.instructions || !Array.isArray(instructions.instructions) || instructions.instructions.length === 0) {
+                    console.log(`[Orchestrator] Missing/empty instructions for ${id}, generating meta...`);
                     const newInstr = await AssetPromptService.generateInstructions(id.replace(/_/g, ' '), type === 'ex' ? 'exercise' : 'meal');
                     if (newInstr) {
                         await AssetRepository.save(metaKey, {
