@@ -66,8 +66,24 @@ export class AssetOrchestrator {
                         let instructions: any = {};
                         // Check both buffer (blob storage) AND value (cached_assets.value string)
                         const metaContent = metaAsset?.buffer?.toString() || metaAsset?.value;
-                        if (metaContent) {
+                        if (metaContent && metaContent.length > 0) {
                             try { instructions = JSON.parse(metaContent); } catch {}
+                        }
+                        
+                        // CRITICAL: If meta is empty/broken, REGENERATE it
+                        if (!instructions.instructions || !Array.isArray(instructions.instructions)) {
+                            console.log(`[Orchestrator] Meta empty/broken for ${id}, regenerating...`);
+                            const newInstr = await AssetPromptService.generateInstructions(id.replace(/_/g, ' '), type === 'ex' ? 'exercise' : 'meal');
+                            if (newInstr && newInstr.instructions) {
+                                await AssetRepository.save(metaKey, {
+                                    buffer: Buffer.from(JSON.stringify(newInstr)),
+                                    status: 'active',
+                                    type: 'json',
+                                    metadata: { movementId: id }
+                                });
+                                instructions = newInstr;
+                                console.log(`[Orchestrator] Meta regenerated for ${id} with ${instructions.instructions?.length || 0} steps`);
+                            }
                         }
                         
                         let textDetailed = '';
