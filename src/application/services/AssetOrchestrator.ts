@@ -99,6 +99,15 @@ export class AssetOrchestrator {
                             const stepData = instructions.instructions?.[index - 1];
                             textDetailed = stepData?.detailed || stepData?.instruction || '';
                             textSimple = stepData?.simple || '';
+                            
+                            // FALLBACK: If meta has no step data, generate simple default
+                            // This ensures text always gets saved even if meta regeneration fails
+                            if (!textDetailed && !textSimple) {
+                                const exerciseName = id.replace(/_/g, ' ');
+                                textSimple = `Step ${index}`;
+                                textDetailed = `${exerciseName} - execution step ${index}`;
+                                console.log(`[Orchestrator] Using fallback text for ${keyStr}`);
+                            }
                         }
                         
                         if (textDetailed || textSimple) {
@@ -205,6 +214,13 @@ export class AssetOrchestrator {
                     instruction = stepData?.detailed || stepData?.instruction || `Step ${index}`;
                     textDetailed = stepData?.detailed || stepData?.instruction || '';
                     textSimple = stepData?.simple || '';
+                    
+                    // FALLBACK: If meta has no step data, generate simple default
+                    if (!textDetailed && !textSimple) {
+                        const exerciseName = id.replace(/_/g, ' ');
+                        textSimple = `Step ${index}`;
+                        textDetailed = `${exerciseName} - execution step ${index}`;
+                    }
                 }
             }
 
