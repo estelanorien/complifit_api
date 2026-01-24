@@ -64,8 +64,10 @@ export class AssetOrchestrator {
                         const metaKey = uKey.toMetaKey();
                         const metaAsset = await AssetRepository.findByKey(metaKey);
                         let instructions: any = {};
-                        if (metaAsset && metaAsset.buffer) {
-                            try { instructions = JSON.parse(metaAsset.buffer.toString()); } catch {}
+                        // Check both buffer (blob storage) AND value (cached_assets.value string)
+                        const metaContent = metaAsset?.buffer?.toString() || metaAsset?.value;
+                        if (metaContent) {
+                            try { instructions = JSON.parse(metaContent); } catch {}
                         }
                         
                         let textDetailed = '';
@@ -140,8 +142,10 @@ export class AssetOrchestrator {
                 const metaAsset = await AssetRepository.findByKey(metaKey);
 
                 let instructions: any = {};
-                if (metaAsset && metaAsset.buffer && metaAsset.buffer.length > 0) {
-                    try { instructions = JSON.parse(metaAsset.buffer.toString()); } catch { }
+                // Check both buffer (blob storage) AND value (cached_assets.value string)
+                const metaContent = metaAsset?.buffer?.toString() || metaAsset?.value;
+                if (metaContent && metaContent.length > 0) {
+                    try { instructions = JSON.parse(metaContent); } catch { }
                 }
 
                 // Auto-Generate Meta if missing

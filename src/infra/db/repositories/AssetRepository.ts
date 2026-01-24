@@ -31,10 +31,16 @@ export class AssetRepository {
         }
     ): Promise<void> {
         const keyStr = key.toString();
-        const { value = '', buffer, status, type, metadata = {} } = data;
+        let { value = '', buffer, status, type, metadata = {} } = data;
+
+        // CRITICAL FIX: For JSON types, if buffer is provided but no value, convert buffer to string
+        // This ensures meta JSON is properly stored and retrievable
+        if (type === 'json' && buffer && buffer.length > 0 && !value) {
+            value = buffer.toString('utf-8');
+        }
 
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AssetRepository.ts:33',message:'save entry',data:{keyStr,type,status,hasValue:!!value,valueLength:value?.length||0,hasBuffer:!!buffer,bufferLength:buffer?.length||0,hasMetadata:!!metadata,metadataKeys:Object.keys(metadata||{}),movementId:metadata?.movementId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AssetRepository.ts:33',message:'save entry',data:{keyStr,type,status,hasValue:!!value,valueLength:value?.length||0,hasBuffer:!!buffer,bufferLength:buffer?.length||0,hasMetadata:!!metadata,metadataKeys:Object.keys(metadata||{}),movementId:metadata?.movementId,convertedBufferToValue:type==='json'&&buffer&&buffer.length>0&&!data.value},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'})}).catch(()=>{});
         // #endregion
 
         const client = await pool.connect();
