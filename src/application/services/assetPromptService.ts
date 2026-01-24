@@ -291,6 +291,94 @@ export class AssetPromptService {
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:278',message:'generateInstructions error after retries',data:{name,type,error:lastError?.message,attempts:maxRetries},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'})}).catch(()=>{});
         // #endregion
-        return { description: name, instructions: [] };
+        
+        // IMPORTANT: Return meaningful fallback instead of empty instructions
+        // This ensures text ALWAYS gets saved, even if AI fails
+        return this.generateFallbackInstructions(name, type);
+    }
+    
+    /**
+     * Generate meaningful fallback instructions when AI is unavailable.
+     * These are generic but usable defaults based on the exercise/meal name.
+     */
+    static generateFallbackInstructions(name: string, type: 'exercise' | 'meal'): any {
+        console.log(`[AssetPromptService] Generating fallback instructions for ${name} (${type})`);
+        
+        const cleanName = name.replace(/_/g, ' ').toLowerCase();
+        
+        if (type === 'exercise') {
+            // Generate generic exercise steps based on common patterns
+            const isCardio = /sprint|run|jog|walk|jump|burpee|mountain|skip|hop/i.test(cleanName);
+            const isStrength = /press|squat|deadlift|curl|row|push|pull|lift|raise/i.test(cleanName);
+            const isStretch = /stretch|yoga|flex|bend|twist/i.test(cleanName);
+            
+            let steps: any[] = [];
+            
+            if (isCardio) {
+                steps = [
+                    { label: "Setup", detailed: `Find a clear, flat space for ${name}. Ensure you have proper footwear.`, simple: "Clear space, proper shoes." },
+                    { label: "Warm-up", detailed: "Perform light dynamic stretches - leg swings, arm circles, and light jogging in place for 2-3 minutes.", simple: "Dynamic warm-up 2-3 min." },
+                    { label: "Starting Position", detailed: "Stand tall with feet hip-width apart, core engaged, arms ready at your sides.", simple: "Stand tall, core engaged." },
+                    { label: "Execute Movement", detailed: `Begin ${name} with controlled intensity. Focus on proper form and breathing.`, simple: "Start with good form." },
+                    { label: "Maintain Form", detailed: "Keep your posture upright, breathe rhythmically, and maintain consistent pace.", simple: "Keep posture, breathe steady." },
+                    { label: "Cool Down", detailed: "Gradually reduce intensity. Walk for 1-2 minutes to lower heart rate.", simple: "Slow down gradually." }
+                ];
+            } else if (isStrength) {
+                steps = [
+                    { label: "Setup", detailed: `Position yourself for ${name}. Check equipment and ensure proper weight selection.`, simple: "Setup equipment safely." },
+                    { label: "Starting Position", detailed: "Assume the starting position with proper grip, stance, and core braced.", simple: "Proper grip and stance." },
+                    { label: "Initiate Movement", detailed: "Begin the movement with controlled tempo. Focus on the target muscles.", simple: "Start controlled movement." },
+                    { label: "Peak Contraction", detailed: "At the top of the movement, squeeze the target muscles briefly.", simple: "Squeeze at the top." },
+                    { label: "Controlled Return", detailed: "Lower the weight with control, maintaining tension throughout.", simple: "Lower with control." },
+                    { label: "Complete Rep", detailed: "Return to starting position. Reset and prepare for the next repetition.", simple: "Reset for next rep." }
+                ];
+            } else {
+                // Generic exercise steps
+                steps = [
+                    { label: "Preparation", detailed: `Prepare for ${name}. Clear your space and gather any needed equipment.`, simple: "Prepare your space." },
+                    { label: "Starting Position", detailed: "Position your body correctly for the movement. Engage your core.", simple: "Get in position." },
+                    { label: "Execute Phase 1", detailed: "Begin the first phase of the movement with proper technique.", simple: "Start the movement." },
+                    { label: "Execute Phase 2", detailed: "Continue through the movement pattern with controlled motion.", simple: "Continue with control." },
+                    { label: "Complete Movement", detailed: "Finish the movement and return to starting position.", simple: "Return to start." },
+                    { label: "Reset", detailed: "Reset your position and prepare for the next repetition.", simple: "Reset and repeat." }
+                ];
+            }
+            
+            return {
+                description: `${name} - a ${isCardio ? 'cardiovascular' : isStrength ? 'strength' : 'fitness'} exercise for improving overall fitness.`,
+                instructions: steps,
+                safety_warnings: [
+                    "Always warm up before exercising",
+                    "Stop if you feel sharp pain",
+                    "Stay hydrated throughout"
+                ],
+                pro_tips: [
+                    "Focus on form over speed",
+                    "Breathe consistently throughout",
+                    "Progress gradually over time"
+                ],
+                common_mistakes: [
+                    "Rushing through repetitions",
+                    "Holding your breath",
+                    "Ignoring proper form"
+                ]
+            };
+        } else {
+            // Meal fallback
+            return {
+                description: `${name} - a nutritious meal option.`,
+                instructions: [
+                    { label: "Gather Ingredients", detailed: `Collect all ingredients needed for ${name}.`, simple: "Gather ingredients." },
+                    { label: "Prep Work", detailed: "Wash, chop, and measure all ingredients before cooking.", simple: "Prep all ingredients." },
+                    { label: "Cook Base", detailed: "Start cooking the main components of the dish.", simple: "Cook main ingredients." },
+                    { label: "Combine", detailed: "Combine all ingredients according to the recipe.", simple: "Combine ingredients." },
+                    { label: "Season", detailed: "Add seasonings and adjust to taste.", simple: "Season to taste." },
+                    { label: "Serve", detailed: "Plate the dish and serve while fresh.", simple: "Plate and serve." }
+                ],
+                nutrition_science: "This meal provides essential nutrients for a balanced diet.",
+                prep_tips: ["Prep ingredients in advance", "Use fresh ingredients when possible", "Season gradually"],
+                allergens: ["Check individual ingredients for allergens"]
+            };
+        }
     }
 }
