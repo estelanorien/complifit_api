@@ -335,9 +335,13 @@ export async function assetsRoutes(app: FastifyInstance) {
 
     // CRITICAL FIX: Join asset_blob_storage to get actual image data
     // Images are stored in asset_blob_storage.data, NOT in cached_assets.value
+    // BUT: For JSON assets (like meta), use a.value directly - don't return blob data
     const { rows } = await pool.query(
       `SELECT a.key, 
-               COALESCE(ENCODE(b.data, 'base64'), a.value) as value,
+               CASE 
+                 WHEN a.asset_type = 'image' THEN COALESCE(ENCODE(b.data, 'base64'), a.value)
+                 ELSE a.value
+               END as value,
                a.asset_type, a.status, a.created_at,
                m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id,
                m.translation_status, m.translation_error,
