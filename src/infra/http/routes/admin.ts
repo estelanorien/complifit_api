@@ -455,13 +455,13 @@ export async function adminRoutes(app: FastifyInstance) {
         ? `ex:${normalizedId.replace(/^ex:/, '')}:none:meta:0`
         : `meal:${normalizedId.replace(/^meal:/, '')}:none:meta:0`;
 
-      // Delete existing meta
+      // Delete existing meta (cached_asset_meta uses "key", not "asset_key")
       await pool.query(
         `DELETE FROM cached_assets WHERE key = $1`,
         [metaKey]
       );
       await pool.query(
-        `DELETE FROM cached_asset_meta WHERE asset_key = $1`,
+        `DELETE FROM cached_asset_meta WHERE key = $1`,
         [metaKey]
       );
 
