@@ -488,19 +488,25 @@ export class JobProcessor {
                     const canonicalHash = this.getContentHash(stepText);
                     const canonicalStepKey = `${baseKey}_step_${stepIndex}_${canonicalHash}`;
 
-                    const stepPrompt = `Food preparation step for ${canonicalName}: ${stepText}. Close-up, professional food photography style. ${VITALITY_IMAGE_STYLE}. No text.`;
+                    // CRITICAL: Meal step images must show PREPARATION ACTION, not finished dish
+                    // Extract action verbs from step text (chop, stir, season, heat, etc.)
+                    const actionWords = stepText.match(/\b(chop|slice|dice|mince|stir|mix|season|heat|sauté|fry|boil|simmer|add|pour|combine|fold|whisk|marinate|rub|coat|arrange|garnish|plate|serve)\w*/gi) || [];
+                    const actionPhrase = actionWords.length > 0 ? actionWords[0] : "preparing";
+                    const stepPrompt = `Professional food photography: Chef hands ${actionPhrase} for ${canonicalName}. Step: ${stepText}. Close-up on hands, ingredients, and cooking action. In-progress preparation, NOT finished dish. Bright kitchen setting. ${VITALITY_IMAGE_STYLE}. No text, no labels, no finished plate.`;
 
                     // #region agent log
                     const fs = await import('fs/promises');
                     const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
-                    const logEntry = JSON.stringify({location:'jobProcessor.ts:491',message:'Meal step image generation',data:{name,stepIndex,stepText,stepTextLength:stepText.length,promptIncludesStepText:stepPrompt.includes(stepText),canonicalStepKey,originalStepKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.1'}) + '\n';
+                    const logEntry = JSON.stringify({location:'jobProcessor.ts:491',message:'Meal step image generation',data:{name,stepIndex,stepText,stepTextLength:stepText.length,actionPhrase,actionWords:actionWords.slice(0,3),promptIncludesStepText:stepPrompt.includes(stepText),canonicalStepKey,originalStepKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.1'}) + '\n';
                     fs.appendFile(logPath, logEntry).catch(()=>{});
                     // #endregion
 
                     try {
+                        // CRITICAL: Don't use main meal image as reference for steps - it biases toward finished dishes
+                        // Use kitchen background reference instead (or no reference)
                         const { base64: stepImg } = await aiService.generateImage({
-                            prompt: stepPrompt,
-                            referenceImage: mainImage // Use main meal as reference
+                            prompt: stepPrompt
+                            // Removed referenceImage: mainImage to prevent hero asset bias
                         });
                         // #region agent log
                         const logEntry2 = JSON.stringify({location:'jobProcessor.ts:494',message:'Meal step image generated',data:{name,stepIndex,hasStepImg:!!stepImg,stepImgLength:stepImg?.length||0,hasReferenceImage:!!mainImage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.1'}) + '\n';

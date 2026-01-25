@@ -193,9 +193,19 @@ export class AssetPromptService {
         // 3. Core Description
         let coreDescription = "";
         if (subtype === 'step') {
-            coreDescription = `ACTION: ${label || "Active Movement"}. ${context || "Performing the exercise with perfect form."} Single subject centered shot of ${groupName}.`;
+            if (groupType === 'meal') {
+                // For meal steps: emphasize preparation action (chopping, stirring, seasoning, etc.)
+                const actionHint = context ? `Chef hands ${context.toLowerCase()}` : "Chef hands actively preparing ingredients";
+                coreDescription = `PREPARATION ACTION: ${label || actionHint}. ${context || "Close-up of hands and ingredients during active cooking step."} Professional food photography, in-progress cooking, not finished dish.`;
+            } else {
+                coreDescription = `ACTION: ${label || "Active Movement"}. ${context || "Performing the exercise with perfect form."} Single subject centered shot of ${groupName}.`;
+            }
         } else {
-            coreDescription = `HERO POSE: ${groupName}. Full body execution. ${context || "Perfect professional form."}`;
+            if (groupType === 'meal') {
+                coreDescription = `HERO DISH: ${groupName}. Finished, plated presentation. Professional food photography.`;
+            } else {
+                coreDescription = `HERO POSE: ${groupName}. Full body execution. ${context || "Perfect professional form."}`;
+            }
         }
 
         let prompt = `${style}${backgroundStyle ? " ENVIRONMENT: " + backgroundStyle + "." : ""} SUBJECT: ${coreDescription}.`;

@@ -493,6 +493,182 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
+  // WIPE ASSET IMAGES AND TEXT (for regeneration with better prompts) - supports both meals and exercises
+  app.post('/admin/wipe-asset-images', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      const body = z.object({
+        movementId: z.string().optional(), // If provided, wipe only this asset group; otherwise wipe all
+        type: z.enum(['meal', 'exercise']).optional(), // Filter by type if provided
+        wipeText: z.boolean().optional().default(true) // Also wipe text instructions and translations
+      }).parse(req.body);
+
+      const { movementId, type, wipeText } = body;
+
+      if (movementId) {
+        // Wipe specific asset group (images + optionally text)
+        const normalizedId = normalizeToMovementId(movementId);
+        const prefix = type === 'exercise' ? 'ex' : (type === 'meal' ? 'meal' : null);
+        
+        let patterns: string[];
+        if (prefix) {
+          patterns = [
+            `${prefix}:${normalizedId}:%`,
+            `${prefix}_${normalizedId}%`
+          ];
+        } else {
+          // Try both patterns if type not specified
+          patterns = [
+            `ex:${normalizedId}:%`,
+            `meal:${normalizedId}:%`,
+            `ex_${normalizedId}%`,
+            `meal_${normalizedId}%`,
+            `${normalizedId}%`
+          ];
+        }
+
+        // 1. Delete images from cached_assets
+        const { rowCount: imageCount } = await pool.query(
+          `DELETE FROM cached_assets 
+           WHERE asset_type = 'image' 
+           AND (${patterns.map((_, i) => `key LIKE $${i + 1}`).join(' OR ')})
+           AND key NOT LIKE '%:meta:%'`,
+          patterns
+        );
+
+        // 2. Delete from blob storage
+        await pool.query(
+          `DELETE FROM asset_blob_storage 
+           WHERE ${patterns.map((_, i) => `key LIKE $${i + 1}`).join(' OR ')}`,
+          patterns
+        );
+
+        let textCount = 0;
+        let translationJobCount = 0;
+        let videoJobCount = 0;
+
+        if (wipeText) {
+          // 3. Clear text instructions from cached_asset_meta
+          const { rowCount: textRows } = await pool.query(
+            `UPDATE cached_asset_meta 
+             SET text_context = NULL, 
+                 text_context_simple = NULL,
+                 translation_status = NULL,
+                 translation_error = NULL,
+                 video_status = NULL,
+                 video_error = NULL
+             WHERE (${patterns.map((_, i) => `key LIKE $${i + 1}`).join(' OR ')})`,
+            patterns
+          );
+          textCount = textRows;
+
+          // 4. Delete translation jobs for these assets
+          const { rowCount: transJobs } = await pool.query(
+            `DELETE FROM translation_jobs 
+             WHERE asset_key IN (
+               SELECT key FROM cached_asset_meta 
+               WHERE ${patterns.map((_, i) => `key LIKE $${i + 1}`).join(' OR ')}
+             )`,
+            patterns
+          );
+          translationJobCount = transJobs;
+
+          // 5. Delete video jobs for these assets
+          const { rowCount: vidJobs } = await pool.query(
+            `DELETE FROM video_jobs 
+             WHERE asset_key IN (
+               SELECT key FROM cached_asset_meta 
+               WHERE ${patterns.map((_, i) => `key LIKE $${i + 1}`).join(' OR ')}
+             )`,
+            patterns
+          );
+          videoJobCount = vidJobs;
+        }
+
+        req.log.info({ movementId, type, imageCount, textCount, translationJobCount, videoJobCount }, 'Wiped asset data');
+        return reply.send({ 
+          success: true, 
+          message: `Wiped ${imageCount} images${wipeText ? `, ${textCount} text instructions, ${translationJobCount} translation jobs, ${videoJobCount} video jobs` : ''} for ${movementId}`, 
+          deletedCount: imageCount,
+          textCleared: textCount,
+          translationJobsDeleted: translationJobCount,
+          videoJobsDeleted: videoJobCount
+        });
+      } else {
+        // Wipe ALL (optionally filtered by type)
+        let keyFilter = '';
+        if (type === 'exercise') {
+          keyFilter = ` AND (key LIKE 'ex:%' OR key LIKE 'ex_%')`;
+        } else if (type === 'meal') {
+          keyFilter = ` AND (key LIKE 'meal:%' OR key LIKE 'meal_%')`;
+        } else {
+          keyFilter = ` AND (key LIKE 'ex:%' OR key LIKE 'meal:%' OR key LIKE 'ex_%' OR key LIKE 'meal_%')`;
+        }
+
+        // 1. Delete images
+        const { rowCount: imageCount } = await pool.query(
+          `DELETE FROM cached_assets 
+           WHERE asset_type = 'image' 
+           AND key NOT LIKE '%:meta:%'${keyFilter}`
+        );
+
+        await pool.query(
+          `DELETE FROM asset_blob_storage 
+           WHERE 1=1${keyFilter}`
+        );
+
+        let textCount = 0;
+        let translationJobCount = 0;
+        let videoJobCount = 0;
+
+        if (wipeText) {
+          // 2. Clear text instructions
+          const { rowCount: textRows } = await pool.query(
+            `UPDATE cached_asset_meta 
+             SET text_context = NULL, 
+                 text_context_simple = NULL,
+                 translation_status = NULL,
+                 translation_error = NULL,
+                 video_status = NULL,
+                 video_error = NULL
+             WHERE 1=1${keyFilter}`
+          );
+          textCount = textRows;
+
+          // 3. Delete translation jobs
+          const { rowCount: transJobs } = await pool.query(
+            `DELETE FROM translation_jobs 
+             WHERE asset_key IN (
+               SELECT key FROM cached_asset_meta WHERE 1=1${keyFilter}
+             )`
+          );
+          translationJobCount = transJobs;
+
+          // 4. Delete video jobs
+          const { rowCount: vidJobs } = await pool.query(
+            `DELETE FROM video_jobs 
+             WHERE asset_key IN (
+               SELECT key FROM cached_asset_meta WHERE 1=1${keyFilter}
+             )`
+          );
+          videoJobCount = vidJobs;
+        }
+
+        req.log.info({ type, imageCount, textCount, translationJobCount, videoJobCount }, 'Wiped all asset data');
+        return reply.send({ 
+          success: true, 
+          message: `Wiped ${imageCount} ${type || 'asset'} images${wipeText ? `, ${textCount} text instructions, ${translationJobCount} translation jobs, ${videoJobCount} video jobs` : ''}`, 
+          deletedCount: imageCount,
+          textCleared: textCount,
+          translationJobsDeleted: translationJobCount,
+          videoJobsDeleted: videoJobCount
+        });
+      }
+    } catch (e: any) {
+      req.log.error({ error: e, movementId: req.body?.movementId, type: req.body?.type }, 'Wipe asset data failed');
+      return reply.status(500).send({ error: `Failed to wipe asset data: ${e.message}` });
+    }
+  });
+
   // BEHAVIORAL CONFIG
   app.get('/admin/behavioral-config', { preHandler: adminGuard }, async (req: any, reply: any) => {
     try {
