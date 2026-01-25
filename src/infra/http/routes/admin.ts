@@ -439,10 +439,11 @@ export async function adminRoutes(app: FastifyInstance) {
     try {
       const body = z.object({
         movementId: z.string(),
-        type: z.enum(['exercise', 'meal']).optional()
+        type: z.enum(['exercise', 'meal']).optional(),
+        stepCount: z.number().int().min(1).max(20).optional()
       }).parse(req.body);
 
-      const { movementId, type } = body;
+      const { movementId, type, stepCount } = body;
       const normalizedId = normalizeToMovementId(movementId);
       
       // Determine type from movementId if not provided
@@ -465,12 +466,10 @@ export async function adminRoutes(app: FastifyInstance) {
         [metaKey]
       );
 
-      // Regenerate using AssetOrchestrator
-      const orchestrator = new AssetOrchestrator();
       const cleanName = normalizedId.replace(/^(ex|meal):/, '').replace(/_/g, ' ');
       
-      // Generate new instructions
-      const instructions = await AssetPromptService.generateInstructions(cleanName, assetType);
+      // Generate new instructions (stepCount ensures we cover all execution steps)
+      const instructions = await AssetPromptService.generateInstructions(cleanName, assetType, stepCount);
       
       // Save new meta
       const metaBuffer = Buffer.from(JSON.stringify(instructions), 'utf-8');

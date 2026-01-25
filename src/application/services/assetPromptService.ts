@@ -213,66 +213,58 @@ export class AssetPromptService {
         return { prompt, referenceImage: refImage, referenceType: refType };
     }
 
-    static async generateInstructions(name: string, type: 'exercise' | 'meal'): Promise<any> {
+    static async generateInstructions(name: string, type: 'exercise' | 'meal', stepCount?: number): Promise<any> {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:140',message:'generateInstructions entry',data:{name,type},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:140',message:'generateInstructions entry',data:{name,type,stepCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'})}).catch(()=>{});
         // #endregion
 
         const ai = new AiService();
-        
-        // Use the same high-quality "Golden Standard" prompt that the app uses
-        const fullPrompt = type === 'meal' 
-            ? `You are a professional chef and nutritionist. Generate "Golden Standard" recipe details for: "${name}".
+        const stepReq = stepCount != null
+            ? `Provide EXACTLY ${stepCount} steps—no more, no fewer.`
+            : (type === 'meal' ? 'Provide EXACTLY 8–10 steps.' : 'Provide at least 7, ideally 8–10 steps.');
 
-CRITICAL REQUIREMENTS:
-1. Provide EXACTLY 8-10 detailed cooking steps
-2. Each step MUST have both "simple" (5-10 words) and "detailed" (2-3 sentences with chef tips)
-3. Include specific temperatures, times, and techniques
-4. Be specific to THIS meal - no generic instructions
+        // Match user-triggered instruction quality (rerollInstructionText): imperative, coaching, safety per step.
+        const fullPrompt = type === 'meal'
+            ? `You are a professional chef and nutritionist. Generate recipe details for: "${name}".
+
+CRITICAL: ${stepReq}
+Each step MUST have:
+- "simple": Single short cue. Max 10 words. No safety sentence. Punchy action (e.g. "Sauté onions until golden", "Fold in cream gently").
+- "detailed": Max 3 sentences. 1) Execution detail (imperative, coaching). 2) Chef tip or technique. 3) Very short safety/caution tip for this step (e.g. avoid burns, sharp knives).
+Imperative only. No preambles like "Here are the instructions". No step numbers in output. Be specific to THIS meal.
 
 Return JSON:
 {
     "description": "A compelling 2-sentence description of this dish",
     "instructions": [
-        { "label": "Step title", "simple": "Brief 5-10 word summary", "detailed": "2-3 sentences with specific chef techniques and tips" }
+        { "label": "Step title", "simple": "Brief cue, max 10 words", "detailed": "Up to 3 sentences: execution, chef tip, short safety tip for this step." }
     ],
-    "nutrition_science": "A paragraph explaining the health benefits, key nutrients, and why this meal is good for you (3-4 sentences)",
-    "prep_tips": ["3 professional preparation tips specific to this dish"],
-    "allergens": ["List all potential allergens in this dish"],
-    "ingredients": ["List main ingredients"],
+    "nutrition_science": "Health benefits, key nutrients, why this meal is good for you (3-4 sentences)",
+    "prep_tips": ["3 professional prep tips for this dish"],
+    "allergens": ["Potential allergens"],
+    "ingredients": ["Main ingredients"],
     "macros": { "protein": 0, "carbs": 0, "fat": 0 },
     "calories": 0
 }`
-            : `You are a clinical physical therapist and movement specialist. Generate "Golden Standard" exercise instructions for: "${name}".
+            : `You are a clinical physical therapist and movement specialist. Generate exercise instructions for: "${name}".
 
-**CRITICAL: MINIMUM 7 INSTRUCTIONS REQUIRED.**
-You MUST generate at least 7, ideally 8-10 step-by-step instructions.
-Use "Micro-mechanics" to break down even simple moves into granular details:
-- Posture Setup (neck, shoulders, hips)
-- Initial Momentum/Drive
-- Mid-point Mechanics (breathing, core bracing)
-- Peak Contraction/Extension
-- Eccentric Control (lowering)
-- Transition/Reset
-
-STRICT OUTPUT RULES:
-- "simple": CUE mode - Short, punchy, 2-5 word action cue. (e.g. "Chest up", "Drive heels", "Squeeze glutes"). Max 5 words.
-- "detailed": DETAILED mode - Clinical physical therapy instruction describing precise biomechanics. 2-3 sentences with specific form cues.
-- Use "simple" for audio cues and "detailed" for reading.
-- IMPERATIVE COMMANDS ONLY.
-- Clinical precision. Physical Therapist tone.
+CRITICAL: ${stepReq}
+Each step MUST have:
+- "simple": Single short cue. Max 10 words. No safety sentence. Punchy action (e.g. "Chest up", "Drive heels", "Squeeze glutes").
+- "detailed": Max 3 sentences. 1) Execution detail (imperative, coaching, form cues). 2) Optional form/technique tip. 3) Very short safety tip for this step (how not to get hurt).
+Imperative only. No preambles. No step numbers in output. Clinical precision.
 
 Return JSON:
 {
     "description": "A compelling description of this exercise and its benefits",
     "instructions": [
-        { "label": "Step title", "simple": "2-5 word cue", "detailed": "2-3 sentences with clinical biomechanics and form cues" }
+        { "label": "Step title", "simple": "2-5 word cue", "detailed": "Up to 3 sentences: execution, form tip, short safety tip for this step." }
     ],
-    "safety_warnings": ["3 critical safety considerations for this exercise"],
-    "pro_tips": ["3 performance optimization tips"],
-    "common_mistakes": ["3 mistakes people commonly make with this exercise"],
+    "safety_warnings": ["3 critical safety considerations"],
+    "pro_tips": ["3 performance tips"],
+    "common_mistakes": ["3 common mistakes"],
     "target_muscles": ["Primary muscles worked"],
-    "equipment": ["Equipment needed, or 'bodyweight' if none"]
+    "equipment": ["Equipment or 'bodyweight'"]
 }`;
 
         // Retry logic for API overload errors
@@ -295,9 +287,10 @@ Return JSON:
                 const cleaned = cleanJson(res.text);
                 const parsed = JSON.parse(cleaned);
                 
-                // Validate we got meaningful content
-                if (!parsed.instructions || parsed.instructions.length < 6) {
-                    throw new Error(`AI returned insufficient instructions (${parsed.instructions?.length || 0} steps)`);
+                // Validate we got enough steps (stepCount when provided, else >= 6)
+                const minSteps = stepCount != null ? stepCount : 6;
+                if (!parsed.instructions || parsed.instructions.length < minSteps) {
+                    throw new Error(`AI returned insufficient instructions (${parsed.instructions?.length || 0} steps, need ${minSteps})`);
                 }
                 // #region agent log
                 fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:260',message:'generateInstructions success',data:{name,type,attempt,hasDescription:!!parsed.description,instructionsCount:parsed.instructions?.length||0,hasSafetyWarnings:!!parsed.safety_warnings,safetyWarningsCount:parsed.safety_warnings?.length||0,hasProTips:!!parsed.pro_tips,proTipsCount:parsed.pro_tips?.length||0,hasNutritionScience:!!parsed.nutrition_science,hasPrepTips:!!parsed.prep_tips,prepTipsCount:parsed.prep_tips?.length||0,firstInstructionHasSimple:!!parsed.instructions?.[0]?.simple,firstInstructionHasDetailed:!!parsed.instructions?.[0]?.detailed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'})}).catch(()=>{});
