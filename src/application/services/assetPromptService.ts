@@ -219,36 +219,50 @@ export class AssetPromptService {
         // #endregion
 
         const ai = new AiService();
-        const fullPrompt = `You are an expert fitness coach and nutritionist. Generate detailed instructions for the ${type === 'exercise' ? 'exercise' : 'meal'}: "${name}".
         
-        REQUIREMENTS:
-        - Return ONLY valid JSON.
-        - description: One sentence high-level summary.
-        - instructions: Array of 6 to 10 steps.
-        
-        IF EXERCISE:
-        - safety_warnings: Array of 3 critical safety tips.
-        - pro_tips: Array of 3 performance tips.
-        - common_mistakes: Array of 3 mistakes to avoid.
-        
-        IF MEAL:
-        - nutrition_science: A short paragraph explaining the health benefits.
-        - prep_tips: Array of 3 preparation tips.
-        - allergens: Array of potential allergens.
-        
-        JSON STRUCTURE:
-        {
-            "description": "...",
-            "instructions": [
-                { "label": "...", "detailed": "...", "simple": "..." }
-            ],
-            "safety_warnings": ["..."],
-            "pro_tips": ["..."],
-            "common_mistakes": ["..."],
-            "nutrition_science": "...",
-            "prep_tips": ["..."],
-            "allergens": ["..."]
-        }`;
+        // Use the same high-quality "Golden Standard" prompt that the app uses
+        const fullPrompt = type === 'meal' 
+            ? `You are a professional chef and nutritionist. Generate "Golden Standard" recipe details for: "${name}".
+
+CRITICAL REQUIREMENTS:
+1. Provide EXACTLY 8-10 detailed cooking steps
+2. Each step MUST have both "simple" (5-10 words) and "detailed" (2-3 sentences with chef tips)
+3. Include specific temperatures, times, and techniques
+4. Be specific to THIS meal - no generic instructions
+
+Return JSON:
+{
+    "description": "A compelling 2-sentence description of this dish",
+    "instructions": [
+        { "label": "Step title", "simple": "Brief 5-10 word summary", "detailed": "2-3 sentences with specific chef techniques and tips" }
+    ],
+    "nutrition_science": "A paragraph explaining the health benefits, key nutrients, and why this meal is good for you (3-4 sentences)",
+    "prep_tips": ["3 professional preparation tips specific to this dish"],
+    "allergens": ["List all potential allergens in this dish"],
+    "ingredients": ["List main ingredients"],
+    "macros": { "protein": 0, "carbs": 0, "fat": 0 },
+    "calories": 0
+}`
+            : `You are an expert fitness coach and movement specialist. Generate "Golden Standard" exercise instructions for: "${name}".
+
+CRITICAL REQUIREMENTS:
+1. Provide EXACTLY 6-8 detailed execution steps
+2. Each step MUST have both "simple" (5-10 words) and "detailed" (2-3 sentences with form cues)
+3. Include specific body positioning, breathing, and common corrections
+4. Be specific to THIS exercise - no generic instructions
+
+Return JSON:
+{
+    "description": "A compelling description of this exercise and its benefits",
+    "instructions": [
+        { "label": "Step title", "simple": "Brief 5-10 word cue", "detailed": "2-3 sentences with specific form cues and coaching points" }
+    ],
+    "safety_warnings": ["3 critical safety considerations for this exercise"],
+    "pro_tips": ["3 performance optimization tips"],
+    "common_mistakes": ["3 mistakes people commonly make with this exercise"],
+    "target_muscles": ["Primary muscles worked"],
+    "equipment": ["Equipment needed, or 'bodyweight' if none"]
+}`;
 
         // Retry logic for API overload errors
         let lastError: Error | null = null;
@@ -263,9 +277,17 @@ export class AssetPromptService {
                 }
                 // #endregion
                 
-                const res = await ai.generateText({ prompt: fullPrompt });
+                const res = await ai.generateText({ 
+                    prompt: fullPrompt,
+                    generationConfig: { responseMimeType: "application/json" }
+                });
                 const cleaned = cleanJson(res.text);
                 const parsed = JSON.parse(cleaned);
+                
+                // Validate we got meaningful content
+                if (!parsed.instructions || parsed.instructions.length < 6) {
+                    throw new Error(`AI returned insufficient instructions (${parsed.instructions?.length || 0} steps)`);
+                }
                 // #region agent log
                 fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:260',message:'generateInstructions success',data:{name,type,attempt,hasDescription:!!parsed.description,instructionsCount:parsed.instructions?.length||0,hasSafetyWarnings:!!parsed.safety_warnings,safetyWarningsCount:parsed.safety_warnings?.length||0,hasProTips:!!parsed.pro_tips,proTipsCount:parsed.pro_tips?.length||0,hasNutritionScience:!!parsed.nutrition_science,hasPrepTips:!!parsed.prep_tips,prepTipsCount:parsed.prep_tips?.length||0,firstInstructionHasSimple:!!parsed.instructions?.[0]?.simple,firstInstructionHasDetailed:!!parsed.instructions?.[0]?.detailed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5.1'})}).catch(()=>{});
                 // #endregion
