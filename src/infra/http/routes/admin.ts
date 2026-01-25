@@ -547,7 +547,26 @@ export async function adminRoutes(app: FastifyInstance) {
         let videoJobCount = 0;
 
         if (wipeText) {
-          // 3. Clear text instructions from cached_asset_meta
+          // 3. Clear text instructions from cached_asset_meta (use movement_id for more reliable matching)
+          // First, get all keys for this movement to ensure we catch everything
+          const { rows: metaRows } = await pool.query(
+            `SELECT key, text_context, text_context_simple, movement_id FROM cached_asset_meta 
+             WHERE movement_id = $1 
+             OR (${patterns.map((_, i) => `key LIKE $${i + 2}`).join(' OR ')})`,
+            [normalizedId, ...patterns]
+          );
+          const metaKeys = metaRows.map((r: any) => r.key);
+          const rowsWithText = metaRows.filter((r: any) => r.text_context || r.text_context_simple);
+          
+          req.log.info({ 
+            movementId: normalizedId, 
+            metaKeysFound: metaKeys.length, 
+            rowsWithText: rowsWithText.length,
+            metaKeysSample: metaKeys.slice(0, 5),
+            rowsWithTextSample: rowsWithText.slice(0, 3).map((r: any) => ({ key: r.key, hasText: !!(r.text_context || r.text_context_simple) }))
+          }, 'Before wiping text instructions');
+          
+          // Update by movement_id (most reliable) AND by key patterns (fallback)
           const { rowCount: textRows } = await pool.query(
             `UPDATE cached_asset_meta 
              SET text_context = NULL, 
@@ -556,19 +575,38 @@ export async function adminRoutes(app: FastifyInstance) {
                  translation_error = NULL,
                  video_status = NULL,
                  video_error = NULL
-             WHERE (${patterns.map((_, i) => `key LIKE $${i + 1}`).join(' OR ')})`,
-            patterns
+             WHERE movement_id = $1 
+             OR (${patterns.map((_, i) => `key LIKE $${i + 2}`).join(' OR ')})`,
+            [normalizedId, ...patterns]
           );
           textCount = textRows;
+          
+          // Verify deletion
+          const { rows: verifyRows } = await pool.query(
+            `SELECT key, text_context, text_context_simple FROM cached_asset_meta 
+             WHERE movement_id = $1 
+             OR (${patterns.map((_, i) => `key LIKE $${i + 2}`).join(' OR ')})`,
+            [normalizedId, ...patterns]
+          );
+          const stillHasText = verifyRows.filter((r: any) => r.text_context || r.text_context_simple);
+          
+          req.log.info({ 
+            movementId: normalizedId, 
+            textRowsUpdated: textRows,
+            verifyRowsCount: verifyRows.length,
+            stillHasTextCount: stillHasText.length,
+            stillHasTextSample: stillHasText.slice(0, 3).map((r: any) => r.key)
+          }, 'After wiping text instructions');
 
           // 4. Delete translation jobs for these assets
           const { rowCount: transJobs } = await pool.query(
             `DELETE FROM translation_jobs 
              WHERE asset_key IN (
                SELECT key FROM cached_asset_meta 
-               WHERE ${patterns.map((_, i) => `key LIKE $${i + 1}`).join(' OR ')}
+               WHERE movement_id = $1 
+               OR (${patterns.map((_, i) => `key LIKE $${i + 2}`).join(' OR ')})
              )`,
-            patterns
+            [normalizedId, ...patterns]
           );
           translationJobCount = transJobs;
 
@@ -577,9 +615,10 @@ export async function adminRoutes(app: FastifyInstance) {
             `DELETE FROM video_jobs 
              WHERE asset_key IN (
                SELECT key FROM cached_asset_meta 
-               WHERE ${patterns.map((_, i) => `key LIKE $${i + 1}`).join(' OR ')}
+               WHERE movement_id = $1 
+               OR (${patterns.map((_, i) => `key LIKE $${i + 2}`).join(' OR ')})
              )`,
-            patterns
+            [normalizedId, ...patterns]
           );
           videoJobCount = vidJobs;
         }
@@ -621,7 +660,7 @@ export async function adminRoutes(app: FastifyInstance) {
         let videoJobCount = 0;
 
         if (wipeText) {
-          // 2. Clear text instructions
+          // 2. Clear text instructions (match by key patterns)
           const { rowCount: textRows } = await pool.query(
             `UPDATE cached_asset_meta 
              SET text_context = NULL, 
@@ -633,6 +672,7 @@ export async function adminRoutes(app: FastifyInstance) {
              WHERE 1=1${keyFilter}`
           );
           textCount = textRows;
+          req.log.info({ type, textRowsUpdated: textRows }, 'Wiping all text instructions');
 
           // 3. Delete translation jobs
           const { rowCount: transJobs } = await pool.query(
@@ -666,6 +706,130 @@ export async function adminRoutes(app: FastifyInstance) {
     } catch (e: any) {
       req.log.error({ error: e, movementId: req.body?.movementId, type: req.body?.type }, 'Wipe asset data failed');
       return reply.status(500).send({ error: `Failed to wipe asset data: ${e.message}` });
+    }
+  });
+
+  // WIPE TEXT INSTRUCTIONS ONLY (separate from images)
+  app.post('/admin/wipe-asset-text', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      const body = z.object({
+        movementId: z.string().optional(),
+        type: z.enum(['meal', 'exercise']).optional()
+      }).parse(req.body);
+
+      const { movementId, type } = body;
+
+      if (movementId) {
+        const normalizedId = normalizeToMovementId(movementId);
+        const prefix = type === 'exercise' ? 'ex' : (type === 'meal' ? 'meal' : null);
+        
+        let patterns: string[];
+        if (prefix) {
+          patterns = [
+            `${prefix}:${normalizedId}:%`,
+            `${prefix}_${normalizedId}%`
+          ];
+        } else {
+          patterns = [
+            `ex:${normalizedId}:%`,
+            `meal:${normalizedId}:%`,
+            `ex_${normalizedId}%`,
+            `meal_${normalizedId}%`,
+            `${normalizedId}%`
+          ];
+        }
+
+        // Clear text by movement_id (most reliable) AND key patterns
+        const { rowCount: textRows } = await pool.query(
+          `UPDATE cached_asset_meta 
+           SET text_context = NULL, 
+               text_context_simple = NULL,
+               translation_status = NULL,
+               translation_error = NULL,
+               video_status = NULL,
+               video_error = NULL
+           WHERE movement_id = $1 
+           OR (${patterns.map((_, i) => `key LIKE $${i + 2}`).join(' OR ')})`,
+          [normalizedId, ...patterns]
+        );
+
+        // Delete translation and video jobs
+        const { rowCount: transJobs } = await pool.query(
+          `DELETE FROM translation_jobs 
+           WHERE asset_key IN (
+             SELECT key FROM cached_asset_meta 
+             WHERE movement_id = $1 
+             OR (${patterns.map((_, i) => `key LIKE $${i + 2}`).join(' OR ')})
+           )`,
+          [normalizedId, ...patterns]
+        );
+
+        const { rowCount: vidJobs } = await pool.query(
+          `DELETE FROM video_jobs 
+           WHERE asset_key IN (
+             SELECT key FROM cached_asset_meta 
+             WHERE movement_id = $1 
+             OR (${patterns.map((_, i) => `key LIKE $${i + 2}`).join(' OR ')})
+           )`,
+          [normalizedId, ...patterns]
+        );
+
+        req.log.info({ movementId: normalizedId, type, textRows, transJobs, vidJobs }, 'Wiped text instructions');
+        return reply.send({ 
+          success: true, 
+          message: `Wiped ${textRows} text instructions, ${transJobs} translation jobs, ${vidJobs} video jobs for ${movementId}`, 
+          textCleared: textRows,
+          translationJobsDeleted: transJobs,
+          videoJobsDeleted: vidJobs
+        });
+      } else {
+        // Wipe ALL text (optionally filtered by type)
+        let keyFilter = '';
+        if (type === 'exercise') {
+          keyFilter = ` AND (key LIKE 'ex:%' OR key LIKE 'ex_%')`;
+        } else if (type === 'meal') {
+          keyFilter = ` AND (key LIKE 'meal:%' OR key LIKE 'meal_%')`;
+        } else {
+          keyFilter = ` AND (key LIKE 'ex:%' OR key LIKE 'meal:%' OR key LIKE 'ex_%' OR key LIKE 'meal_%')`;
+        }
+
+        const { rowCount: textRows } = await pool.query(
+          `UPDATE cached_asset_meta 
+           SET text_context = NULL, 
+               text_context_simple = NULL,
+               translation_status = NULL,
+               translation_error = NULL,
+               video_status = NULL,
+               video_error = NULL
+           WHERE 1=1${keyFilter}`
+        );
+
+        const { rowCount: transJobs } = await pool.query(
+          `DELETE FROM translation_jobs 
+           WHERE asset_key IN (
+             SELECT key FROM cached_asset_meta WHERE 1=1${keyFilter}
+           )`
+        );
+
+        const { rowCount: vidJobs } = await pool.query(
+          `DELETE FROM video_jobs 
+           WHERE asset_key IN (
+             SELECT key FROM cached_asset_meta WHERE 1=1${keyFilter}
+           )`
+        );
+
+        req.log.info({ type, textRows, transJobs, vidJobs }, 'Wiped all text instructions');
+        return reply.send({ 
+          success: true, 
+          message: `Wiped ${textRows} ${type || 'asset'} text instructions, ${transJobs} translation jobs, ${vidJobs} video jobs`, 
+          textCleared: textRows,
+          translationJobsDeleted: transJobs,
+          videoJobsDeleted: vidJobs
+        });
+      }
+    } catch (e: any) {
+      req.log.error({ error: e, movementId: req.body?.movementId, type: req.body?.type }, 'Wipe text failed');
+      return reply.status(500).send({ error: `Failed to wipe text: ${e.message}` });
     }
   });
 
