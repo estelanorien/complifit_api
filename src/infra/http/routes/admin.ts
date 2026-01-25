@@ -434,6 +434,66 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
+  // FORCE REGENERATE META
+  app.post('/admin/force-regenerate-meta', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      const body = z.object({
+        movementId: z.string(),
+        type: z.enum(['exercise', 'meal']).optional()
+      }).parse(req.body);
+
+      const { movementId, type } = body;
+      const normalizedId = normalizeToMovementId(movementId);
+      
+      // Determine type from movementId if not provided
+      let assetType: 'exercise' | 'meal' = type || (normalizedId.startsWith('ex:') ? 'exercise' : 'meal');
+      if (normalizedId.startsWith('meal:')) assetType = 'meal';
+      if (normalizedId.startsWith('ex:')) assetType = 'exercise';
+
+      // Derive meta key
+      const metaKey = assetType === 'exercise' 
+        ? `ex:${normalizedId.replace(/^ex:/, '')}:none:meta:0`
+        : `meal:${normalizedId.replace(/^meal:/, '')}:none:meta:0`;
+
+      // Delete existing meta
+      await pool.query(
+        `DELETE FROM cached_assets WHERE key = $1`,
+        [metaKey]
+      );
+      await pool.query(
+        `DELETE FROM cached_asset_meta WHERE asset_key = $1`,
+        [metaKey]
+      );
+
+      // Regenerate using AssetOrchestrator
+      const orchestrator = new AssetOrchestrator();
+      const cleanName = normalizedId.replace(/^(ex|meal):/, '').replace(/_/g, ' ');
+      
+      // Generate new instructions
+      const instructions = await AssetPromptService.generateInstructions(cleanName, assetType);
+      
+      // Save new meta
+      const metaBuffer = Buffer.from(JSON.stringify(instructions), 'utf-8');
+      await AssetRepository.save(UnifiedKey.parse(metaKey), {
+        buffer: metaBuffer,
+        type: 'json',
+        status: 'active',
+        metadata: {}
+      });
+
+      req.log.info({ movementId, metaKey, instructionsCount: instructions.instructions?.length || 0 }, 'Force regenerated meta');
+
+      return reply.send({ 
+        success: true, 
+        message: `Meta regenerated for ${cleanName}`,
+        instructionsCount: instructions.instructions?.length || 0
+      });
+    } catch (e: any) {
+      req.log.error({ error: e, movementId: req.body?.movementId }, 'Force regenerate meta failed');
+      return reply.status(500).send({ error: `Failed to regenerate meta: ${e.message}` });
+    }
+  });
+
   // BEHAVIORAL CONFIG
   app.get('/admin/behavioral-config', { preHandler: adminGuard }, async (req: any, reply: any) => {
     try {

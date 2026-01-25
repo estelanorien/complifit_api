@@ -243,19 +243,30 @@ Return JSON:
     "macros": { "protein": 0, "carbs": 0, "fat": 0 },
     "calories": 0
 }`
-            : `You are an expert fitness coach and movement specialist. Generate "Golden Standard" exercise instructions for: "${name}".
+            : `You are a clinical physical therapist and movement specialist. Generate "Golden Standard" exercise instructions for: "${name}".
 
-CRITICAL REQUIREMENTS:
-1. Provide EXACTLY 6-8 detailed execution steps
-2. Each step MUST have both "simple" (5-10 words) and "detailed" (2-3 sentences with form cues)
-3. Include specific body positioning, breathing, and common corrections
-4. Be specific to THIS exercise - no generic instructions
+**CRITICAL: MINIMUM 7 INSTRUCTIONS REQUIRED.**
+You MUST generate at least 7, ideally 8-10 step-by-step instructions.
+Use "Micro-mechanics" to break down even simple moves into granular details:
+- Posture Setup (neck, shoulders, hips)
+- Initial Momentum/Drive
+- Mid-point Mechanics (breathing, core bracing)
+- Peak Contraction/Extension
+- Eccentric Control (lowering)
+- Transition/Reset
+
+STRICT OUTPUT RULES:
+- "simple": CUE mode - Short, punchy, 2-5 word action cue. (e.g. "Chest up", "Drive heels", "Squeeze glutes"). Max 5 words.
+- "detailed": DETAILED mode - Clinical physical therapy instruction describing precise biomechanics. 2-3 sentences with specific form cues.
+- Use "simple" for audio cues and "detailed" for reading.
+- IMPERATIVE COMMANDS ONLY.
+- Clinical precision. Physical Therapist tone.
 
 Return JSON:
 {
     "description": "A compelling description of this exercise and its benefits",
     "instructions": [
-        { "label": "Step title", "simple": "Brief 5-10 word cue", "detailed": "2-3 sentences with specific form cues and coaching points" }
+        { "label": "Step title", "simple": "2-5 word cue", "detailed": "2-3 sentences with clinical biomechanics and form cues" }
     ],
     "safety_warnings": ["3 critical safety considerations for this exercise"],
     "pro_tips": ["3 performance optimization tips"],
