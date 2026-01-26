@@ -320,6 +320,13 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   app.post('/assets/by-movement', { preHandler: authGuard }, async (req: any, reply: any) => {
+    // Ensure CORS headers are set for this route
+    const origin = req.headers.origin || '*';
+    reply.header('Access-Control-Allow-Origin', origin);
+    reply.header('Access-Control-Allow-Credentials', 'false');
+    reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
+    
     const body = z.object({ movementId: z.string(), limit: z.number().min(1).max(100).optional() }).parse(req.body || {});
     const limit = body.limit || 100;
 
