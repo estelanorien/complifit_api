@@ -18,8 +18,8 @@ export const DEFAULT_GUIDELINES: PromptGuidelines = {
     styleExerciseVideo: "Cinematic 4k fitness shot, dark gym, moody lighting, slow motion execution.",
     style3DAnatomyVideo: "3D anatomical render of [Subject]. Transparent biological skin, glowing emerald green muscle highlights on [Target Muscles]. Neutral studio background. Seamless loop motion. 4k resolution, high frame rate.",
     styleMealVideo: "Cinematic 4k food videography, slow motion cooking, delicious steam, chef preparation, moody lighting.",
-    coachMaleDescription: "Light-skinned Caucasian athletic male with a short dark buzz cut haircut, slight facial stubble, clean and sharp features. Wearing a dark grey performance t-shirt and black athletic shorts.",
-    coachFemaleDescription: "Platinum blonde Caucasian female athlete. High ponytail. Emerald green sports bra and black athletic leggings."
+    coachMaleDescription: "Light-skinned Caucasian athletic male with a short dark buzz cut haircut, slight facial stubble, clean and sharp features. Wearing a dark grey performance t-shirt, black athletic shorts, and athletic shoes (sports sneakers).",
+    coachFemaleDescription: "Platinum blonde Caucasian female athlete. High ponytail. Emerald green sports bra, black athletic leggings, and athletic shoes (sports sneakers)."
 } as any;
 
 function cleanJson(str: string): string {
