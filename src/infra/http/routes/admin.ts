@@ -1234,19 +1234,24 @@ export async function adminRoutes(app: FastifyInstance) {
           if (metaAsset?.value) {
             const parsed = JSON.parse(metaAsset.value);
             if (parsed.instructions && Array.isArray(parsed.instructions)) {
-              stepCount = parsed.instructions.length;
+              stepCount = Math.min(parsed.instructions.length, 10); // Cap at MAX_STEPS (10)
             }
           } else if (metaAsset?.buffer) {
             const parsed = JSON.parse(metaAsset.buffer.toString());
             if (parsed.instructions && Array.isArray(parsed.instructions)) {
-              stepCount = parsed.instructions.length;
+              stepCount = Math.min(parsed.instructions.length, 10); // Cap at MAX_STEPS (10)
             }
           }
+          // Ensure stepCount is at least 1 and capped at 10
+          stepCount = Math.max(1, Math.min(stepCount, 10));
         } catch (e) {
           // If meta doesn't exist yet, use default - will be generated first
         }
         
-        const manifest = await UnifiedAssetService.getManifest(item.type, item.id, item.name, stepCount);
+        // CRITICAL: Use slug (normalized name) for manifest, not UUID - manifest generates keys like ex:slug:nova:main:0
+        const movementSlug = AssetPromptService.normalizeToId(item.name);
+        const manifest = await UnifiedAssetService.getManifest(item.type, movementSlug, item.name, stepCount);
+        req.log.info({ msg: 'Manifest generated', itemName: item.name, movementSlug, stepCount, manifestKeys: manifest.filter(k => k.includes(':nova:main:') || k.includes(':atlas:main:')), totalKeys: manifest.length });
         tasks.push(...manifest);
         totalSteps += manifest.length;
       }

@@ -156,6 +156,14 @@ export class AssetOrchestrator {
 
         try {
             console.log(`[Orchestrator] Generating ${uKey.toString()}...`);
+            // #region agent log - Nova hero tracking
+            if (persona === 'nova' && subtype === 'main') {
+                const fs = await import('fs/promises');
+                const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
+                const logEntry = JSON.stringify({location:'AssetOrchestrator.ts:NOVA_HERO_START',message:'Nova hero generation started',data:{keyStr,type,id,persona,subtype,index},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H_NOVA_HERO'}) + '\n';
+                fs.appendFile(logPath, logEntry).catch(()=>{});
+            }
+            // #endregion
 
             // 2. Resolve Context/Prompt
             let instruction = "";
@@ -321,6 +329,14 @@ export class AssetOrchestrator {
             });
 
             console.log(`[Orchestrator] Success: ${uKey.toString()}`);
+            // #region agent log - Nova hero success
+            if (persona === 'nova' && subtype === 'main') {
+                const fs = await import('fs/promises');
+                const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
+                const logEntry = JSON.stringify({location:'AssetOrchestrator.ts:NOVA_HERO_SUCCESS',message:'Nova hero generation succeeded',data:{keyStr,type,id,persona,subtype,index,resultLength:result.base64?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H_NOVA_HERO'}) + '\n';
+                fs.appendFile(logPath, logEntry).catch(()=>{});
+            }
+            // #endregion
             return 'SUCCESS';
 
         } catch (e: any) {
@@ -329,11 +345,13 @@ export class AssetOrchestrator {
             // Log more details for debugging
             const fs = await import('fs/promises');
             const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
+            const isNovaHero = persona === 'nova' && subtype === 'main';
             const errorLog = JSON.stringify({
-                location: 'AssetOrchestrator.ts:CATCH',
-                message: 'Generation failed',
+                location: isNovaHero ? 'AssetOrchestrator.ts:NOVA_HERO_FAILED' : 'AssetOrchestrator.ts:CATCH',
+                message: isNovaHero ? 'Nova hero generation failed' : 'Generation failed',
                 data: { 
                     keyStr, 
+                    type, id, persona, subtype, index,
                     error: e.message, 
                     stack: e.stack?.substring(0, 300),
                     isSafetyBlock: e.message?.includes('SAFETY'),
@@ -343,7 +361,7 @@ export class AssetOrchestrator {
                 timestamp: Date.now(),
                 sessionId: 'debug-session',
                 runId: 'run1',
-                hypothesisId: 'H6.1'
+                hypothesisId: isNovaHero ? 'H_NOVA_HERO' : 'H6.1'
             }) + '\n';
             fs.appendFile(logPath, errorLog).catch(() => {});
             
