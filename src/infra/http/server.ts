@@ -100,6 +100,15 @@ export function buildServer() {
 
   app.register(cors, corsOptions);
 
+  // CRITICAL: Ensure CORS headers are always present on ALL responses (safety net)
+  app.addHook('onRequest', async (req: any, reply: any) => {
+    const origin = req.headers.origin || '*';
+    reply.header('Access-Control-Allow-Origin', origin);
+    reply.header('Access-Control-Allow-Credentials', 'false');
+    reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
+  });
+
   // Request ID middleware - must be registered early
   app.addHook('onRequest', requestIdMiddleware);
 
