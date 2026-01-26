@@ -57,6 +57,7 @@ coverage/
 *.sqlite
 *.sqlite3
 *.db
+*.backup
 
 # PM2
 .pm2/
