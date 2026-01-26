@@ -18,12 +18,20 @@ export async function authGuard(req: FastifyRequest, reply: FastifyReply) {
     }
     
     if (!token) {
+      // Ensure CORS headers are present on error responses
+      const origin = req.headers.origin || '*';
+      reply.header('Access-Control-Allow-Origin', origin);
+      reply.header('Access-Control-Allow-Credentials', 'false');
       return reply.status(401).send({ error: 'Unauthorized' });
     }
     
     const payload = authService.verifyToken(token);
     (req as any).user = payload;
   } catch (e) {
+    // Ensure CORS headers are present on error responses
+    const origin = req.headers.origin || '*';
+    reply.header('Access-Control-Allow-Origin', origin);
+    reply.header('Access-Control-Allow-Credentials', 'false');
     return reply.status(401).send({ error: 'Unauthorized' });
   }
 }

@@ -104,6 +104,13 @@ export async function errorHandler(
   req: FastifyRequest,
   reply: FastifyReply
 ) {
+  // Ensure CORS headers are present on error responses
+  const origin = req.headers.origin || '*';
+  reply.header('Access-Control-Allow-Origin', origin);
+  reply.header('Access-Control-Allow-Credentials', 'false');
+  reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
+  
   const requestId = (req as any).requestId || 'unknown';
   const isProduction = process.env.NODE_ENV === 'production';
   const userId = (req as any).user?.userId || null;
