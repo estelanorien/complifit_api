@@ -52,6 +52,6 @@ images:
   - 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/vitality-api:$COMMIT_SHA'
 
 options:
-  # LEGACY = logs in both Cloud Storage and Cloud Logging so they show in Build History UI
-  logging: LEGACY
+  # Custom SA (gemini@) requires CLOUD_LOGGING_ONLY or NONE — LEGACY is not allowed. Use fetch-build-log.ps1 if Console shows "No logs".
+  logging: CLOUD_LOGGING_ONLY
 
