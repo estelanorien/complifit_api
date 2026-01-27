@@ -329,87 +329,62 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   app.post('/assets/by-movement', { preHandler: authGuard }, async (req: any, reply: any) => {
-    reply.header('Access-Control-Allow-Origin', '*');
-    reply.header('Access-Control-Allow-Credentials', 'false');
-    reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
+    // CORS on every response path (success, error, and outer catch)
+    const corsHeaders = () => {
+      reply.header('Access-Control-Allow-Origin', '*');
+      reply.header('Access-Control-Allow-Credentials', 'false');
+      reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
+    };
+    corsHeaders();
 
     try {
       const body = z.object({ movementId: z.string(), limit: z.number().min(1).max(100).optional() }).parse(req.body || {});
-    const limit = body.limit || 100;
+      const limit = body.limit || 100;
+      const originalMovementId = body.movementId;
+      req.log.info(`[by-movement] Query for movementId: ${originalMovementId}, limit: ${limit}`);
 
-    // CRITICAL FIX: Keep original movementId for pattern searches
-    // The canonical service was changing the ID which caused searches to fail
-    const originalMovementId = body.movementId;
-    req.log.info(`[by-movement] Query for movementId: ${originalMovementId}, limit: ${limit}`);
+      const { rows } = await pool.query(
+        `SELECT a.key, 
+                 CASE 
+                   WHEN a.asset_type = 'image' THEN COALESCE(ENCODE(b.data, 'base64'), a.value)
+                   ELSE a.value
+                 END as value,
+                 a.asset_type, a.status, a.created_at,
+                 m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id,
+                 m.translation_status, m.translation_error,
+                 m.video_status, m.video_error,
+                 m.text_context, m.text_context_simple, m.step_index, m.persona
+          FROM cached_assets a
+          LEFT JOIN cached_asset_meta m ON m.key = a.key
+          LEFT JOIN asset_blob_storage b ON b.key = a.key
+          WHERE m.movement_id = $1 
+             OR a.key LIKE $2 
+             OR a.key LIKE $3
+             OR a.key LIKE $4 
+             OR a.key LIKE $5
+             OR a.key LIKE $6
+          ORDER BY a.created_at DESC
+          LIMIT $7`,
+        [originalMovementId, `ex:${originalMovementId}:%`, `meal:${originalMovementId}:%`, `ex_${originalMovementId}%`, `meal_${originalMovementId}%`, `${originalMovementId}%`, limit]
+      );
 
-    // FIX: Search for keys with COLON separators (UnifiedKey format: type:id:persona:subtype:index)
-    // Keys are stored as ex:movement_id:atlas:main:0, meal:movement_id:none:step:1, etc.
-    // Use ORIGINAL movementId for ALL pattern matches - don't let canonical service change it
-    req.log.info(`[by-movement] Searching with patterns: ex:${originalMovementId}:%, meal:${originalMovementId}:%`);
-
-    // CRITICAL FIX: Join asset_blob_storage to get actual image data
-    // Images are stored in asset_blob_storage.data, NOT in cached_assets.value
-    // BUT: For JSON assets (like meta), use a.value directly - don't return blob data
-    const { rows } = await pool.query(
-      `SELECT a.key, 
-               CASE 
-                 WHEN a.asset_type = 'image' THEN COALESCE(ENCODE(b.data, 'base64'), a.value)
-                 ELSE a.value
-               END as value,
-               a.asset_type, a.status, a.created_at,
-               m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id,
-               m.translation_status, m.translation_error,
-               m.video_status, m.video_error,
-               m.text_context, m.text_context_simple, m.step_index, m.persona
-        FROM cached_assets a
-        LEFT JOIN cached_asset_meta m ON m.key = a.key
-        LEFT JOIN asset_blob_storage b ON b.key = a.key
-        WHERE m.movement_id = $1 
-           OR a.key LIKE $2 
-           OR a.key LIKE $3
-           OR a.key LIKE $4
-           OR a.key LIKE $5
-           OR a.key LIKE $6
-        ORDER BY a.created_at DESC
-        LIMIT $7`,
-      [originalMovementId, `ex:${originalMovementId}:%`, `meal:${originalMovementId}:%`, `ex_${originalMovementId}%`, `meal_${originalMovementId}%`, `${originalMovementId}%`, limit]
-    );
-
-    req.log.info(`[by-movement] Found ${rows.length} rows for ${originalMovementId}`);
-    // Ensure image values have proper data:image prefix for frontend display
-    const processedRows = rows.map((row: any) => {
-      if (row.asset_type === 'image' && row.value && typeof row.value === 'string') {
-        // If value doesn't have data:image prefix, add it
-        if (!row.value.startsWith('data:image')) {
-          // Check if it's base64 (starts with valid base64 chars)
-          if (/^[A-Za-z0-9+/=]+$/.test(row.value)) {
-            row.value = `data:image/png;base64,${row.value}`;
-          }
+      req.log.info(`[by-movement] Found ${rows.length} rows for ${originalMovementId}`);
+      const processedRows = rows.map((row: any) => {
+        if (row.asset_type === 'image' && row.value && typeof row.value === 'string' && !row.value.startsWith('data:image') && /^[A-Za-z0-9+/=]+$/.test(row.value)) {
+          row.value = `data:image/png;base64,${row.value}`;
         }
-      }
-      return row;
-    });
-
-    // DEBUG: Log what we're returning
-    req.log.info({
-      message: '[by-movement] Returning data',
-      movementId: originalMovementId,
-      totalRows: processedRows.length,
-      keys: processedRows.map((r: any) => r.key),
-      hasTextContext: processedRows.filter((r: any) => r.text_context || r.text_context_simple).length,
-      metaJsonKeys: processedRows.filter((r: any) => r.key?.includes(':meta:') || r.key?.endsWith('_meta')).map((r: any) => r.key)
-    });
-
+        return row;
+      });
       return processedRows;
     } catch (e: any) {
       req.log.error({ err: e }, '[by-movement] Error');
       if (!reply.sent) {
-        reply.header('Access-Control-Allow-Origin', '*');
+        corsHeaders();
         reply.header('Content-Type', 'application/json');
         return reply.status(500).send({
-          error: String(e?.message || 'Internal server error'),
-          requestId: (req as any).requestId || 'unknown'
+          error: String(e?.message ?? 'Internal server error'),
+          requestId: (req as any).requestId ?? 'unknown'
         });
       }
     }

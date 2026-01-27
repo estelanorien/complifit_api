@@ -42,6 +42,8 @@ export async function adminGuard(req: FastifyRequest, reply: FastifyReply) {
   try {
     const user = (req as any).user;
     if (!user?.userId) {
+      reply.header('Access-Control-Allow-Origin', '*');
+      reply.header('Access-Control-Allow-Credentials', 'false');
       return reply.status(403).send({ error: 'Forbidden' });
     }
 
@@ -55,14 +57,20 @@ export async function adminGuard(req: FastifyRequest, reply: FastifyReply) {
 
     // Only 'admin' and 'owner' roles have access to admin endpoints
     if (userRole !== 'admin' && userRole !== 'owner') {
+      reply.header('Access-Control-Allow-Origin', '*');
+      reply.header('Access-Control-Allow-Credentials', 'false');
       return reply.status(403).send({ error: 'Forbidden' });
     }
   } catch (e: any) {
     const isProduction = process.env.NODE_ENV === 'production';
     req.log?.error(e);
-    return reply.status(500).send({
-      error: isProduction ? 'Authorization check failed' : (e.message || 'Authorization check failed')
-    });
+    if (!reply.sent) {
+      reply.header('Access-Control-Allow-Origin', '*');
+      reply.header('Access-Control-Allow-Credentials', 'false');
+      return reply.status(500).send({
+        error: isProduction ? 'Authorization check failed' : (e.message || 'Authorization check failed')
+      });
+    }
   }
 }
 

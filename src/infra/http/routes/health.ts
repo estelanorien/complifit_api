@@ -2,6 +2,20 @@ import { FastifyInstance } from 'fastify';
 import { pool, checkDatabaseHealth } from '../../db/pool.js';
 
 export async function healthRoutes(app: FastifyInstance) {
+  // No auth, always CORS – use to verify backend CORS from browser (e.g. fetch from localhost:5174)
+  app.options('/cors-test', async (req, reply) => {
+    reply.header('Access-Control-Allow-Origin', '*');
+    reply.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return reply.status(204).send();
+  });
+  app.get('/cors-test', async (req, reply) => {
+    reply.header('Access-Control-Allow-Origin', '*');
+    reply.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return reply.status(200).send({ ok: true, cors: 'allowed' });
+  });
+
   app.get('/health', async (req, reply) => {
     const checks: Record<string, {
       status: string;

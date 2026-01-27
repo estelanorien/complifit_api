@@ -116,14 +116,12 @@ export function buildServer() {
     reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
   });
 
-  // Last-chance CORS before send
+  // Last-chance CORS: ALWAYS set on every response (Cloud Run/proxies must not strip)
   app.addHook('onSend', async (req: any, reply: any, payload: any) => {
-    if (!reply.getHeader('Access-Control-Allow-Origin')) {
-      reply.header('Access-Control-Allow-Origin', '*');
-      reply.header('Access-Control-Allow-Credentials', 'false');
-      reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
-    }
+    reply.header('Access-Control-Allow-Origin', '*');
+    reply.header('Access-Control-Allow-Credentials', 'false');
+    reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
     return payload;
   });
 
