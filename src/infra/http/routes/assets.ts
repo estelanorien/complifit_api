@@ -395,10 +395,14 @@ export async function assetsRoutes(app: FastifyInstance) {
       return processedRows;
     } catch (e: any) {
       req.log.error({ err: e }, '[by-movement] Error');
-      return reply.status(500).send({
-        error: e.message || 'Internal server error',
-        requestId: (req as any).requestId || 'unknown'
-      });
+      if (!reply.sent) {
+        reply.header('Access-Control-Allow-Origin', '*');
+        reply.header('Content-Type', 'application/json');
+        return reply.status(500).send({
+          error: String(e?.message || 'Internal server error'),
+          requestId: (req as any).requestId || 'unknown'
+        });
+      }
     }
   });
 }

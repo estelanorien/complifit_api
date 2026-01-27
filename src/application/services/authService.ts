@@ -132,7 +132,9 @@ export class AuthService {
   }
 
   verifyToken(token: string): JwtPayload {
-    return jwt.verify(token, env.jwtSecret) as JwtPayload;
+    return jwt.verify(token, env.jwtSecret, {
+      clockTolerance: 300, // 5 min tolerance for server/client clock skew
+    }) as JwtPayload;
   }
 
   async refreshToken(token: string) {
