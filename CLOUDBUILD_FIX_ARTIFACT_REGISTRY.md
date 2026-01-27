@@ -48,14 +48,14 @@ Then refresh the build log page in Cloud Build → History. You need **Project O
 
 ### Option 3 – Fetch build logs via gcloud
 
-If the UI still shows nothing, try the CLI (uses the same logging permission):
+If the UI still shows nothing, try the CLI (uses the same logging permission). **For the europe trigger** you must pass `--region=europe-west1`:
 
 ```bash
 gcloud config set project bright-aloe-485517-n8
-gcloud builds log BUILD_ID
+gcloud builds log BUILD_ID --region=europe-west1
 ```
 
-Use the build ID from the History table (e.g. `2a90aea6`). If this also fails with a permission error, you still need **Logs Viewer** (Option 1 or 2).
+Use the build ID from the History table (e.g. `2a90aea6`). If this fails with a permission error, you need **Logs Viewer** (Option 1 or 2).
 
 ### PowerShell (Option 1 from Windows)
 
@@ -65,15 +65,21 @@ gcloud projects add-iam-policy-binding bright-aloe-485517-n8 --member="user:YOUR
 ```
 Replace `YOUR_GOOGLE_EMAIL@gmail.com` with your Google account.
 
-### Option 4 – Fetch log to a file (Console still says "No logs")
+### Option 4 – Fetch europe build log to a file (Console says "No logs")
 
-From the **repo root** (with gcloud installed and logged in):
+From the **vitality_api repo root** (the folder that contains `scripts`), in PowerShell:
 
 ```powershell
 .\scripts\fetch-build-log.ps1
 ```
 
-This writes the **latest** build’s log to `build-log.txt` in the repo root. Open that file to see why the build failed. The script uses `--region=europe-west1` so it matches the vitality-api trigger.
+This fetches the **latest europe-west1** build’s log to `build-log.txt` in the repo root. Open that file to see why the europe trigger failed. If the script prints a permission error, run **Option 1** (Logs Viewer) first, then run the script again.
+
+### Europe fails, global works — and I can't see logs
+
+1. **Get the europe build log**: Open PowerShell, `cd` to the vitality_api folder (where `scripts` lives), run `.\scripts\fetch-build-log.ps1`. Open `build-log.txt`.
+2. **If the script fails with permission/403**: Run Option 1 (Logs Viewer) above, then run `.\scripts\fetch-build-log.ps1` again.
+3. **Compare triggers**: In Cloud Build → Triggers, open the **europe** trigger and the **global** one. Check: **Service account** (same?), **Substitution variables** (PROJECT_ID, COMMIT_SHA or REPO_NAME/BRANCH_NAME). The europe trigger must use the same SA that has Artifact Registry + Cloud Run permissions, and must pass substitutions so `cloudbuild.yaml` gets `$PROJECT_ID` and `$COMMIT_SHA`. If europe uses different substitutions or a different SA, fix it to match the working global trigger, or re-run the "Full fix" block so **gemini@** has the roles and use that SA for europe too.
 
 ---
 
