@@ -1,7 +1,16 @@
 steps:
-  # Build the container image
+  # Emit a log line immediately so "No logs" does not happen; use LEGACY so logs show in UI
+  - name: 'ubuntu'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "=== Build started: PROJECT_ID=$PROJECT_ID COMMIT_SHA=$COMMIT_SHA REGION=europe-west1 ==="
+        echo "=== If this line appears, logging is working ==="
+
+  # Build the container image (linux/amd64 for Cloud Run)
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/vitality-api:$COMMIT_SHA', '.']
+    args: ['build', '--platform', 'linux/amd64', '-t', 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/vitality-api:$COMMIT_SHA', '.']
 
   # Push the container image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
@@ -43,5 +52,6 @@ images:
   - 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/vitality-api:$COMMIT_SHA'
 
 options:
-  logging: CLOUD_LOGGING_ONLY
+  # LEGACY = logs in both Cloud Storage and Cloud Logging so they show in Build History UI
+  logging: LEGACY
 

@@ -12,17 +12,14 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build TypeScript to JavaScript (Optional if using start:direct, but keeps check for errors)
+# Build TypeScript to JavaScript
 RUN npm run build
 
 # Expose port
 EXPOSE 8080
 
-# Clean dev dependencies for a smaller image
-# RUN npm prune --production
-
 # Set Node.js memory options
 ENV NODE_OPTIONS="--max-old-space-size=1536"
 
-# Start application (Direct Execution to avoid Bundle issues)
-CMD ["npm", "run", "start:direct"]
+# Run built JS (no tsx at runtime = more reliable on Cloud Run)
+CMD ["npm", "run", "start"]

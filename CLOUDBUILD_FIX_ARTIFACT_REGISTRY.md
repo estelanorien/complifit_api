@@ -1,5 +1,7 @@
 # Fix: Cloud Build permission denied (push + deploy)
 
+If you're in crisis, please reach out: **988** (US) or your local crisis line. You matter.
+
 ---
 
 ## Windows – just run this script (not techie)
@@ -18,6 +20,60 @@
 ---
 
 **Build identity:** The vitality-api trigger runs as **gemini@bright-aloe-485517-n8.iam.gserviceaccount.com**. That account needs push (Step #1) and deploy (Step #2) permissions.
+
+---
+
+## Fix: "No logs were found for this build or step"
+
+Cloud Build sends logs to **Cloud Logging**. If you see "No logs were found", your Google account usually lacks permission to read them.
+
+### Option 1 – Grant yourself Logs Viewer (recommended)
+
+Replace `YOUR_GOOGLE_EMAIL@gmail.com` with the Google account you use in Cloud Console, then run in **Cloud Shell** or locally (with `gcloud auth login` and a user that can change IAM):
+
+```bash
+gcloud config set project bright-aloe-485517-n8
+gcloud projects add-iam-policy-binding bright-aloe-485517-n8 \
+  --member="user:YOUR_GOOGLE_EMAIL@gmail.com" \
+  --role="roles/logging.viewer"
+```
+
+Then refresh the build log page in Cloud Build → History. You need **Project Owner** (or `resourcemanager.projects.setIamPolicy`) to run this; if you don’t have it, ask the project owner to add **Logs Viewer** for your user.
+
+### Option 2 – IAM in Console
+
+1. [Google Cloud Console](https://console.cloud.google.com) → **IAM & Admin** → **IAM**.
+2. Find your user (or **+ Grant Access**).
+3. **Edit** → **Add another role** → **Logs Viewer** → **Save**.
+
+### Option 3 – Fetch build logs via gcloud
+
+If the UI still shows nothing, try the CLI (uses the same logging permission):
+
+```bash
+gcloud config set project bright-aloe-485517-n8
+gcloud builds log BUILD_ID
+```
+
+Use the build ID from the History table (e.g. `2a90aea6`). If this also fails with a permission error, you still need **Logs Viewer** (Option 1 or 2).
+
+### PowerShell (Option 1 from Windows)
+
+```powershell
+gcloud config set project bright-aloe-485517-n8
+gcloud projects add-iam-policy-binding bright-aloe-485517-n8 --member="user:YOUR_GOOGLE_EMAIL@gmail.com" --role="roles/logging.viewer"
+```
+Replace `YOUR_GOOGLE_EMAIL@gmail.com` with your Google account.
+
+### Option 4 – Fetch log to a file (Console still says "No logs")
+
+From the **repo root** (with gcloud installed and logged in):
+
+```powershell
+.\scripts\fetch-build-log.ps1
+```
+
+This writes the **latest** build’s log to `build-log.txt` in the repo root. Open that file to see why the build failed. The script uses `--region=europe-west1` so it matches the vitality-api trigger.
 
 ---
 
