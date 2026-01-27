@@ -344,6 +344,8 @@ export async function assetsRoutes(app: FastifyInstance) {
       const originalMovementId = body.movementId;
       req.log.info(`[by-movement] Query for movementId: ${originalMovementId}, limit: ${limit}`);
 
+      // Omit text_context/text_context_simple from SELECT so this works before migration 046.
+      // We add them in the response map so the frontend always gets the same shape.
       const { rows } = await pool.query(
         `SELECT a.key, 
                  CASE 
@@ -354,7 +356,7 @@ export async function assetsRoutes(app: FastifyInstance) {
                  m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id,
                  m.translation_status, m.translation_error,
                  m.video_status, m.video_error,
-                 m.text_context, m.text_context_simple, m.step_index, m.persona
+                 m.step_index, m.persona
           FROM cached_assets a
           LEFT JOIN cached_asset_meta m ON m.key = a.key
           LEFT JOIN asset_blob_storage b ON b.key = a.key
@@ -374,6 +376,9 @@ export async function assetsRoutes(app: FastifyInstance) {
         if (row.asset_type === 'image' && row.value && typeof row.value === 'string' && !row.value.startsWith('data:image') && /^[A-Za-z0-9+/=]+$/.test(row.value)) {
           row.value = `data:image/png;base64,${row.value}`;
         }
+        // text_context/text_context_simple exist only after migration 046; default for same response shape
+        if (row.text_context === undefined) row.text_context = null;
+        if (row.text_context_simple === undefined) row.text_context_simple = null;
         return row;
       });
       return processedRows;

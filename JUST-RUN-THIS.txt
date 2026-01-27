@@ -1,0 +1,27 @@
+================================================================================
+  FIX CLOUD BUILD "PERMISSION DENIED" – DO THIS
+================================================================================
+
+1. Open PowerShell
+   (Press Windows key, type "PowerShell", click "Windows PowerShell")
+
+2. Go to this folder. Type this and press Enter:
+
+   cd "c:\Users\rmkoc\Downloads\vitapp2\vitality_api-main\vitality_api-main"
+
+3. Run the fix script. Type this and press Enter:
+
+   .\scripts\DO-FIX-CLOUDBUILD.ps1
+
+4. If a browser opens asking you to sign in to Google:
+   - Sign in with the Google account that can access project "bright-aloe-485517-n8"
+   - When it says you're done in the browser, go back to PowerShell
+
+5. When the script prints "Done" in green:
+   - Open https://console.cloud.google.com
+   - Go to Cloud Build → History
+   - Open the failed build and click "Retry"
+
+That’s it. You only have to do step 4 once (sign in). After that, the script does the rest.
+
+================================================================================

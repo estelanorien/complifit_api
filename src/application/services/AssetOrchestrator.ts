@@ -5,13 +5,6 @@ import { AssetPromptService } from './assetPromptService.js';
 import { UnifiedKey } from '../../domain/UnifiedKey.js';
 import { AssetRepository } from '../../infra/db/repositories/AssetRepository.js';
 import { MovementRepository } from '../../infra/db/repositories/MovementRepository.js';
-import path from 'path';
-
-// Load Face Anchors
-import { fileURLToPath } from 'url';
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-// Jump up from src/application/services to src/assets
 
 export class AssetOrchestrator {
     private static ai = new AiService();

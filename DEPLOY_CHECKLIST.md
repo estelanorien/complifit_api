@@ -11,11 +11,13 @@ The code in this repo has been updated so the API **always** sends CORS headers 
    - `fbfdb26` – JWT clock tolerance, safe auth, by-movement 500 + CORS  
    - `4b9b6d2` – CORS `Access-Control-Allow-Origin: *` everywhere
 4. Open that build. If it **failed**:  
-   - Log says **"Permission artifactregistry.repositories.uploadArtifacts denied"** → follow **[CLOUDBUILD_FIX_ARTIFACT_REGISTRY.md](./CLOUDBUILD_FIX_ARTIFACT_REGISTRY.md)** (grant Artifact Registry Writer to Cloud Build), then retry.  
+   - **Push or deploy permission denied** → **Windows:** open PowerShell in the repo folder and run `.\scripts\DO-FIX-CLOUDBUILD.ps1` (see “Windows – just run this script” in [CLOUDBUILD_FIX_ARTIFACT_REGISTRY.md](./CLOUDBUILD_FIX_ARTIFACT_REGISTRY.md)). **Cloud Shell:** use the “Full fix” block or run `bash scripts/run-full-fix-cloudbuild-permissions.sh` from the doc. Then retry the build.  
    - Other errors → fix the Docker or `npm run build` step from the log.
 
 If you don’t see any new builds when you push to `main`, the trigger is missing or wrong.  
 Go to **Cloud Build** → **Triggers** and add or edit a trigger so that it runs on push to the correct branch (usually `main`) for this repo.
+
+**If the trigger keeps failing on permission:** you can build and deploy from your machine using your own gcloud/Docker credentials. From the repo root run `.\scripts\build-and-deploy-local.ps1` (see “Deploy from your machine” in [CLOUDBUILD_FIX_ARTIFACT_REGISTRY.md](./CLOUDBUILD_FIX_ARTIFACT_REGISTRY.md)). Then push to GitHub as usual.
 
 ## 2. Check that the new revision is serving traffic
 
