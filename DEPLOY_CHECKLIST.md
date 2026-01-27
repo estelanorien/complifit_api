@@ -10,7 +10,9 @@ The code in this repo has been updated so the API **always** sends CORS headers 
    - `8a95732` – explicit OPTIONS for CORS preflight  
    - `fbfdb26` – JWT clock tolerance, safe auth, by-movement 500 + CORS  
    - `4b9b6d2` – CORS `Access-Control-Allow-Origin: *` everywhere
-4. Open that build. If it **failed**, fix the error (e.g. in the build log for the Docker or `npm run build` step).
+4. Open that build. If it **failed**:  
+   - Log says **"Permission artifactregistry.repositories.uploadArtifacts denied"** → follow **[CLOUDBUILD_FIX_ARTIFACT_REGISTRY.md](./CLOUDBUILD_FIX_ARTIFACT_REGISTRY.md)** (grant Artifact Registry Writer to Cloud Build), then retry.  
+   - Other errors → fix the Docker or `npm run build` step from the log.
 
 If you don’t see any new builds when you push to `main`, the trigger is missing or wrong.  
 Go to **Cloud Build** → **Triggers** and add or edit a trigger so that it runs on push to the correct branch (usually `main`) for this repo.
