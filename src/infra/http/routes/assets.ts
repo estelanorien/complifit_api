@@ -319,6 +319,15 @@ export async function assetsRoutes(app: FastifyInstance) {
     return rows[0];
   });
 
+  // Explicit OPTIONS for by-movement so preflight always gets CORS (no auth on OPTIONS)
+  app.options('/assets/by-movement', async (req: any, reply: any) => {
+    reply.header('Access-Control-Allow-Origin', '*');
+    reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
+    reply.header('Access-Control-Max-Age', '86400');
+    return reply.status(204).send();
+  });
+
   app.post('/assets/by-movement', { preHandler: authGuard }, async (req: any, reply: any) => {
     reply.header('Access-Control-Allow-Origin', '*');
     reply.header('Access-Control-Allow-Credentials', 'false');
