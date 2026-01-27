@@ -326,8 +326,9 @@ export async function assetsRoutes(app: FastifyInstance) {
     reply.header('Access-Control-Allow-Credentials', 'false');
     reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
-    
-    const body = z.object({ movementId: z.string(), limit: z.number().min(1).max(100).optional() }).parse(req.body || {});
+
+    try {
+      const body = z.object({ movementId: z.string(), limit: z.number().min(1).max(100).optional() }).parse(req.body || {});
     const limit = body.limit || 100;
 
     // CRITICAL FIX: Keep original movementId for pattern searches
@@ -393,7 +394,14 @@ export async function assetsRoutes(app: FastifyInstance) {
       metaJsonKeys: processedRows.filter((r: any) => r.key?.includes(':meta:') || r.key?.endsWith('_meta')).map((r: any) => r.key)
     });
 
-    return processedRows;
+      return processedRows;
+    } catch (e: any) {
+      req.log.error({ err: e }, '[by-movement] Error');
+      return reply.status(500).send({
+        error: e.message || 'Internal server error',
+        requestId: (req as any).requestId || 'unknown'
+      });
+    }
   });
 }
 

@@ -72,9 +72,17 @@ export function buildServer() {
   });
 
   // CORS configuration - ROBUST SETTINGS for production/local interop
-  // explicitly allow necessary headers to prevent preflight failures
+  // Explicitly allow localhost:5173/5174 (Vite dev) and env ALLOWED_ORIGINS when set
+  const devOrigins = ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'];
+  const allowedList = env.allowedOrigins && env.allowedOrigins.length > 0
+    ? [...new Set([...env.allowedOrigins, ...devOrigins])]
+    : null;
   const corsOptions = {
-    origin: '*',  // Allow ALL origins
+    origin: allowedList
+      ? (origin: string | undefined, cb: (err: Error | null, allow: boolean | string) => void) => {
+          cb(null, origin && allowedList.includes(origin) ? origin : '*');
+        }
+      : '*',
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-request-id', 'x-goog-api-key', 'x-api-key'],
     credentials: false
@@ -101,9 +109,10 @@ export function buildServer() {
   app.register(cors, corsOptions);
 
   // CRITICAL: Ensure CORS headers are always present on ALL responses (safety net)
-  // Hook runs on every request to set CORS headers early
+  // Hook runs on every request to set CORS headers early; explicit localhost for dev
   app.addHook('onRequest', async (req: any, reply: any) => {
-    const origin = req.headers.origin || '*';
+    const raw = req.headers.origin;
+    const origin = raw && (allowedList ? allowedList.includes(raw) : true) ? raw : '*';
     reply.header('Access-Control-Allow-Origin', origin);
     reply.header('Access-Control-Allow-Credentials', 'false');
     reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
