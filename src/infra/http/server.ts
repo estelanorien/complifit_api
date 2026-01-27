@@ -108,22 +108,18 @@ export function buildServer() {
 
   app.register(cors, corsOptions);
 
-  // CRITICAL: Ensure CORS headers are always present on ALL responses (safety net)
-  // Hook runs on every request to set CORS headers early; explicit localhost for dev
+  // CRITICAL: CORS on every response - use * so Cloud Run/proxies never hide it
   app.addHook('onRequest', async (req: any, reply: any) => {
-    const raw = req.headers.origin;
-    const origin = raw && (allowedList ? allowedList.includes(raw) : true) ? raw : '*';
-    reply.header('Access-Control-Allow-Origin', origin);
+    reply.header('Access-Control-Allow-Origin', '*');
     reply.header('Access-Control-Allow-Credentials', 'false');
     reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
   });
 
-  // Additional safety: Set CORS headers right before sending response
+  // Last-chance CORS before send
   app.addHook('onSend', async (req: any, reply: any, payload: any) => {
-    const origin = req.headers.origin || '*';
     if (!reply.getHeader('Access-Control-Allow-Origin')) {
-      reply.header('Access-Control-Allow-Origin', origin);
+      reply.header('Access-Control-Allow-Origin', '*');
       reply.header('Access-Control-Allow-Credentials', 'false');
       reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
       reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');

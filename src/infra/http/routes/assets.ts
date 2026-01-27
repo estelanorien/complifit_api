@@ -320,9 +320,7 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   app.post('/assets/by-movement', { preHandler: authGuard }, async (req: any, reply: any) => {
-    // Ensure CORS headers are set for this route
-    const origin = req.headers.origin || '*';
-    reply.header('Access-Control-Allow-Origin', origin);
+    reply.header('Access-Control-Allow-Origin', '*');
     reply.header('Access-Control-Allow-Credentials', 'false');
     reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
