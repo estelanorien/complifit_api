@@ -885,6 +885,110 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
+  // Cleanup orphaned assets (not referenced by any active movement)
+  app.post('/admin/assets/cleanup-orphaned', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      req.log.info('[cleanup-orphaned] Starting orphaned asset cleanup');
+      
+      // 1. Get all active movements
+      const { exercises: exRows, meals: mealRows } = await MovementRepository.getMovementManifest();
+      
+      // 2. Build set of all "in-use" asset keys
+      const inUseKeys = new Set<string>();
+      
+      // System assets that should never be deleted
+      const systemKeys = [
+        'system_coach_atlas_ref',
+        'system_coach_nova_ref',
+        'system_background_gym_ref',
+        'system_background_kitchen_ref',
+        'system_blueprints'
+      ];
+      systemKeys.forEach(k => inUseKeys.add(k));
+      
+      // Generate expected keys for each exercise
+      for (const ex of exRows) {
+        const movementId = normalizeToMovementId(ex.name);
+        const stepCount = ex.metadata?.instructions?.length || ex.metadata?.steps?.length || 8;
+        const expectedKeys = await UnifiedAssetService.getManifest('ex', movementId, ex.name, stepCount);
+        expectedKeys.forEach(k => inUseKeys.add(k));
+      }
+      
+      // Generate expected keys for each meal
+      for (const meal of mealRows) {
+        const movementId = normalizeToMovementId(meal.name);
+        const stepCount = meal.instructions?.length || 8;
+        const expectedKeys = await UnifiedAssetService.getManifest('meal', movementId, meal.name, stepCount);
+        expectedKeys.forEach(k => inUseKeys.add(k));
+      }
+      
+      req.log.info({ inUseCount: inUseKeys.size }, '[cleanup-orphaned] Built in-use key set');
+      
+      // 3. Find orphaned assets (assets not in inUseKeys set)
+      const { rows: allAssets } = await pool.query(
+        `SELECT key FROM cached_assets WHERE key NOT LIKE 'system_%'`
+      );
+      
+      const orphanedKeys = allAssets
+        .map((r: any) => r.key)
+        .filter((key: string) => !inUseKeys.has(key));
+      
+      req.log.info({ orphanedCount: orphanedKeys.length, sample: orphanedKeys.slice(0, 10) }, '[cleanup-orphaned] Found orphaned assets');
+      
+      if (orphanedKeys.length === 0) {
+        return reply.send({ 
+          success: true, 
+          deletedCount: 0, 
+          message: 'No orphaned assets found' 
+        });
+      }
+      
+      // 4. Delete orphaned assets
+      // Delete from cached_assets
+      const { rowCount: assetsDeleted } = await pool.query(
+        `DELETE FROM cached_assets WHERE key = ANY($1)`,
+        [orphanedKeys]
+      );
+      
+      // Delete from asset_blob_storage
+      await pool.query(
+        `DELETE FROM asset_blob_storage WHERE key = ANY($1)`,
+        [orphanedKeys]
+      );
+      
+      // Delete from cached_asset_meta
+      await pool.query(
+        `DELETE FROM cached_asset_meta WHERE key = ANY($1)`,
+        [orphanedKeys]
+      );
+      
+      // Delete related translation/video jobs
+      await pool.query(
+        `DELETE FROM translation_jobs WHERE asset_key = ANY($1)`,
+        [orphanedKeys]
+      );
+      await pool.query(
+        `DELETE FROM video_jobs WHERE asset_key = ANY($1)`,
+        [orphanedKeys]
+      );
+      
+      req.log.info({ deletedCount: assetsDeleted, orphanedKeys: orphanedKeys.length }, '[cleanup-orphaned] Cleanup complete');
+      
+      return reply.send({ 
+        success: true, 
+        deletedCount: assetsDeleted,
+        orphanedKeysCount: orphanedKeys.length,
+        message: `Deleted ${assetsDeleted} orphaned assets` 
+      });
+    } catch (e: any) {
+      req.log.error({ err: e }, '[cleanup-orphaned] Error');
+      return reply.status(500).send({ 
+        error: String(e?.message ?? 'Cleanup failed'),
+        requestId: (req as any).requestId ?? 'unknown'
+      });
+    }
+  });
+
   // Batch Check Asset Existence
   app.post('/admin/assets/batch-check', { preHandler: adminGuard }, async (req: any, reply: any) => {
     const { keys } = req.body as { keys: string[] };
