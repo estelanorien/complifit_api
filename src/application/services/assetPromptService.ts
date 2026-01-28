@@ -130,12 +130,16 @@ export class AssetPromptService {
                     if (!guidelines.coachMaleDescription?.toLowerCase().includes('shoe') && !guidelines.coachMaleDescription?.toLowerCase().includes('sneaker')) {
                         style += ` Wearing athletic shoes (sports sneakers).`;
                     }
+                    // CRITICAL: Lock Atlas outfit for consistent clothing across all generations
+                    style += ` OUTFIT LOCK (Atlas): dark grey performance t-shirt, black athletic shorts, athletic shoes (sports sneakers). No hoodie, no jacket, no hat, no gloves. No logos. Do not change outfit colors.`;
                 } else if (identity === 'nova') {
                     style += ` Subject: COACH NOVA. ${guidelines.coachFemaleDescription || "Athletic female, professional gym photography."}`;
                     // ENFORCE: Nova MUST wear athletic shoes - add explicitly even if description doesn't mention it
                     if (!guidelines.coachFemaleDescription?.toLowerCase().includes('shoe') && !guidelines.coachFemaleDescription?.toLowerCase().includes('sneaker')) {
                         style += ` Wearing athletic shoes (sports sneakers).`;
                     }
+                    // CRITICAL: Lock Nova outfit for consistent clothing across all generations
+                    style += ` OUTFIT LOCK (Nova): emerald green sports bra, black athletic leggings, athletic shoes (sports sneakers). No jacket, no hoodie. No logos. Do not change outfit colors.`;
                 } else {
                     style += ` Featuring: ${guidelines.vitalityAvatarDescription}.`;
                 }
