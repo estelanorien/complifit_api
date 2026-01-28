@@ -989,6 +989,98 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
+  // Cleanup orphaned assets scoped to a single movement (SAFE MODE)
+  // This prevents deleting assets for other movements that may still be on legacy key formats.
+  app.post('/admin/assets/cleanup-orphaned-scoped', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      const body = z.object({
+        movementId: z.string().min(1),
+        type: z.enum(['exercise', 'meal'])
+      }).parse(req.body || {});
+
+      const { movementId, type } = body;
+      const keyType = type === 'exercise' ? 'ex' : 'meal';
+
+      req.log.info({ movementId, type }, '[cleanup-orphaned-scoped] Starting scoped cleanup');
+
+      // Only consider assets that match this movementId and keyType (very safe scope)
+      const likePattern = `${keyType}:${movementId}:%`;
+      const { rows: scopedAssets } = await pool.query(
+        `SELECT key FROM cached_assets WHERE key LIKE $1 AND key NOT LIKE 'system_%'`,
+        [likePattern]
+      );
+
+      // Determine stepCount from existing scoped keys (prevents deleting valid steps due to wrong count)
+      let stepCount = type === 'exercise' ? 10 : 8;
+      try {
+        let maxStep = 0;
+        for (const r of scopedAssets) {
+          const k: string = r.key;
+          const parts = k.split(':');
+          // UnifiedKey: type:slug:persona:subtype:index
+          if (parts.length === 5 && parts[3] === 'step') {
+            const idx = parseInt(parts[4], 10);
+            if (!Number.isNaN(idx) && idx > maxStep) maxStep = idx;
+          }
+        }
+        if (maxStep > 0) stepCount = maxStep;
+      } catch {
+        // ignore; fallback remains
+      }
+
+      // Build expected keys for this specific movement only using derived stepCount
+      const expectedKeys = await UnifiedAssetService.getManifest(keyType as any, movementId, movementId, stepCount);
+      const inUseKeys = new Set<string>([
+        'system_coach_atlas_ref',
+        'system_coach_nova_ref',
+        'system_background_gym_ref',
+        'system_background_kitchen_ref',
+        'system_blueprints',
+        ...expectedKeys
+      ]);
+
+      const orphanedKeys = scopedAssets
+        .map((r: any) => r.key)
+        .filter((k: string) => !inUseKeys.has(k));
+
+      req.log.info({ movementId, type, stepCount, scopedCount: scopedAssets.length, orphanedCount: orphanedKeys.length }, '[cleanup-orphaned-scoped] Computed scoped orphan set');
+
+      if (orphanedKeys.length === 0) {
+        return reply.send({
+          success: true,
+          deletedCount: 0,
+          orphanedKeysCount: 0,
+          message: 'No scoped orphaned assets found'
+        });
+      }
+
+      // Delete orphaned assets only for this movement scope
+      const { rowCount: assetsDeleted } = await pool.query(
+        `DELETE FROM cached_assets WHERE key = ANY($1)`,
+        [orphanedKeys]
+      );
+      await pool.query(`DELETE FROM asset_blob_storage WHERE key = ANY($1)`, [orphanedKeys]);
+      await pool.query(`DELETE FROM cached_asset_meta WHERE key = ANY($1)`, [orphanedKeys]);
+      await pool.query(`DELETE FROM translation_jobs WHERE asset_key = ANY($1)`, [orphanedKeys]);
+      await pool.query(`DELETE FROM video_jobs WHERE asset_key = ANY($1)`, [orphanedKeys]);
+
+      req.log.info({ movementId, type, deletedCount: assetsDeleted }, '[cleanup-orphaned-scoped] Scoped cleanup complete');
+
+      return reply.send({
+        success: true,
+        deletedCount: assetsDeleted,
+        orphanedKeysCount: orphanedKeys.length,
+        message: `Deleted ${assetsDeleted} scoped orphaned assets`
+      });
+    } catch (e: any) {
+      req.log.error({ err: e }, '[cleanup-orphaned-scoped] Error');
+      return reply.status(500).send({
+        error: String(e?.message ?? 'Scoped cleanup failed'),
+        requestId: (req as any).requestId ?? 'unknown'
+      });
+    }
+  });
+
   // Batch Check Asset Existence
   app.post('/admin/assets/batch-check', { preHandler: adminGuard }, async (req: any, reply: any) => {
     const { keys } = req.body as { keys: string[] };
