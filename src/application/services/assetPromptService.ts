@@ -176,6 +176,9 @@ export class AssetPromptService {
             }
         }
 
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:constructPrompt:return',message:'AssetPromptService prompt built',data:{groupType,groupName,key,subtype,type,identity,containsSprain:/sprain/i.test(groupName)||/sprain/i.test(coreDescription),corePreview:coreDescription.substring(0,120),promptPreview:prompt.substring(0,220)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B2'})}).catch(()=>{});
+        // #endregion
         return { prompt, referenceImage: refImage, referenceType: refType };
     }
 
