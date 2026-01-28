@@ -494,13 +494,6 @@ export class JobProcessor {
                     const actionPhrase = actionWords.length > 0 ? actionWords[0] : "preparing";
                     const stepPrompt = `Professional food photography: Chef hands ${actionPhrase} for ${canonicalName}. Step: ${stepText}. Close-up on hands, ingredients, and cooking action. In-progress preparation, NOT finished dish. Bright kitchen setting. ${VITALITY_IMAGE_STYLE}. No text, no labels, no finished plate.`;
 
-                    // #region agent log
-                    const fs = await import('fs/promises');
-                    const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
-                    const logEntry = JSON.stringify({location:'jobProcessor.ts:491',message:'Meal step image generation',data:{name,stepIndex,stepText,stepTextLength:stepText.length,actionPhrase,actionWords:actionWords.slice(0,3),promptIncludesStepText:stepPrompt.includes(stepText),canonicalStepKey,originalStepKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.1'}) + '\n';
-                    fs.appendFile(logPath, logEntry).catch(()=>{});
-                    // #endregion
-
                     try {
                         // CRITICAL: Don't use main meal image as reference for steps - it biases toward finished dishes
                         // Use kitchen background reference instead (or no reference)
@@ -508,10 +501,6 @@ export class JobProcessor {
                             prompt: stepPrompt
                             // Removed referenceImage: mainImage to prevent hero asset bias
                         });
-                        // #region agent log
-                        const logEntry2 = JSON.stringify({location:'jobProcessor.ts:494',message:'Meal step image generated',data:{name,stepIndex,hasStepImg:!!stepImg,stepImgLength:stepImg?.length||0,hasReferenceImage:!!mainImage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.1'}) + '\n';
-                        fs.appendFile(logPath, logEntry2).catch(()=>{});
-                        // #endregion
                         if (stepImg) {
                             // Save Canonical
                             await this.saveAsset(canonicalStepKey, stepImg, { prompt: stepPrompt, source: 'meal-job-step', step: stepIndex, movementId: baseKey, originalName, language });
@@ -520,17 +509,9 @@ export class JobProcessor {
                             if (originalStepKey !== canonicalStepKey) {
                                 await this.saveAsset(originalStepKey, stepImg, { prompt: stepPrompt, source: 'meal-job-step-alias', step: stepIndex, movementId: baseKey, originalName, language });
                             }
-                            // #region agent log
-                            const logEntry3 = JSON.stringify({location:'jobProcessor.ts:500',message:'Meal step image saved',data:{name,stepIndex,canonicalStepKey,originalStepKey,keysMatch:canonicalStepKey===originalStepKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.2'}) + '\n';
-                            fs.appendFile(logPath, logEntry3).catch(()=>{});
-                            // #endregion
                         }
                     } catch (e) {
                         logger.error(`[JobProcessor] Meal step ${stepIndex} failed for ${name}`, e as Error);
-                        // #region agent log
-                        const logEntry4 = JSON.stringify({location:'jobProcessor.ts:508',message:'Meal step image failed',data:{name,stepIndex,error:(e as Error).message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2.1'}) + '\n';
-                        fs.appendFile(logPath, logEntry4).catch(()=>{});
-                        // #endregion
                     }
                 }
             }

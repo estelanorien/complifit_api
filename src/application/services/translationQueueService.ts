@@ -31,12 +31,6 @@ export class TranslationQueueService {
      * Enqueue a translation job for an asset.
      */
     async enqueue(assetKey: string, languages: string[] = ['es', 'fr', 'de', 'it', 'pt', 'ru', 'tr', 'zh', 'ja', 'ko', 'ar', 'hi']): Promise<string> {
-        // #region agent log
-        const fs = await import('fs/promises');
-        const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
-        const logEntry = JSON.stringify({location:'translationQueueService.ts:33',message:'Translation job enqueued',data:{assetKey,languagesCount:languages.length,languages},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'}) + '\n';
-        fs.appendFile(logPath, logEntry).catch(()=>{});
-        // #endregion
         try {
             const { rows } = await pool.query(
                 `INSERT INTO translation_jobs(asset_key, target_languages, status)
@@ -103,12 +97,6 @@ export class TranslationQueueService {
 
                 // 2. Execute Translation
                 try {
-                    // #region agent log
-                    const fsStart = await import('fs/promises');
-                    const logPathStart = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
-                    const logEntryStart = JSON.stringify({location:'translationQueueService.ts:100',message:'Translation execution start',data:{jobId:job.id,assetKey:job.asset_key,languagesCount:job.target_languages?.length||0,languages:job.target_languages},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'}) + '\n';
-                    fsStart.appendFile(logPathStart, logEntryStart).catch(()=>{});
-                    // #endregion
                     await this.executeTranslation(job.asset_key, job.target_languages);
 
                     // Success
@@ -121,20 +109,9 @@ export class TranslationQueueService {
                         [job.asset_key]
                     );
                     logger.info(`[TranslationQueue] Job ${job.id} COMPLETED`);
-                    // #region agent log
-                    const logEntryComplete = JSON.stringify({location:'translationQueueService.ts:111',message:'Translation job completed',data:{jobId:job.id,assetKey:job.asset_key},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.1'}) + '\n';
-                    fsStart.appendFile(logPathStart, logEntryComplete).catch(()=>{});
-                    // #endregion
 
                 } catch (err: any) {
                     logger.error(`[TranslationQueue] Job ${job.id} FAILED`, err);
-                    // #region agent log
-                    const fsError = await import('fs/promises');
-                    const logPathError = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
-                    const logEntryError = JSON.stringify({location:'translationQueueService.ts:114',message:'Translation job failed',data:{jobId:job.id,assetKey:job.asset_key,error:err.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.2'}) + '\n';
-                    fsError.appendFile(logPathError, logEntryError).catch(()=>{});
-                    // #endregion
-
                     // Retry logic? For now just fail. V2.1 can add retries.
                     await pool.query(
                         `UPDATE translation_jobs SET status = 'failed', error_log = $1, updated_at = NOW() WHERE id = $2`,
@@ -176,12 +153,6 @@ export class TranslationQueueService {
 
         if (asset_type === 'json') {
             const data = JSON.parse(value);
-            // #region agent log
-            const fsExtract = await import('fs/promises');
-            const logPathExtractJson = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
-            const logEntryExtractJson = JSON.stringify({location:'translationQueueService.ts:152',message:'Text extraction from JSON',data:{assetKey,hasInstructions:!!data.instructions,instructionsCount:data.instructions?.length||0,hasSafetyWarnings:!!data.safety_warnings,safetyWarningsCount:data.safety_warnings?.length||0,hasProTips:!!data.pro_tips,proTipsCount:data.pro_tips?.length||0,hasNutritionScience:!!data.nutrition_science,hasPrepTips:!!data.prep_tips,prepTipsCount:data.prep_tips?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.3'}) + '\n';
-            fsExtract.appendFile(logPathExtractJson, logEntryExtractJson).catch(()=>{});
-            // #endregion
             // Heuristic extraction
             if (data.instructions && Array.isArray(data.instructions)) {
                 data.instructions.forEach((s: any) => {
@@ -220,13 +191,6 @@ export class TranslationQueueService {
             // If it's an image, maybe we just complete it?
             return;
         }
-
-        // #region agent log
-        const fsLog = await import('fs/promises');
-        const logPathExtract = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
-        const logEntryExtract = JSON.stringify({location:'translationQueueService.ts:177',message:'Texts to translate extracted',data:{assetKey,textsToTranslateCount:textsToTranslate.length,textsByContext:textsToTranslate.reduce((acc,t)=>{acc[t.context]=(acc[t.context]||0)+1;return acc;},{})},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.3'}) + '\n';
-        fsLog.appendFile(logPathExtract, logEntryExtract).catch(()=>{});
-        // #endregion
 
         if (textsToTranslate.length === 0) return;
 
@@ -288,12 +252,6 @@ export class TranslationQueueService {
                 }
             }
         }
-        // #region agent log
-        const fsSave = await import('fs/promises');
-        const logPathSave = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
-        const logEntrySave = JSON.stringify({location:'translationQueueService.ts:230',message:'Translations saved',data:{assetKey,languagesCount:Object.keys(parsed).length,savedTranslationsCount:savedCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3.4'}) + '\n';
-        fsSave.appendFile(logPathSave, logEntrySave).catch(()=>{});
-        // #endregion
     }
 
     private getContentHash(text: string): string {

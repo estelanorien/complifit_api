@@ -151,13 +151,6 @@ export class VideoQueueService {
     }
 
     private async executeVideoGeneration(assetKey: string, persona: string | null): Promise<string> {
-        // #region agent log
-        const fs = await import('fs/promises');
-        const logPath = 'c:\\Users\\rmkoc\\Downloads\\vitapp2\\.cursor\\debug.log';
-        const logEntry = JSON.stringify({location:'videoQueueService.ts:153',message:'Video generation entry',data:{assetKey,persona,isExercise:!!persona,isMeal:!persona},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4.1'}) + '\n';
-        fs.appendFile(logPath, logEntry).catch(()=>{});
-        // #endregion
-
         // 1. Fetch Context (Exercise Name, Instructions)
         const { rows } = await pool.query(
             `SELECT value, asset_type FROM cached_assets WHERE key = $1`,
@@ -184,11 +177,6 @@ export class VideoQueueService {
             prompt = `Cinematic food preparation shot. ${subjectName}. Gourmet 4k cooking video. Steam rising, delicious texture. 30-60 seconds, showing complete preparation steps.`;
         }
 
-        // #region agent log
-        const logEntry2 = JSON.stringify({location:'videoQueueService.ts:177',message:'Video prompt constructed',data:{assetKey,persona,isExercise:!!persona,isMeal:!persona,promptLength:prompt.length,videoLengthSpec:'5 seconds loop',hasLengthControl:prompt.includes('seconds')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4.3'}) + '\n';
-        fs.appendFile(logPath, logEntry2).catch(()=>{});
-        // #endregion
-
         // 3. Call AI Service (Veo)
         // Note: AI Service needs a `generateVideo` method. 
         // If it doesn't exist, we'll mock it or add it.
@@ -199,10 +187,6 @@ export class VideoQueueService {
         // We really should put that in `AiService`.
 
         const videoUrl = await aiService.generateVideo({ prompt });
-        // #region agent log
-        const logEntry3 = JSON.stringify({location:'videoQueueService.ts:189',message:'Video generation result',data:{assetKey,persona,hasVideoUrl:!!videoUrl,videoUrlLength:videoUrl?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4.1'}) + '\n';
-        fs.appendFile(logPath, logEntry3).catch(()=>{});
-        // #endregion
         return videoUrl;
     }
 }
