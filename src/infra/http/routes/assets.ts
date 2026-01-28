@@ -339,8 +339,10 @@ export async function assetsRoutes(app: FastifyInstance) {
     corsHeaders();
 
     try {
-      const body = z.object({ movementId: z.string(), limit: z.number().min(1).max(100).optional() }).parse(req.body || {});
-      const limit = body.limit || 100;
+      const body = z.object({ movementId: z.string(), limit: z.number().min(1).max(50).optional() }).parse(req.body || {});
+      // Cap limit aggressively to avoid Cloud Run response-size issues
+      const requestedLimit = body.limit ?? 40;
+      const limit = Math.min(requestedLimit, 40);
       const originalMovementId = body.movementId;
       req.log.info(`[by-movement] Query for movementId: ${originalMovementId}, limit: ${limit}`);
 

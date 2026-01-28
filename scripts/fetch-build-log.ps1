@@ -22,7 +22,10 @@ Write-Host "Fetching log..."
 $logOutput = gcloud builds log $buildId --region=$Region 2>&1
 $logOutput | Set-Content -Path $OutFile -Encoding utf8
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "gcloud builds log failed. If you see permission/403, run first:"
+    Write-Host "gcloud builds log failed (permission or error). Wrote whatever we got to $OutFile - open it."
+    Write-Host ""
+    Write-Host "If build-log.txt says permission denied / 403, run this (replace YOUR_EMAIL with your Google account):"
+    Write-Host "  gcloud config set project $ProjectId"
     Write-Host "  gcloud projects add-iam-policy-binding $ProjectId --member=`"user:YOUR_EMAIL`" --role=roles/logging.viewer"
     Write-Host "Then run this script again."
     exit 1

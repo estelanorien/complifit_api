@@ -79,7 +79,12 @@ This fetches the **latest europe-west1** build’s log to `build-log.txt` in the
 
 1. **Get the europe build log**: Open PowerShell, `cd` to the vitality_api folder (where `scripts` lives), run `.\scripts\fetch-build-log.ps1`. Open `build-log.txt`.
 2. **If the script fails with permission/403**: Run Option 1 (Logs Viewer) above, then run `.\scripts\fetch-build-log.ps1` again.
-3. **Compare triggers**: In Cloud Build → Triggers, open the **europe** trigger and the **global** one. Check: **Service account** (same?), **Substitution variables** (PROJECT_ID, COMMIT_SHA or REPO_NAME/BRANCH_NAME). The europe trigger must use the same SA that has Artifact Registry + Cloud Run permissions, and must pass substitutions so `cloudbuild.yaml` gets `$PROJECT_ID` and `$COMMIT_SHA`. If europe uses different substitutions or a different SA, fix it to match the working global trigger, or re-run the "Full fix" block so **gemini@** has the roles and use that SA for europe too.
+3. **Compare triggers**: In Cloud Build → Triggers, open the **europe** trigger and the **global** one. Check: **Service account** (same?), **Substitution variables** (PROJECT_ID, COMMIT_SHA or REPO_NAME/BRANCH_NAME).
+4. **Fix europe to match global (one script)**: From the vitality_api folder, run:
+   ```powershell
+   .\scripts\fix-europe-trigger-match-global.ps1
+   ```
+   This copies the **global** trigger’s service account to the **europe** trigger. If global uses the default Cloud Build SA, it also grants that SA Artifact Registry + Cloud Run. Then retry the europe build or push to `main`.
 
 ---
 

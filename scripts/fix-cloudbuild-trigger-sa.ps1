@@ -47,6 +47,24 @@ gcloud projects add-iam-policy-binding $PROJECT_ID `
   --quiet
 if ($LASTEXITCODE -ne 0) { throw "Failed to grant run.admin" }
 
+# Logs Writer so the build can write logs to Cloud Logging
+Write-Host "Granting roles/logging.logWriter (project) ..."
+gcloud projects add-iam-policy-binding $PROJECT_ID `
+  --member="serviceAccount:$SA_EMAIL" `
+  --role="roles/logging.logWriter" `
+  --quiet
+if ($LASTEXITCODE -ne 0) { throw "Failed to grant logging.logWriter" }
+
+# So gcloud run deploy can act as the Compute default SA
+$COMPUTE_SA = "684095677071-compute@developer.gserviceaccount.com"
+Write-Host "Granting vitality-api-cb permission to use Compute default SA (for deploy) ..."
+gcloud iam service-accounts add-iam-policy-binding $COMPUTE_SA `
+  --member="serviceAccount:$SA_EMAIL" `
+  --role="roles/iam.serviceAccountUser" `
+  --project=$PROJECT_ID `
+  --quiet
+if ($LASTEXITCODE -ne 0) { throw "Failed to grant iam.serviceAccountUser" }
+
 # 3. Find and update the trigger
 if (-not $TriggerName) {
     Write-Host "Listing triggers in $REGION ..."

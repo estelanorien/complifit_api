@@ -1,0 +1,25 @@
+================================================================================
+  SEE THE BUILD LOG RIGHT NOW (when Console says "No logs" or you can't tell why it failed)
+================================================================================
+
+1. Open PowerShell (Windows key, type PowerShell, Enter).
+
+2. Copy and paste these two lines, then press Enter:
+
+   cd "c:\Users\rmkoc\Downloads\vitapp2\vitality_api-main\vitality_api-main"
+   .\scripts\fetch-build-log.ps1
+
+3. Open the file "build-log.txt" in this folder. That file IS the build log. You'll see exactly why the build failed.
+
+----------------------------------------------------------------------
+If the script prints "permission denied" or 403:
+----------------------------------------------------------------------
+
+Replace your.email@gmail.com with the Google account you use in Cloud Console, then run:
+
+   gcloud config set project bright-aloe-485517-n8
+   gcloud projects add-iam-policy-binding bright-aloe-485517-n8 --member="user:your.email@gmail.com" --role="roles/logging.viewer"
+
+Then run step 2 again, and open build-log.txt.
+
+================================================================================
