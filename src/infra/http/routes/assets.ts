@@ -375,8 +375,38 @@ export async function assetsRoutes(app: FastifyInstance) {
 
       req.log.info(`[by-movement] Found ${rows.length} rows for ${originalMovementId}`);
       const processedRows = rows.map((row: any) => {
-        if (row.asset_type === 'image' && row.value && typeof row.value === 'string' && !row.value.startsWith('data:image') && /^[A-Za-z0-9+/=]+$/.test(row.value)) {
-          row.value = `data:image/png;base64,${row.value}`;
+        // CRITICAL: Ensure image values are always valid base64 data URIs
+        if (row.asset_type === 'image' && row.value) {
+          if (typeof row.value === 'string') {
+            // If already a data URI, validate and clean it
+            if (row.value.startsWith('data:image')) {
+              const match = row.value.match(/data:image\/[^;]+;base64,(.+)/s);
+              if (match && match[1]) {
+                const base64Data = match[1].replace(/[\s\r\n\t]/g, '');
+                if (/^[A-Za-z0-9+/=]+$/.test(base64Data) && base64Data.length > 100) {
+                  row.value = `data:image/png;base64,${base64Data}`;
+                } else {
+                  req.log.warn(`[by-movement] Invalid base64 in data URI for ${row.key}, skipping`);
+                  row.value = null;
+                }
+              }
+            } else {
+              // Raw base64 string - clean and validate
+              const cleaned = row.value.replace(/[\s\r\n\t]/g, '');
+              if (/^[A-Za-z0-9+/=]+$/.test(cleaned) && cleaned.length > 100) {
+                row.value = `data:image/png;base64,${cleaned}`;
+              } else {
+                req.log.warn(`[by-movement] Invalid base64 for ${row.key}, skipping`);
+                row.value = null;
+              }
+            }
+          } else if (Buffer.isBuffer(row.value)) {
+            // Binary buffer - convert to base64
+            row.value = `data:image/png;base64,${row.value.toString('base64')}`;
+          } else {
+            req.log.warn(`[by-movement] Unexpected image value type for ${row.key}: ${typeof row.value}`);
+            row.value = null;
+          }
         }
         // text_context/text_context_simple exist only after migration 046; default for same response shape
         if (row.text_context === undefined) row.text_context = null;

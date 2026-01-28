@@ -126,13 +126,21 @@ export class AssetPromptService {
                 style = guidelines.styleExerciseImage;
                 if (identity === 'atlas') {
                     style += ` Subject: COACH ATLAS. ${guidelines.coachMaleDescription || "Athletic male, professional gym photography."}`;
+                    // ENFORCE: Atlas MUST wear athletic shoes - add explicitly even if description doesn't mention it
+                    if (!guidelines.coachMaleDescription?.toLowerCase().includes('shoe') && !guidelines.coachMaleDescription?.toLowerCase().includes('sneaker')) {
+                        style += ` Wearing athletic shoes (sports sneakers).`;
+                    }
                 } else if (identity === 'nova') {
                     style += ` Subject: COACH NOVA. ${guidelines.coachFemaleDescription || "Athletic female, professional gym photography."}`;
+                    // ENFORCE: Nova MUST wear athletic shoes - add explicitly even if description doesn't mention it
+                    if (!guidelines.coachFemaleDescription?.toLowerCase().includes('shoe') && !guidelines.coachFemaleDescription?.toLowerCase().includes('sneaker')) {
+                        style += ` Wearing athletic shoes (sports sneakers).`;
+                    }
                 } else {
                     style += ` Featuring: ${guidelines.vitalityAvatarDescription}.`;
                 }
-                // CRITICAL: Always enforce footwear for exercise images
-                style += ` CRITICAL: Subject MUST wear athletic shoes (sports sneakers). NO barefoot, NO socks only, NO feet visible without shoes.`;
+                // CRITICAL: Always enforce footwear for exercise images - REPEATED for emphasis
+                style += ` CRITICAL REQUIREMENT: Subject MUST wear athletic shoes (sports sneakers) at all times. NO barefoot, NO socks only, NO feet visible without shoes. This is MANDATORY and NON-NEGOTIABLE.`;
             } else if (groupType === 'meal') {
                 style = guidelines.styleMealImage;
             }
@@ -162,6 +170,10 @@ export class AssetPromptService {
             prompt += " CRITICAL: STRICTLY NO TEXT, NO CALORIE LABELS, NO OVERLAYS.";
         } else if (type === 'image') {
             prompt += " STRICTLY NO TEXT.";
+            // CRITICAL: Always enforce footwear for exercise images (all steps and main) - REPEATED for emphasis
+            if (groupType === 'exercise') {
+                prompt += " CRITICAL REQUIREMENT: Subject MUST wear athletic shoes (sports sneakers) at all times. NO barefoot, NO socks only, NO feet visible without shoes. This is MANDATORY and NON-NEGOTIABLE. The subject's feet MUST be completely covered by athletic shoes in every image.";
+            }
         }
 
         return { prompt, referenceImage: refImage, referenceType: refType };
