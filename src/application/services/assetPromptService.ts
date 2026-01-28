@@ -131,6 +131,8 @@ export class AssetPromptService {
                 } else {
                     style += ` Featuring: ${guidelines.vitalityAvatarDescription}.`;
                 }
+                // CRITICAL: Always enforce footwear for exercise images
+                style += ` CRITICAL: Subject MUST wear athletic shoes (sports sneakers). NO barefoot, NO socks only, NO feet visible without shoes.`;
             } else if (groupType === 'meal') {
                 style = guidelines.styleMealImage;
             }
