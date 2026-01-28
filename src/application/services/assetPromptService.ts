@@ -173,6 +173,11 @@ export class AssetPromptService {
             // CRITICAL: Always enforce footwear for exercise images (all steps and main) - REPEATED for emphasis
             if (groupType === 'exercise') {
                 prompt += " CRITICAL REQUIREMENT: Subject MUST wear athletic shoes (sports sneakers) at all times. NO barefoot, NO socks only, NO feet visible without shoes. This is MANDATORY and NON-NEGOTIABLE. The subject's feet MUST be completely covered by athletic shoes in every image.";
+                // CRITICAL: Prevent medical gear (bandages, casts, braces) - the exercise is about movement, not injury treatment
+                const hasSprain = /sprain/i.test(groupName) || /sprain/i.test(coreDescription);
+                if (hasSprain) {
+                    prompt += " ABSOLUTELY NO medical equipment, bandages, casts, braces, or injury treatment devices. This is a fitness exercise demonstration, NOT a medical treatment scenario. The subject is healthy and performing the exercise normally.";
+                }
             }
         }
 

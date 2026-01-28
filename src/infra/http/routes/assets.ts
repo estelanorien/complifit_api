@@ -42,8 +42,23 @@ export async function assetsRoutes(app: FastifyInstance) {
       const asset = await AssetRepository.findByKey(decodedKey);
 
       if (asset) {
-        let { buffer, asset_type, status, metadata } = asset;
-        let value = buffer ? buffer.toString() : '';
+        let { buffer, asset_type, status, metadata, value: dbValue } = asset;
+        let value = dbValue || '';
+        
+        // CRITICAL FIX: If buffer exists (from asset_blob_storage), convert it to base64
+        // buffer.toString() without encoding returns binary data with null bytes
+        if (buffer && Buffer.isBuffer(buffer)) {
+          if (asset_type === 'image') {
+            // Convert binary PNG buffer to base64 string
+            value = buffer.toString('base64');
+          } else if (asset_type === 'json') {
+            // For JSON, convert buffer to UTF-8 string
+            value = buffer.toString('utf-8');
+          } else {
+            // For other types, use base64
+            value = buffer.toString('base64');
+          }
+        }
 
         // If image, ensure base64 prefix
         if (asset_type === 'image' && value && !value.startsWith('data:image')) {
@@ -207,15 +222,18 @@ export async function assetsRoutes(app: FastifyInstance) {
     if (!Array.isArray(keys) || keys.length === 0) return {};
     
     // FIX: Return full asset data including status and metadata for frontend
+    // CRITICAL: Join with asset_blob_storage to get binary data if value column is empty
     const { rows } = await pool.query(
       `SELECT 
         a.key, 
         a.value, 
         a.asset_type,
         a.status,
+        b.data as buffer,
         m.text_context,
         m.text_context_simple
       FROM cached_assets a
+      LEFT JOIN asset_blob_storage b ON a.key = b.key
       LEFT JOIN cached_asset_meta m ON m.key = a.key
       WHERE a.key = ANY($1) AND a.status IN ('active','auto','draft','generating')
       LIMIT 100`,
@@ -225,6 +243,22 @@ export async function assetsRoutes(app: FastifyInstance) {
     const result: Record<string, any> = {};
     rows.forEach((r: any) => {
       let value = r.value || '';
+      
+      // CRITICAL FIX: If buffer exists (from asset_blob_storage), convert it to base64
+      // buffer.toString() without encoding returns binary data with null bytes
+      if (r.buffer && Buffer.isBuffer(r.buffer)) {
+        if (r.asset_type === 'image') {
+          // Convert binary PNG buffer to base64 string
+          value = r.buffer.toString('base64');
+        } else if (r.asset_type === 'json') {
+          // For JSON, convert buffer to UTF-8 string
+          value = r.buffer.toString('utf-8');
+        } else {
+          // For other types, use base64
+          value = r.buffer.toString('base64');
+        }
+      }
+      
       // If image, ensure base64 prefix
       if (r.asset_type === 'image' && value && !value.startsWith('data:image')) {
         value = `data:image/png;base64,${value}`;
