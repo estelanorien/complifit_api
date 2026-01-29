@@ -158,8 +158,10 @@ export async function adminRoutes(app: FastifyInstance) {
         // Gemini often wraps JSON in backticks
         value = text;
       } else {
-        // Attempt Real Veo Generation with fallback
-        const modelsToTry = ['models/veo-3.0-generate-preview', 'models/veo-2.0-generate-001'];
+        // Veo video generation via Gemini API (no Vertex AI needed).
+        // Uses predictLongRunning + poll; see https://ai.google.dev/gemini-api/docs/video
+        const baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
+        const modelsToTry = ['models/veo-3.1-generate-preview', 'models/veo-3.1-fast-generate-preview', 'models/veo-3.0-generate-001'];
         let lastError: Error | null = null;
         let videoUri: string | null = null;
 
@@ -167,63 +169,81 @@ export async function adminRoutes(app: FastifyInstance) {
 
         for (const model of modelsToTry) {
           try {
-            const genEndpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`;
+            const startEndpoint = `${baseUrl}/${model}:predictLongRunning`;
             console.log(`[Admin] Trying Veo model: ${model}`);
 
-            const res = await fetch(genEndpoint, {
+            const startRes = await fetch(startEndpoint, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
                 'x-goog-api-key': env.geminiApiKey
               },
               body: JSON.stringify({
-                contents: [{ parts }]
+                instances: [{ prompt: prompt }],
+                parameters: { aspectRatio: '16:9' }
               })
             });
 
-            console.log(`[Admin] Veo response: status=${res.status}, ok=${res.ok}`);
-
-            if (!res.ok) {
-              const errorText = await res.text();
-              console.error(`[Admin] Veo error (${model}): ${res.status} - ${errorText.substring(0, 200)}`);
-              
-              // If 404 (model not found), try next model
-              if (res.status === 404) {
+            if (!startRes.ok) {
+              const errorText = await startRes.text();
+              console.error(`[Admin] Veo start error (${model}): ${startRes.status} - ${errorText.substring(0, 200)}`);
+              if (startRes.status === 404) {
                 lastError = new Error(`Model ${model} not found`);
                 continue;
               }
-              throw new Error(`Veo API error (${res.status}): ${errorText}`);
+              throw new Error(`Veo API error (${startRes.status}): ${errorText}`);
             }
 
-            const data: any = await res.json();
-            videoUri = data?.candidates?.[0]?.content?.parts?.[0]?.fileData?.fileUri;
-
-            console.log(`[Admin] Veo result: hasVideoUri=${!!videoUri}, candidatesCount=${data?.candidates?.length || 0}`);
-
-            if (videoUri) {
-              console.log(`[Admin] Video generated successfully with model ${model}`);
-              break; // Success!
-            } else {
-              lastError = new Error(`Veo API returned no video URI with model ${model}`);
-              continue; // Try next model
+            const startData: any = await startRes.json();
+            const opName = startData?.name;
+            if (!opName) {
+              lastError = new Error(`Veo start response missing operation name`);
+              continue;
             }
+
+            // Poll until done (max ~6 min per docs)
+            const pollIntervalMs = 10000;
+            const maxWaitMs = 360000;
+            let waited = 0;
+            while (waited < maxWaitMs) {
+              await new Promise((r) => setTimeout(r, pollIntervalMs));
+              waited += pollIntervalMs;
+              const pollRes = await fetch(`${baseUrl}/${opName}`, {
+                headers: { 'x-goog-api-key': env.geminiApiKey }
+              });
+              if (!pollRes.ok) {
+                lastError = new Error(`Veo poll error: ${pollRes.status}`);
+                break;
+              }
+              const pollData: any = await pollRes.json();
+              if (pollData?.done) {
+                videoUri =
+                  pollData?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
+                  pollData?.response?.generatedSamples?.[0]?.video?.uri;
+                if (videoUri) {
+                  console.log(`[Admin] Video generated successfully with model ${model}`);
+                  break;
+                }
+                lastError = new Error(`Veo returned no video URI`);
+                break;
+              }
+              console.log(`[Admin] Veo polling... (${waited / 1000}s)`);
+            }
+
+            if (videoUri) break;
+            if (lastError && !lastError.message?.includes('404')) break;
           } catch (e: any) {
             console.error(`[Admin] Veo attempt failed (${model}):`, e.message);
             lastError = e;
-            // If it's a 404, continue to next model
             if (e.message?.includes('404')) continue;
-            // For other errors, throw immediately
             throw e;
           }
         }
 
         if (!videoUri) {
-          // Provide helpful error message about Veo requirements
           const veoError = new Error(
-            'Video generation requires Veo API access. ' +
-            'Please ensure: (1) Vertex AI API is enabled in Google Cloud Console, ' +
-            '(2) Your API key has video generation permissions, ' +
-            '(3) Veo is available in your region. ' +
+            'Video generation uses Veo via the Gemini API (no Vertex AI required). ' +
+            'Ensure your API key from aistudio.google.com has access to Veo (paid preview). ' +
             'Original error: ' + (lastError?.message || 'No Veo models available')
           );
           console.error('[Admin] Veo not available:', veoError.message);

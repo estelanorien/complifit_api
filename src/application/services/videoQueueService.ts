@@ -5,6 +5,10 @@ import { AiService } from './aiService.js';
 
 const aiService = new AiService();
 
+// Location consistency: same setting for all videos (no beach vs gym mix)
+const VIDEO_LOCATION_EXERCISE = 'Modern indoor gym, consistent set. Same environment for all fitness videos. No beach, no outdoor, no home. Professional fitness studio.';
+const VIDEO_LOCATION_MEAL = 'Modern professional kitchen, consistent set. Same environment for all meal videos. No outdoor, no varied backgrounds.';
+
 export class VideoQueueService {
     private processing = false;
     private intervalId: NodeJS.Timeout | null = null;
@@ -166,15 +170,15 @@ export class VideoQueueService {
         // 2. Construct Prompt
         let prompt = "";
         if (persona) {
-            // Exercise Video
+            // Exercise Video (location consistency)
             const coachDesc = persona === 'atlas'
                 ? "Caucasian male fitness coach, athletic build, short hair"
                 : "Caucasian female fitness coach, athletic build, ponytail";
 
-            prompt = `Cinematic 4k fitness shot. ${coachDesc}. Performing perfect form ${subjectName}. Dark gym background, moody lighting. 5-10 seconds loop.`;
+            prompt = `Cinematic 4k fitness shot. ${coachDesc}. Performing perfect form ${subjectName}. ${VIDEO_LOCATION_EXERCISE}. Moody lighting. 5-10 seconds loop.`;
         } else {
-            // Meal Prep Video - FIX: Longer duration for meal videos (30-60 seconds)
-            prompt = `Cinematic food preparation shot. ${subjectName}. Gourmet 4k cooking video. Steam rising, delicious texture. 30-60 seconds, showing complete preparation steps.`;
+            // Meal Prep Video (location consistency)
+            prompt = `Cinematic food preparation shot. ${subjectName}. ${VIDEO_LOCATION_MEAL}. Gourmet 4k cooking video. Steam rising, delicious texture. 30-60 seconds, showing complete preparation steps.`;
         }
 
         // 3. Call AI Service (Veo)

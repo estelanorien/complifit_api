@@ -206,56 +206,60 @@ FORBIDDEN:
     return { base64: `data:image/png;base64,${base64}` };
   }
 
-  async generateVideo({ prompt, model = 'models/veo-3.1-generate-preview' }: { prompt: string, model?: string }): Promise<string> {
-    // Try veo-3.1 first, fallback to veo-3.0 if not available
-    let lastError: Error | null = null;
-    const modelsToTry = ['models/veo-3.1-generate-preview', 'models/veo-3.0-generate-preview'];
-    
-    for (const modelToTry of modelsToTry) {
+  async generateVideo({ prompt }: { prompt: string; model?: string }): Promise<string> {
+    // Veo via Gemini API: predictLongRunning + poll (see https://ai.google.dev/gemini-api/docs/video)
+    const modelsToTry = ['models/veo-3.1-generate-preview', 'models/veo-3.1-fast-generate-preview', 'models/veo-3.0-generate-001'];
+    const pollIntervalMs = 10000;
+    const maxWaitMs = 360000;
+
+    for (const model of modelsToTry) {
       try {
-        const res = await fetch(`${this.baseUrl}/${modelToTry}:generateContent`, {
+        const startRes = await fetch(`${this.baseUrl}/${model}:predictLongRunning`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'x-goog-api-key': this.apiKey
           },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
+            instances: [{ prompt }],
+            parameters: { aspectRatio: '16:9' }
           })
         });
 
-        if (!res.ok) {
-          const errorText = await res.text();
-          lastError = new Error(`Veo API error (${res.status}): ${errorText}`);
-          // If 404, try next model; otherwise throw immediately
-          if (res.status === 404 && modelsToTry.indexOf(modelToTry) < modelsToTry.length - 1) {
-            continue;
+        if (!startRes.ok) {
+          if (startRes.status === 404) continue;
+          throw new Error(`Veo start error (${startRes.status}): ${await startRes.text()}`);
+        }
+
+        const startData = (await startRes.json()) as any;
+        const opName = startData?.name;
+        if (!opName) continue;
+
+        let waited = 0;
+        while (waited < maxWaitMs) {
+          await new Promise((r) => setTimeout(r, pollIntervalMs));
+          waited += pollIntervalMs;
+          const pollRes = await fetch(`${this.baseUrl}/${opName}`, {
+            headers: { 'x-goog-api-key': this.apiKey }
+          });
+          if (!pollRes.ok) throw new Error(`Veo poll error: ${pollRes.status}`);
+          const pollData = (await pollRes.json()) as any;
+          if (pollData?.done) {
+            const videoUri =
+              pollData?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
+              pollData?.response?.generatedSamples?.[0]?.video?.uri;
+            if (videoUri) return videoUri;
+            throw new Error('Veo returned no video URI');
           }
-          throw lastError;
         }
-
-        const data = await res.json() as any;
-        const videoUri = data?.candidates?.[0]?.content?.parts?.[0]?.fileData?.fileUri;
-
-        if (!videoUri) {
-          throw new Error("Veo API returned no video URI. Response: " + JSON.stringify(data));
-        }
-
-        return videoUri;
+        throw new Error('Veo timed out waiting for video');
       } catch (e: any) {
-        lastError = e;
-        // If it's a 404 and we have more models to try, continue
-        if (e.message?.includes('404') && modelsToTry.indexOf(modelToTry) < modelsToTry.length - 1) {
-          continue;
-        }
-        // Otherwise, if it's the last model or a different error, throw
-        if (modelsToTry.indexOf(modelToTry) === modelsToTry.length - 1) {
-          throw e;
-        }
+        if (e.message?.includes('404') || e.message?.includes('not found')) continue;
+        throw e;
       }
     }
-    
-    throw lastError || new Error('Video generation failed: No models available');
+
+    throw new Error('Video generation failed: No Veo models available. Ensure API key has Veo access (paid preview).');
   }
 }
 
