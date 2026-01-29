@@ -158,7 +158,8 @@ export async function adminRoutes(app: FastifyInstance) {
         // Gemini often wraps JSON in backticks
         value = text;
       } else {
-        // Veo video generation via Gemini API (no Vertex AI needed).
+        // Video generation runs only in the backend (Veo via Gemini API; no Vertex AI).
+        // Frontend must use this endpoint; no client-side Veo or API key.
         // Uses predictLongRunning + poll; see https://ai.google.dev/gemini-api/docs/video
         const baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
         const modelsToTry = ['models/veo-3.1-generate-preview', 'models/veo-3.1-fast-generate-preview', 'models/veo-3.0-generate-001'];
@@ -195,20 +196,23 @@ export async function adminRoutes(app: FastifyInstance) {
             }
 
             const startData: any = await startRes.json();
-            const opName = startData?.name;
+            let opName = startData?.name;
             if (!opName) {
               lastError = new Error(`Veo start response missing operation name`);
               continue;
             }
+            // Keep operation name as returned (e.g. "operations/..." or full URL)
+            if (opName.startsWith('/')) opName = opName.slice(1);
 
             // Poll until done (max ~6 min per docs)
             const pollIntervalMs = 10000;
             const maxWaitMs = 360000;
+            const pollUrl = opName.startsWith('http') ? opName : `${baseUrl}/${opName}`;
             let waited = 0;
             while (waited < maxWaitMs) {
               await new Promise((r) => setTimeout(r, pollIntervalMs));
               waited += pollIntervalMs;
-              const pollRes = await fetch(`${baseUrl}/${opName}`, {
+              const pollRes = await fetch(pollUrl, {
                 headers: { 'x-goog-api-key': env.geminiApiKey }
               });
               if (!pollRes.ok) {
@@ -216,15 +220,36 @@ export async function adminRoutes(app: FastifyInstance) {
                 break;
               }
               const pollData: any = await pollRes.json();
+              if (pollData?.error) {
+                lastError = new Error(pollData.error.message || JSON.stringify(pollData.error));
+                break;
+              }
               if (pollData?.done) {
+                const resp = pollData?.response || {};
                 videoUri =
-                  pollData?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
-                  pollData?.response?.generatedSamples?.[0]?.video?.uri;
+                  resp?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
+                  resp?.generate_video_response?.generated_samples?.[0]?.video?.uri ||
+                  resp?.generatedSamples?.[0]?.video?.uri ||
+                  resp?.generated_samples?.[0]?.video?.uri ||
+                  resp?.generatedVideos?.[0]?.video?.uri ||
+                  resp?.generated_videos?.[0]?.video?.uri;
+                if (!videoUri && typeof resp === 'object') {
+                  const findUri = (o: any): string | null => {
+                    if (!o || typeof o !== 'object') return null;
+                    if (o.uri && typeof o.uri === 'string' && (o.uri.startsWith('http') || o.uri.startsWith('https'))) return o.uri;
+                    if (Array.isArray(o)) { for (const i of o) { const u = findUri(i); if (u) return u; } return null; }
+                    for (const k of Object.keys(o)) { const u = findUri(o[k]); if (u) return u; }
+                    return null;
+                  };
+                  videoUri = findUri(resp);
+                }
                 if (videoUri) {
                   console.log(`[Admin] Video generated successfully with model ${model}`);
                   break;
                 }
-                lastError = new Error(`Veo returned no video URI`);
+                const respPreview = JSON.stringify(resp).slice(0, 500);
+                console.error('[Admin] Veo done but no video URI. Response (preview):', respPreview);
+                lastError = new Error(`Veo returned no video URI. Check server logs for response preview.`);
                 break;
               }
               console.log(`[Admin] Veo polling... (${waited / 1000}s)`);

@@ -181,15 +181,7 @@ export class VideoQueueService {
             prompt = `Cinematic food preparation shot. ${subjectName}. ${VIDEO_LOCATION_MEAL}. Gourmet 4k cooking video. Steam rising, delicious texture. 30-60 seconds, showing complete preparation steps.`;
         }
 
-        // 3. Call AI Service (Veo)
-        // Note: AI Service needs a `generateVideo` method. 
-        // If it doesn't exist, we'll mock it or add it.
-        // Assuming we added it or will add it.
-
-        // For now, let's use the method we saw in `admin.ts`? 
-        // `admin.ts` called `fetch(genEndpoint)` directly for Veo.
-        // We really should put that in `AiService`.
-
+        // Video generation runs only in the backend (this job processor or /admin/generate-asset).
         const videoUrl = await aiService.generateVideo({ prompt });
         return videoUrl;
     }

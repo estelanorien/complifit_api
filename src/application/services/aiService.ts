@@ -232,22 +232,40 @@ FORBIDDEN:
         }
 
         const startData = (await startRes.json()) as any;
-        const opName = startData?.name;
+        let opName = startData?.name;
         if (!opName) continue;
+        if (typeof opName === 'string' && opName.startsWith('/')) opName = opName.slice(1);
+        const pollUrl = opName.startsWith('http') ? opName : `${this.baseUrl}/${opName}`;
 
         let waited = 0;
         while (waited < maxWaitMs) {
           await new Promise((r) => setTimeout(r, pollIntervalMs));
           waited += pollIntervalMs;
-          const pollRes = await fetch(`${this.baseUrl}/${opName}`, {
+          const pollRes = await fetch(pollUrl, {
             headers: { 'x-goog-api-key': this.apiKey }
           });
           if (!pollRes.ok) throw new Error(`Veo poll error: ${pollRes.status}`);
           const pollData = (await pollRes.json()) as any;
+          if (pollData?.error) throw new Error(pollData.error.message || JSON.stringify(pollData.error));
           if (pollData?.done) {
-            const videoUri =
-              pollData?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
-              pollData?.response?.generatedSamples?.[0]?.video?.uri;
+            const resp = pollData?.response || {};
+            let videoUri =
+              resp?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
+              resp?.generate_video_response?.generated_samples?.[0]?.video?.uri ||
+              resp?.generatedSamples?.[0]?.video?.uri ||
+              resp?.generated_samples?.[0]?.video?.uri ||
+              resp?.generatedVideos?.[0]?.video?.uri ||
+              resp?.generated_videos?.[0]?.video?.uri;
+            if (!videoUri && typeof resp === 'object') {
+              const findUri = (o: any): string | null => {
+                if (!o || typeof o !== 'object') return null;
+                if (o.uri && typeof o.uri === 'string' && (o.uri.startsWith('http') || o.uri.startsWith('https'))) return o.uri;
+                if (Array.isArray(o)) { for (const i of o) { const u = findUri(i); if (u) return u; } return null; }
+                for (const k of Object.keys(o)) { const u = findUri(o[k]); if (u) return u; }
+                return null;
+              };
+              videoUri = findUri(resp);
+            }
             if (videoUri) return videoUri;
             throw new Error('Veo returned no video URI');
           }
