@@ -359,6 +359,29 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
+  // Video proxy: stream Veo/Google video URLs with API key so the UI can preview before publishing
+  app.get('/admin/video-proxy', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    const uri = (req.query as { uri?: string }).uri;
+    if (!uri || typeof uri !== 'string') return reply.status(400).send({ error: 'Missing uri query parameter' });
+    try {
+      const decoded = decodeURIComponent(uri);
+      if (!decoded.startsWith('https://') || (!decoded.includes('generativelanguage.googleapis.com') && !decoded.includes('googleapis.com'))) {
+        return reply.status(400).send({ error: 'Invalid video URI' });
+      }
+      const headers: Record<string, string> = {};
+      if (decoded.includes('googleapis.com') && env.geminiApiKey) headers['x-goog-api-key'] = env.geminiApiKey;
+      const res = await fetch(decoded, { headers });
+      if (!res.ok) return reply.status(res.status).send({ error: `Upstream: ${res.statusText}` });
+      const contentType = res.headers.get('content-type') || 'video/mp4';
+      const buffer = Buffer.from(await res.arrayBuffer());
+      reply.header('content-type', contentType);
+      return reply.send(buffer);
+    } catch (e: any) {
+      req.log.error({ error: 'video-proxy failed', e });
+      return reply.status(500).send({ error: e.message || 'Proxy failed' });
+    }
+  });
+
   const uploadSchema = z.object({
     videoUrl: z.string(),
     title: z.string(),
