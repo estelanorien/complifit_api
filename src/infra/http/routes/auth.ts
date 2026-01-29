@@ -2,9 +2,10 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AuthService } from '../../../application/services/authService.js';
 import { authGuard } from '../hooks/auth.js';
-import { ValidationError, ConflictError, AuthenticationError } from '../middleware/errors.js';
+import { ValidationError, ConflictError, AuthenticationError, InternalServerError } from '../middleware/errors.js';
 
 const auth = new AuthService();
+const isProduction = process.env.NODE_ENV === 'production';
 
 export async function authRoutes(app: FastifyInstance) {
   app.post('/auth/signup', async (req, reply) => {
@@ -61,7 +62,7 @@ export async function authRoutes(app: FastifyInstance) {
         throw new ValidationError('Validation failed', e);
       }
       // Don't reveal if email/username exists
-      if (e.message?.includes('Invalid credentials')) {
+      if (e?.message?.includes('Invalid credentials')) {
         req.log.warn({
           type: 'login_failed',
           requestId: (req as any).requestId,
@@ -70,7 +71,17 @@ export async function authRoutes(app: FastifyInstance) {
         });
         throw new AuthenticationError('Invalid credentials');
       }
-      throw e; // Let error handler deal with it
+      // Log the real cause so we can fix DB/config issues (500 = DB, JWT, or unexpected error)
+      req.log.error({
+        type: 'login_error',
+        requestId: (req as any).requestId,
+        message: e?.message,
+        code: (e as any)?.code,
+        stack: isProduction ? undefined : e?.stack,
+      });
+      throw new InternalServerError(
+        isProduction ? 'Login temporarily unavailable. Please try again later.' : (e?.message || 'Internal server error')
+      );
     }
   });
 
