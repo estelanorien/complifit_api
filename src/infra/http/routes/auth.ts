@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AuthService } from '../../../application/services/authService.js';
 import { authGuard } from '../hooks/auth.js';
-import { ValidationError, ConflictError, AuthenticationError, InternalServerError } from '../middleware/errors.js';
+import { ValidationError, ConflictError, AuthenticationError } from '../middleware/errors.js';
 
 const auth = new AuthService();
 const isProduction = process.env.NODE_ENV === 'production';
@@ -39,19 +39,12 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   app.post('/auth/login', async (req, reply) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:login:entry',message:'login handler entered',data:{hasBody:!!req.body,bodyKeys:req.body?Object.keys(req.body):[]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
-    // #endregion
     try {
-      // email veya username kabul ediyoruz, bu yüzden sadece min length kontrolü
       const body = z.object({
         email: z.string().min(1).trim(),
         password: z.string().min(6)
       }).parse(req.body);
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:login:beforeSignIn',message:'calling signIn',data:{emailLen:body.email?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
-      // #endregion
       const { user, token } = await auth.signIn(body.email, body.password);
 
       req.log.info({
@@ -64,13 +57,9 @@ export async function authRoutes(app: FastifyInstance) {
 
       return reply.send({ user, token });
     } catch (e: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:login:catch',message:'login catch',data:{message:e?.message,code:(e as any)?.code,isZod:e instanceof z.ZodError},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5-H6'})}).catch(()=>{});
-      // #endregion
       if (e instanceof z.ZodError) {
         throw new ValidationError('Validation failed', e);
       }
-      // Don't reveal if email/username exists
       if (e?.message?.includes('Invalid credentials')) {
         req.log.warn({
           type: 'login_failed',
@@ -78,19 +67,25 @@ export async function authRoutes(app: FastifyInstance) {
           email: (req.body as any)?.email,
           ip: req.ip,
         });
-        throw new AuthenticationError('Invalid credentials');
+        reply.header('Access-Control-Allow-Origin', '*');
+        return reply.status(401).send({ error: 'Invalid credentials' });
       }
-      // Log the real cause so we can fix DB/config issues (500 = DB, JWT, or unexpected error)
+      const code = e?.code ?? e?.errno;
+      const isDbUnavailable = code === '57P03' || code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || e?.message?.includes('connect');
       req.log.error({
         type: 'login_error',
         requestId: (req as any).requestId,
         message: e?.message,
-        code: (e as any)?.code,
+        code,
         stack: isProduction ? undefined : e?.stack,
       });
-      throw new InternalServerError(
-        isProduction ? 'Login temporarily unavailable. Please try again later.' : (e?.message || 'Internal server error')
-      );
+      reply.header('Access-Control-Allow-Origin', '*');
+      if (isDbUnavailable) {
+        return reply.status(503).send({ error: 'Service temporarily unavailable. Please try again in a moment.' });
+      }
+      return reply.status(500).send({
+        error: isProduction ? 'Login temporarily unavailable. Please try again later.' : (e?.message || 'Internal server error'),
+      });
     }
   });
 

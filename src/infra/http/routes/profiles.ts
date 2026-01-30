@@ -11,88 +11,76 @@ const saveSchema = z.object({
 export async function profileRoutes(app: FastifyInstance) {
   app.get('/profiles/me', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as any).user;
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'profiles.ts:profiles/me:entry',message:'profiles/me handler entered',data:{hasUser:!!user,userId:user?.userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
+    const safeProfile = () => ({
+      profile: {
+        id: user?.userId,
+        email: user?.email ?? '',
+        username: (user?.email ?? '').split('@')[0] || 'user',
+        name: user?.email ?? '',
+        role: 'user',
+      },
+      metrics: {},
+    });
+
     try {
-    // Check if biometric columns exist, if not use fallback query
-    let rows;
-    try {
-      const { rows: testRows } = await pool.query(
-        `SELECT up.profile_data, up.health_metrics, up.age, up.gender, up.height_cm, up.weight_kg, up.avatar_url, u.username, u.email, u.role, u.id
-         FROM users u
-         LEFT JOIN user_profiles up ON up.user_id = u.id
-         WHERE u.id = $1`,
-        [user.userId]
-      );
-      rows = testRows;
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'profiles.ts:profiles/me:queryOk',message:'first query succeeded',data:{rowsLength:testRows?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
-    } catch (e: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'profiles.ts:profiles/me:catch',message:'first query threw',data:{code:(e as any)?.code,message:(e as any)?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
-      // 42703 = undefined_column (e.g. biometric columns missing); 42P01 = relation user_profiles does not exist
-      if (e.code === '42703') {
-        const { rows: fallbackRows } = await pool.query(
-          `SELECT up.profile_data, up.health_metrics, u.username, u.email, u.role, u.id
+      let rows: any[];
+      try {
+        const { rows: testRows } = await pool.query(
+          `SELECT up.profile_data, up.health_metrics, up.age, up.gender, up.height_cm, up.weight_kg, up.avatar_url, u.username, u.email, u.role, u.id
            FROM users u
            LEFT JOIN user_profiles up ON up.user_id = u.id
            WHERE u.id = $1`,
           [user.userId]
         );
-        rows = fallbackRows;
-      } else if (e.code === '42P01') {
-        // user_profiles table missing - return minimal profile from users only
-        const { rows: userRows } = await pool.query(
-          `SELECT u.username, u.email, u.role, u.id FROM users u WHERE u.id = $1`,
-          [user.userId]
-        );
-        rows = userRows.length ? [{ ...userRows[0], profile_data: null, health_metrics: null }] : [];
-      } else {
-        throw e;
+        rows = testRows ?? [];
+      } catch (e: any) {
+        if (e.code === '42703') {
+          const { rows: fallbackRows } = await pool.query(
+            `SELECT up.profile_data, up.health_metrics, u.username, u.email, u.role, u.id
+             FROM users u
+             LEFT JOIN user_profiles up ON up.user_id = u.id
+             WHERE u.id = $1`,
+            [user.userId]
+          );
+          rows = fallbackRows ?? [];
+        } else if (e.code === '42P01') {
+          const { rows: userRows } = await pool.query(
+            `SELECT u.username, u.email, u.role, u.id FROM users u WHERE u.id = $1`,
+            [user.userId]
+          );
+          rows = userRows?.length ? [{ ...userRows[0], profile_data: null, health_metrics: null }] : [];
+        } else {
+          req.log?.warn({ err: e }, '[profiles/me] DB error, returning minimal profile');
+          reply.header('Access-Control-Allow-Origin', '*');
+          return reply.status(200).send(safeProfile());
+        }
       }
-    }
 
-    const row = rows?.[0];
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'profiles.ts:profiles/me:beforeProfileData',message:'before profileData build',data:{hasRow:!!row,hasProfileData:!!row?.profile_data,profileDataType:typeof row?.profile_data},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
-    const profileData = (row?.profile_data && typeof row.profile_data === 'object' && Object.keys(row.profile_data).length > 0)
-      ? row.profile_data
-      : {};
+      const row = rows?.[0];
+      const profileData: Record<string, any> =
+        row?.profile_data && typeof row.profile_data === 'object' && Object.keys(row.profile_data).length > 0
+          ? { ...row.profile_data }
+          : {};
 
-    // Sync biometric columns to profile_data if they exist
-    if (row?.age !== null && row?.age !== undefined) profileData.age = row.age;
-    if (row?.gender) profileData.gender = row.gender;
-    if (row?.height_cm !== null && row?.height_cm !== undefined) profileData.height = row.height_cm;
-    if (row?.weight_kg !== null && row?.weight_kg !== undefined) profileData.weight = parseFloat(row.weight_kg);
+      if (row?.age != null) profileData.age = row.age;
+      if (row?.gender) profileData.gender = row.gender;
+      if (row?.height_cm != null) profileData.height = row.height_cm;
+      if (row?.weight_kg != null) profileData.weight = parseFloat(String(row.weight_kg));
+      if (row?.avatar_url) profileData.avatar = row.avatar_url;
 
-    // Sync avatar_url to profile_data (prefer column over JSONB)
-    if (row?.avatar_url) {
-      profileData.avatar = row.avatar_url;
-    } else if (profileData.avatar) {
-      // Keep JSONB avatar if column is empty (backward compatibility)
-    }
+      profileData.name = profileData.name || row?.email || user?.email || '';
+      profileData.email = profileData.email || row?.email || user?.email || '';
+      profileData.username = profileData.username || row?.username || (row?.email ? String(row.email).split('@')[0] : 'user');
+      profileData.id = row?.id ?? user?.userId;
+      profileData.role = row?.role || 'user';
 
-    if (!profileData.name) profileData.name = row?.email || user.email;
-    if (!profileData.email) profileData.email = row?.email || user.email;
-    if (!profileData.username) profileData.username = row?.username || (row?.email ? row.email.split('@')[0] : 'user');
-
-    // Crucial for admin persistence and identification
-    profileData.id = row?.id || user.userId;
-    profileData.role = row?.role || 'user';
-
-    const metrics = row?.health_metrics || {};
-    return { profile: profileData, metrics };
+      const metrics = row?.health_metrics && typeof row.health_metrics === 'object' ? row.health_metrics : {};
+      reply.header('Access-Control-Allow-Origin', '*');
+      return reply.status(200).send({ profile: profileData, metrics });
     } catch (e: any) {
       req.log?.warn({ err: e }, '[profiles/me] fallback on error');
       reply.header('Access-Control-Allow-Origin', '*');
-      return reply.status(200).send({
-        profile: { id: user?.userId, email: user?.email, username: user?.email?.split('@')[0] || 'user', role: 'user' },
-        metrics: {}
-      });
+      return reply.status(200).send(safeProfile());
     }
   });
 
