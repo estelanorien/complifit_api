@@ -42,17 +42,35 @@ export class AuthService {
   }
 
   async signIn(identifier: string, password: string) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'authService.ts:signIn:entry',message:'signIn entered',data:{identifierLen:identifier?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
+    // #endregion
     const normalized = identifier.trim().toLowerCase();
-    const { rows } = await pool.query(
-      'SELECT id, email, password_hash, username, role FROM users WHERE LOWER(email) = $1 OR LOWER(username) = $1',
-      [normalized]
-    );
+    let rows: { id: string; email: string; password_hash: string; username: string; role: string }[];
+    try {
+      const result = await pool.query(
+        'SELECT id, email, password_hash, username, role FROM users WHERE LOWER(email) = $1 OR LOWER(username) = $1',
+        [normalized]
+      );
+      rows = result.rows;
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'authService.ts:signIn:afterQuery',message:'query returned',data:{rowsLength:rows?.length,hasPasswordHash:!!rows?.[0]?.password_hash},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
+      // #endregion
+    } catch (e: any) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'authService.ts:signIn:queryThrow',message:'pool.query threw',data:{message:e?.message,code:e?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
+      // #endregion
+      throw e;
+    }
     if (rows.length === 0) throw new Error('Invalid credentials');
     const user = rows[0];
     if (!user?.password_hash) throw new Error('Invalid credentials');
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) throw new Error('Invalid credentials');
 
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'authService.ts:signIn:beforeIssueToken',message:'before issueToken',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H6'})}).catch(()=>{});
+    // #endregion
     const token = this.issueToken({ userId: user.id, email: user.email });
     return { user: { id: user.id, email: user.email, username: user.username, role: user.role }, token };
   }

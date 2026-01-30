@@ -39,6 +39,9 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   app.post('/auth/login', async (req, reply) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:login:entry',message:'login handler entered',data:{hasBody:!!req.body,bodyKeys:req.body?Object.keys(req.body):[]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+    // #endregion
     try {
       // email veya username kabul ediyoruz, bu yüzden sadece min length kontrolü
       const body = z.object({
@@ -46,6 +49,9 @@ export async function authRoutes(app: FastifyInstance) {
         password: z.string().min(6)
       }).parse(req.body);
 
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:login:beforeSignIn',message:'calling signIn',data:{emailLen:body.email?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
+      // #endregion
       const { user, token } = await auth.signIn(body.email, body.password);
 
       req.log.info({
@@ -58,6 +64,9 @@ export async function authRoutes(app: FastifyInstance) {
 
       return reply.send({ user, token });
     } catch (e: any) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:login:catch',message:'login catch',data:{message:e?.message,code:(e as any)?.code,isZod:e instanceof z.ZodError},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5-H6'})}).catch(()=>{});
+      // #endregion
       if (e instanceof z.ZodError) {
         throw new ValidationError('Validation failed', e);
       }
