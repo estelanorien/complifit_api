@@ -1138,12 +1138,18 @@ export async function adminRoutes(app: FastifyInstance) {
 
       req.log.info({ movementId, type }, '[cleanup-orphaned-scoped] Starting scoped cleanup');
 
-      // Only consider assets that match this movementId and keyType (very safe scope)
+      // Only consider assets whose slug EXACTLY equals movementId (type:slug:persona:subtype:index).
+      // CRITICAL: LIKE 'ex:ankle_alphabet:%' would also match ex:ankle_alphabet_ankle_sprain:... and
+      // getManifest only returns ex:ankle_alphabet:... so those would be wrongly deleted. Filter by exact slug.
       const likePattern = `${keyType}:${movementId}:%`;
-      const { rows: scopedAssets } = await pool.query(
+      const { rows: rawScoped } = await pool.query(
         `SELECT key FROM cached_assets WHERE key LIKE $1 AND key NOT LIKE 'system_%'`,
         [likePattern]
       );
+      const scopedAssets = rawScoped.filter((r: any) => {
+        const parts = (r.key as string).split(':');
+        return parts.length >= 2 && parts[1] === movementId;
+      });
 
       // Determine stepCount from existing scoped keys (prevents deleting valid steps due to wrong count)
       let stepCount = type === 'exercise' ? 10 : 8;

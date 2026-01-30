@@ -203,6 +203,9 @@ export class AssetOrchestrator {
                 type: 'image',
                 context: instruction
             });
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AssetOrchestrator.ts:afterConstructPrompt',message:'After constructPrompt',data:{key:uKey.toString(),hasReferenceImage:!!referenceImage,referenceImageLen:referenceImage?.length,referenceType},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+            // #endregion
 
             // Equipment Enrichment via Repository
             let finalPrompt = prompt;

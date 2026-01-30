@@ -78,27 +78,42 @@ export class AssetPromptService {
 
         const lowerKey = key.toLowerCase();
         const lowerLabel = (label || "").toLowerCase();
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:constructPrompt:entry',message:'constructPrompt entry',data:{key,lowerKey,label:label||'',lowerLabel,hasAtlas:lowerKey.includes('atlas')||lowerLabel.includes('atlas'),hasNova:lowerKey.includes('nova')||lowerLabel.includes('nova')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
+        // #endregion
 
         // 1. Resolve Identity and References
         if (lowerKey.includes('atlas') || lowerLabel.includes('atlas')) {
             identity = 'atlas';
             const asset = await AssetRepository.findByKey('system_coach_atlas_ref');
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:atlasRef',message:'Atlas ref load',data:{key:options.key,identity,assetNull:!asset,hasBuffer:!!asset?.buffer,bufferLen:asset?.buffer?.length,hasValue:!!asset?.value,valueLen:asset?.value?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+            // #endregion
             if (asset?.buffer) {
                 refImage = `data:image/png;base64,${asset.buffer.toString('base64')}`;
             } else if (asset?.value) {
                 // Value might already be base64 or data URI
                 refImage = asset.value.startsWith('data:image') ? asset.value : `data:image/png;base64,${asset.value}`;
             }
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:atlasRefResult',message:'Atlas refImage result',data:{refImageLen:refImage?.length,refImagePrefix:refImage?.slice(0,30)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+            // #endregion
             refType = 'identity';
         } else if (lowerKey.includes('nova') || lowerLabel.includes('nova')) {
             identity = 'nova';
             const asset = await AssetRepository.findByKey('system_coach_nova_ref');
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:novaRef',message:'Nova ref load',data:{key:options.key,identity,assetNull:!asset,hasBuffer:!!asset?.buffer,hasValue:!!asset?.value},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+            // #endregion
             if (asset?.buffer) {
                 refImage = `data:image/png;base64,${asset.buffer.toString('base64')}`;
             } else if (asset?.value) {
                 // Value might already be base64 or data URI
                 refImage = asset.value.startsWith('data:image') ? asset.value : `data:image/png;base64,${asset.value}`;
             }
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:novaRefResult',message:'Nova refImage result',data:{refImageLen:refImage?.length,refImagePrefix:refImage?.slice(0,30)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+            // #endregion
             refType = 'identity';
         } else if (groupType === 'exercise') {
             const asset = await AssetRepository.findByKey('system_background_gym_ref');
