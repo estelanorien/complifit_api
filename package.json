@@ -9,12 +9,14 @@
     "start": "node dist/server.cjs",
     "start:direct": "tsx src/server.ts",
     "lint": "eslint . --ext .ts",
+    "migrate": "tsx src/infra/db/run_all_migrations_sync.ts",
     "debug:nova": "/Users/mehmetcandiri/Desktop/reha/vitality_api/node_modules/.bin/tsx src/scripts/debug_nova.ts"
   },
   "dependencies": {
     "@fastify/cors": "^8.5.0",
     "@fastify/helmet": "^11.1.1",
     "@fastify/rate-limit": "^9.0.1",
+    "@google-cloud/text-to-speech": "^5.8.1",
     "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.90.1",
     "bcryptjs": "^2.4.3",

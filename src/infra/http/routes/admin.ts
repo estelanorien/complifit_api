@@ -225,31 +225,33 @@ export async function adminRoutes(app: FastifyInstance) {
                 break;
               }
               if (pollData?.done) {
-                const resp = pollData?.response || {};
+                // LRO can put result in response or result
+                const resp = pollData?.response ?? pollData?.result ?? {};
+                const findUri = (o: any): string | null => {
+                  if (!o || typeof o !== 'object') return null;
+                  const u = o.uri ?? o.fileUri ?? o.url ?? o.videoUri;
+                  if (typeof u === 'string' && (u.startsWith('http') || u.startsWith('https'))) return u;
+                  if (Array.isArray(o)) { for (const i of o) { const v = findUri(i); if (v) return v; } return null; }
+                  for (const k of Object.keys(o)) { const v = findUri(o[k]); if (v) return v; }
+                  return null;
+                };
                 videoUri =
                   resp?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
                   resp?.generate_video_response?.generated_samples?.[0]?.video?.uri ||
                   resp?.generatedSamples?.[0]?.video?.uri ||
                   resp?.generated_samples?.[0]?.video?.uri ||
                   resp?.generatedVideos?.[0]?.video?.uri ||
-                  resp?.generated_videos?.[0]?.video?.uri;
-                if (!videoUri && typeof resp === 'object') {
-                  const findUri = (o: any): string | null => {
-                    if (!o || typeof o !== 'object') return null;
-                    if (o.uri && typeof o.uri === 'string' && (o.uri.startsWith('http') || o.uri.startsWith('https'))) return o.uri;
-                    if (Array.isArray(o)) { for (const i of o) { const u = findUri(i); if (u) return u; } return null; }
-                    for (const k of Object.keys(o)) { const u = findUri(o[k]); if (u) return u; }
-                    return null;
-                  };
-                  videoUri = findUri(resp);
-                }
+                  resp?.generated_videos?.[0]?.video?.uri ||
+                  findUri(resp?.generateVideoResponse ?? {}) ||
+                  findUri(resp);
                 if (videoUri) {
                   console.log(`[Admin] Video generated successfully with model ${model}`);
                   break;
                 }
-                const respPreview = JSON.stringify(resp).slice(0, 500);
-                console.error('[Admin] Veo done but no video URI. Response (preview):', respPreview);
-                lastError = new Error(`Veo returned no video URI. Check server logs for response preview.`);
+                const respPreview = JSON.stringify(resp).slice(0, 800);
+                const topKeys = Object.keys(pollData).join(', ');
+                console.error('[Admin] Veo done but no video URI. pollData keys:', topKeys, 'response preview:', respPreview);
+                lastError = new Error(`Veo returned no video URI. Response keys: ${topKeys}. Preview: ${respPreview.slice(0, 200)}`);
                 break;
               }
               console.log(`[Admin] Veo polling... (${waited / 1000}s)`);
@@ -400,7 +402,63 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
+  // Voiceover videos: list localized_videos (only verification_status=passed shown for review)
+  app.get('/admin/voiceover-videos', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      const parentId = (req.query as any)?.parent_id;
+      const languageCode = (req.query as any)?.language_code;
+      const readyOnly = (req.query as any)?.ready_for_review === 'true';
+      let query = `SELECT id, parent_id, language_code, youtube_url, gcs_path, status, verification_status, review_status, review_notes, reviewed_at, created_at
+                   FROM localized_videos WHERE 1=1`;
+      const params: any[] = [];
+      let i = 1;
+      if (parentId) { query += ` AND parent_id = $${i}`; params.push(parentId); i++; }
+      if (languageCode) { query += ` AND language_code = $${i}`; params.push(languageCode); i++; }
+      if (readyOnly) { query += ` AND verification_status = 'passed' AND review_status = 'ready_for_review'`; }
+      query += ` ORDER BY parent_id, language_code`;
+      const { rows } = await pool.query(query, params);
+      return reply.send({ videos: rows });
+    } catch (e: any) {
+      req.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
 
+  app.patch('/admin/voiceover-videos/:id/review', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      const id = (req.params as any).id;
+      const body = z.object({ review_status: z.enum(['approved', 'revision_requested']), review_notes: z.string().optional() }).parse(req.body || {});
+      await pool.query(
+        `UPDATE localized_videos SET review_status = $1, review_notes = $2, reviewed_at = NOW() WHERE id = $3`,
+        [body.review_status, body.review_notes ?? null, id]
+      );
+      return reply.send({ success: true });
+    } catch (e: any) {
+      req.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  app.post('/admin/voiceover-videos/intervention', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      const body = z.object({
+        assetId: z.string(),
+        intervention: z.enum(['replace_clips', 'reassemble_only', 'regenerate_voiceover', 'full_regenerate']),
+        replaceShotTypes: z.array(z.string()).optional(),
+        languages: z.array(z.string()).optional()
+      }).parse(req.body || {});
+      const { videoQueue } = await import('../../../application/services/videoQueueService.js');
+      if (body.intervention === 'full_regenerate') {
+        await pool.query(`DELETE FROM video_source_clips WHERE parent_id = $1`, [body.assetId]);
+        await pool.query(`DELETE FROM localized_videos WHERE parent_id = $1`, [body.assetId]);
+      }
+      await videoQueue.enqueue(body.assetId, null, { withVoiceover: true, languages: body.languages ?? ['en'] });
+      return reply.send({ success: true, message: 'Intervention job enqueued' });
+    } catch (e: any) {
+      req.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
 
   // Simple seed stubs
   app.post('/admin/seed', { preHandler: adminGuard }, async (req: any, reply: any) => {
@@ -541,13 +599,14 @@ export async function adminRoutes(app: FastifyInstance) {
         }
 
         // 1. Delete images from cached_assets
-        const { rowCount: imageCount } = await pool.query(
+        const { rowCount: imageCountRaw } = await pool.query(
           `DELETE FROM cached_assets 
            WHERE asset_type = 'image' 
            AND (${patterns.map((_, i) => `key LIKE $${i + 1}`).join(' OR ')})
            AND key NOT LIKE '%:meta:%'`,
           patterns
         );
+        const imageCount = imageCountRaw ?? 0;
 
         // 2. Delete from blob storage
         await pool.query(
@@ -593,8 +652,8 @@ export async function adminRoutes(app: FastifyInstance) {
              OR (${patterns.map((_, i) => `key LIKE $${i + 2}`).join(' OR ')})`,
             [normalizedId, ...patterns]
           );
-          textCount = textRows;
-          
+          textCount = textRows ?? 0;
+
           // Verify deletion
           const { rows: verifyRows } = await pool.query(
             `SELECT key, text_context, text_context_simple FROM cached_asset_meta 
@@ -622,7 +681,7 @@ export async function adminRoutes(app: FastifyInstance) {
              )`,
             [normalizedId, ...patterns]
           );
-          translationJobCount = transJobs;
+          translationJobCount = transJobs ?? 0;
 
           // 5. Delete video jobs for these assets
           const { rowCount: vidJobs } = await pool.query(
@@ -634,7 +693,7 @@ export async function adminRoutes(app: FastifyInstance) {
              )`,
             [normalizedId, ...patterns]
           );
-          videoJobCount = vidJobs;
+          videoJobCount = vidJobs ?? 0;
         }
 
         req.log.info({ movementId, type, imageCount, textCount, translationJobCount, videoJobCount }, 'Wiped asset data');
@@ -658,11 +717,12 @@ export async function adminRoutes(app: FastifyInstance) {
         }
 
         // 1. Delete images
-        const { rowCount: imageCount } = await pool.query(
+        const { rowCount: imageCountRaw } = await pool.query(
           `DELETE FROM cached_assets 
            WHERE asset_type = 'image' 
            AND key NOT LIKE '%:meta:%'${keyFilter}`
         );
+        const imageCount = imageCountRaw ?? 0;
 
         await pool.query(
           `DELETE FROM asset_blob_storage 
@@ -685,7 +745,7 @@ export async function adminRoutes(app: FastifyInstance) {
                  video_error = NULL
              WHERE 1=1${keyFilter}`
           );
-          textCount = textRows;
+          textCount = textRows ?? 0;
           req.log.info({ type, textRowsUpdated: textRows }, 'Wiping all text instructions');
 
           // 3. Delete translation jobs
@@ -695,7 +755,7 @@ export async function adminRoutes(app: FastifyInstance) {
                SELECT key FROM cached_asset_meta WHERE 1=1${keyFilter}
              )`
           );
-          translationJobCount = transJobs;
+          translationJobCount = transJobs ?? 0;
 
           // 4. Delete video jobs
           const { rowCount: vidJobs } = await pool.query(
@@ -704,7 +764,7 @@ export async function adminRoutes(app: FastifyInstance) {
                SELECT key FROM cached_asset_meta WHERE 1=1${keyFilter}
              )`
           );
-          videoJobCount = vidJobs;
+          videoJobCount = vidJobs ?? 0;
         }
 
         req.log.info({ type, imageCount, textCount, translationJobCount, videoJobCount }, 'Wiped all asset data');
@@ -788,13 +848,16 @@ export async function adminRoutes(app: FastifyInstance) {
           [normalizedId, ...patterns]
         );
 
-        req.log.info({ movementId: normalizedId, type, textRows, transJobs, vidJobs }, 'Wiped text instructions');
-        return reply.send({ 
-          success: true, 
-          message: `Wiped ${textRows} text instructions, ${transJobs} translation jobs, ${vidJobs} video jobs for ${movementId}`, 
-          textCleared: textRows,
-          translationJobsDeleted: transJobs,
-          videoJobsDeleted: vidJobs
+        const t = textRows ?? 0;
+        const tr = transJobs ?? 0;
+        const v = vidJobs ?? 0;
+        req.log.info({ movementId: normalizedId, type, textRows: t, transJobs: tr, vidJobs: v }, 'Wiped text instructions');
+        return reply.send({
+          success: true,
+          message: `Wiped ${t} text instructions, ${tr} translation jobs, ${v} video jobs for ${movementId}`,
+          textCleared: t,
+          translationJobsDeleted: tr,
+          videoJobsDeleted: v
         });
       } else {
         // Wipe ALL text (optionally filtered by type)
@@ -832,13 +895,16 @@ export async function adminRoutes(app: FastifyInstance) {
            )`
         );
 
-        req.log.info({ type, textRows, transJobs, vidJobs }, 'Wiped all text instructions');
-        return reply.send({ 
-          success: true, 
-          message: `Wiped ${textRows} ${type || 'asset'} text instructions, ${transJobs} translation jobs, ${vidJobs} video jobs`, 
-          textCleared: textRows,
-          translationJobsDeleted: transJobs,
-          videoJobsDeleted: vidJobs
+        const t2 = textRows ?? 0;
+        const tr2 = transJobs ?? 0;
+        const v2 = vidJobs ?? 0;
+        req.log.info({ type, textRows: t2, transJobs: tr2, vidJobs: v2 }, 'Wiped all text instructions');
+        return reply.send({
+          success: true,
+          message: `Wiped ${t2} ${type || 'asset'} text instructions, ${tr2} translation jobs, ${v2} video jobs`,
+          textCleared: t2,
+          translationJobsDeleted: tr2,
+          videoJobsDeleted: v2
         });
       }
     } catch (e: any) {
@@ -1040,13 +1106,14 @@ export async function adminRoutes(app: FastifyInstance) {
         [orphanedKeys]
       );
       
-      req.log.info({ deletedCount: assetsDeleted, orphanedKeys: orphanedKeys.length }, '[cleanup-orphaned] Cleanup complete');
+      const deletedCount = assetsDeleted ?? 0;
+      req.log.info({ deletedCount, orphanedKeys: orphanedKeys.length }, '[cleanup-orphaned] Cleanup complete');
       
       return reply.send({ 
         success: true, 
-        deletedCount: assetsDeleted,
+        deletedCount,
         orphanedKeysCount: orphanedKeys.length,
-        message: `Deleted ${assetsDeleted} orphaned assets` 
+        message: `Deleted ${deletedCount} orphaned assets` 
       });
     } catch (e: any) {
       req.log.error({ err: e }, '[cleanup-orphaned] Error');
@@ -1132,11 +1199,12 @@ export async function adminRoutes(app: FastifyInstance) {
       await pool.query(`DELETE FROM translation_jobs WHERE asset_key = ANY($1)`, [orphanedKeys]);
       await pool.query(`DELETE FROM video_jobs WHERE asset_key = ANY($1)`, [orphanedKeys]);
 
-      req.log.info({ movementId, type, deletedCount: assetsDeleted }, '[cleanup-orphaned-scoped] Scoped cleanup complete');
+      const deletedCount = assetsDeleted ?? 0;
+      req.log.info({ movementId, type, deletedCount }, '[cleanup-orphaned-scoped] Scoped cleanup complete');
 
       return reply.send({
         success: true,
-        deletedCount: assetsDeleted,
+        deletedCount,
         orphanedKeysCount: orphanedKeys.length,
         message: `Deleted ${assetsDeleted} scoped orphaned assets`
       });

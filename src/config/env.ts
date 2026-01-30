@@ -38,7 +38,11 @@ const envSchema = z.object({
   DB_SSL_REJECT_UNAUTHORIZED: z.string().optional().transform(val => {
     if (val === undefined || val === null) return undefined;
     return val === 'true' || val === '1';
-  })
+  }),
+  // Video voiceover pipeline: optional background music (GCS or HTTPS URI). When set, mixed under TTS at low level.
+  VIDEO_MUSIC_TRACK_URI: z.string().optional(),
+  // Google Cloud TTS: use Application Default Credentials or set GOOGLE_APPLICATION_CREDENTIALS to service account JSON path
+  GOOGLE_APPLICATION_CREDENTIALS: z.string().optional()
 });
 
 const parseEnv = () => {
@@ -64,7 +68,9 @@ const parseEnv = () => {
     APPLE_CLIENT_ID: process.env.APPLE_CLIENT_ID,
     APPLE_TEAM_ID: process.env.APPLE_TEAM_ID,
     APPLE_KEY_ID: process.env.APPLE_KEY_ID,
-    DB_SSL_REJECT_UNAUTHORIZED: process.env.DB_SSL_REJECT_UNAUTHORIZED
+    DB_SSL_REJECT_UNAUTHORIZED: process.env.DB_SSL_REJECT_UNAUTHORIZED,
+    VIDEO_MUSIC_TRACK_URI: process.env.VIDEO_MUSIC_TRACK_URI || undefined,
+    GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS
     });
     return parsed;
   } catch (error: any) {
@@ -111,6 +117,7 @@ export const env = {
       keyId: envVars.APPLE_KEY_ID
     }
   },
-  dbSslRejectUnauthorized: envVars.DB_SSL_REJECT_UNAUTHORIZED ?? (envVars.NODE_ENV === 'production' ? true : false)
+  dbSslRejectUnauthorized: envVars.DB_SSL_REJECT_UNAUTHORIZED ?? (envVars.NODE_ENV === 'production' ? true : false),
+  videoMusicTrackUri: envVars.VIDEO_MUSIC_TRACK_URI && envVars.VIDEO_MUSIC_TRACK_URI !== '' ? envVars.VIDEO_MUSIC_TRACK_URI : undefined
 };
 
