@@ -23,7 +23,7 @@ export async function profileRoutes(app: FastifyInstance) {
       );
       rows = testRows;
     } catch (e: any) {
-      // If columns don't exist, use fallback query without biometric columns
+      // 42703 = undefined_column (e.g. biometric columns missing); 42P01 = relation user_profiles does not exist
       if (e.code === '42703') {
         const { rows: fallbackRows } = await pool.query(
           `SELECT up.profile_data, up.health_metrics, u.username, u.email, u.role, u.id
@@ -33,12 +33,19 @@ export async function profileRoutes(app: FastifyInstance) {
           [user.userId]
         );
         rows = fallbackRows;
+      } else if (e.code === '42P01') {
+        // user_profiles table missing - return minimal profile from users only
+        const { rows: userRows } = await pool.query(
+          `SELECT u.username, u.email, u.role, u.id FROM users u WHERE u.id = $1`,
+          [user.userId]
+        );
+        rows = userRows.length ? [{ ...userRows[0], profile_data: null, health_metrics: null }] : [];
       } else {
         throw e;
       }
     }
 
-    const row = rows[0];
+    const row = rows?.[0];
     const profileData = (row?.profile_data && Object.keys(row.profile_data).length > 0)
       ? row.profile_data
       : {};

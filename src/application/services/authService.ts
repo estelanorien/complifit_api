@@ -49,6 +49,7 @@ export class AuthService {
     );
     if (rows.length === 0) throw new Error('Invalid credentials');
     const user = rows[0];
+    if (!user?.password_hash) throw new Error('Invalid credentials');
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) throw new Error('Invalid credentials');
 
