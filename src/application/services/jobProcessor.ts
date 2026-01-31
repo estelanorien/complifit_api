@@ -401,10 +401,18 @@ export class JobProcessor {
         }
     }
 
+    /** Returns coach reference as data URI or base64 so it can be passed to generateImage. Never use buffer.toString() (UTF-8) for binary image. */
     private async getAsset(key: string): Promise<string | null> {
         try {
             const asset = await AssetRepository.findByKey(key);
-            return asset?.buffer?.toString() || null;
+            if (!asset) return null;
+            if (asset.buffer && asset.buffer.length > 0) {
+                return `data:image/png;base64,${asset.buffer.toString('base64')}`;
+            }
+            if (asset.value && asset.value.length > 0) {
+                return asset.value.startsWith('data:') ? asset.value : `data:image/png;base64,${asset.value}`;
+            }
+            return null;
         } catch (e) {
             logger.error(`[JobProcessor] Failed to fetch asset ${key}`, e as Error);
             return null;

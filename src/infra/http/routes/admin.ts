@@ -159,14 +159,31 @@ export async function adminRoutes(app: FastifyInstance) {
         value = text;
       } else {
         // Video generation runs only in the backend (Veo via Gemini API; no Vertex AI).
-        // Frontend must use this endpoint; no client-side Veo or API key.
-        // Uses predictLongRunning + poll; see https://ai.google.dev/gemini-api/docs/video
+        // ALWAYS use coach reference image when key indicates Atlas/Nova so video face matches training images.
         const baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
         const modelsToTry = ['models/veo-3.1-generate-preview', 'models/veo-3.1-fast-generate-preview', 'models/veo-3.0-generate-001'];
         let lastError: Error | null = null;
         let videoUri: string | null = null;
 
-        console.log(`[Admin] Starting video generation for mode=${mode}, key=${key}`);
+        let videoRefImage: string | undefined;
+        if (imageInput && imageInput.length > 100) {
+          videoRefImage = imageInput;
+        } else if (key && key.toLowerCase().includes('atlas')) {
+          const atlas = await AssetRepository.findByKey('system_coach_atlas_ref');
+          if (atlas?.buffer?.length) videoRefImage = `data:image/png;base64,${atlas.buffer.toString('base64')}`;
+          else if (atlas?.value) videoRefImage = atlas.value.startsWith('data:') ? atlas.value : `data:image/png;base64,${atlas.value}`;
+        } else if (key && key.toLowerCase().includes('nova')) {
+          const nova = await AssetRepository.findByKey('system_coach_nova_ref');
+          if (nova?.buffer?.length) videoRefImage = `data:image/png;base64,${nova.buffer.toString('base64')}`;
+          else if (nova?.value) videoRefImage = nova.value.startsWith('data:') ? nova.value : `data:image/png;base64,${nova.value}`;
+        }
+        const videoInstance: any = { prompt };
+        if (videoRefImage) {
+          const b64 = videoRefImage.replace(/^data:image\/\w+;base64,/, '');
+          if (b64.length > 100) videoInstance.image = { bytesBase64Encoded: b64 };
+        }
+
+        console.log(`[Admin] Starting video generation for mode=${mode}, key=${key}, hasRef=${!!videoRefImage}`);
 
         for (const model of modelsToTry) {
           try {
@@ -180,7 +197,7 @@ export async function adminRoutes(app: FastifyInstance) {
                 'x-goog-api-key': env.geminiApiKey
               },
               body: JSON.stringify({
-                instances: [{ prompt: prompt }],
+                instances: [videoInstance],
                 parameters: { aspectRatio: '16:9' }
               })
             });
@@ -1237,6 +1254,27 @@ export async function adminRoutes(app: FastifyInstance) {
     } catch (e: any) {
       req.log.error(e);
       return reply.status(500).send({ error: "Batch check failed" });
+    }
+  });
+
+  // Coach reference images status (Atlas/Nova) – never deleted by cleanup; check if present for generation
+  app.get('/admin/assets/refs-status', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      const res = await pool.query(
+        `SELECT a.key, 
+         CASE WHEN b.data IS NOT NULL THEN LENGTH(b.data) ELSE LENGTH(COALESCE(a.value, '')) END as data_len
+         FROM cached_assets a
+         LEFT JOIN asset_blob_storage b ON b.key = a.key
+         WHERE a.key IN ('system_coach_atlas_ref', 'system_coach_nova_ref')`
+      );
+      const map = new Map(res.rows.map((r: any) => [r.key, r.data_len]));
+      return reply.send({
+        atlas: { exists: map.has('system_coach_atlas_ref'), hasData: (map.get('system_coach_atlas_ref') || 0) > 100 },
+        nova: { exists: map.has('system_coach_nova_ref'), hasData: (map.get('system_coach_nova_ref') || 0) > 100 }
+      });
+    } catch (e: any) {
+      req.log.error({ err: e }, '[refs-status] Error');
+      return reply.status(500).send({ error: String(e?.message ?? 'refs-status failed') });
     }
   });
 

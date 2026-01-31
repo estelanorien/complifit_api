@@ -4,9 +4,21 @@
  */
 
 import { pool } from '../../infra/db/pool.js';
+import { AssetRepository } from '../../infra/db/repositories/AssetRepository.js';
 import { AiService } from '../../application/services/aiService.js';
 
 const aiService = new AiService();
+
+/** Load coach reference image for video consistency (Atlas/Nova). */
+async function getCoachRefDataUri(coachId: string | null): Promise<string | undefined> {
+  if (!coachId || (coachId !== 'atlas' && coachId !== 'nova')) return undefined;
+  const key = coachId === 'atlas' ? 'system_coach_atlas_ref' : 'system_coach_nova_ref';
+  const asset = await AssetRepository.findByKey(key);
+  if (!asset) return undefined;
+  if (asset.buffer?.length) return `data:image/png;base64,${asset.buffer.toString('base64')}`;
+  if (asset.value?.length) return asset.value.startsWith('data:') ? asset.value : `data:image/png;base64,${asset.value}`;
+  return undefined;
+}
 
 const VIDEO_LOCATION_EXERCISE = 'Modern indoor gym, consistent set. Same environment for all fitness videos.';
 const VIDEO_LOCATION_MEAL = 'Modern professional kitchen, consistent set. Same environment for all meal videos.';
@@ -82,10 +94,11 @@ export async function ensureScenePack(input: VeoDirectorInput): Promise<ClipResu
     }));
   }
 
+  const referenceImage = await getCoachRefDataUri(coachId ?? null);
   const results: ClipResult[] = [];
   for (const shotType of SHOT_TYPES) {
     const prompt = buildPrompt(shotType, name, type, coachId ?? null);
-    const uri = await aiService.generateVideo({ prompt });
+    const uri = await aiService.generateVideo({ prompt, referenceImage });
     const durationSeconds = 8;
 
     const { rows } = await pool.query(

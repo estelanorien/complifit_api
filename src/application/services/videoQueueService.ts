@@ -13,8 +13,23 @@ import { uploadToYouTube } from '../../services/youtubeService.js';
 import { ensureScenePack, getClipsForAsset, getClipsWithUriForAsset } from '../../services/video/VeoDirector.js';
 import { buildEditList } from './editListBuilder.js';
 import { assemble } from '../../services/video/VideoAssemblyService.js';
+import { AssetRepository } from '../../infra/db/repositories/AssetRepository.js';
 
 const aiService = new AiService();
+
+/** Load coach reference image as data URI for video consistency. */
+async function getCoachRefDataUri(persona: 'atlas' | 'nova'): Promise<string | null> {
+    const key = persona === 'atlas' ? 'system_coach_atlas_ref' : 'system_coach_nova_ref';
+    const asset = await AssetRepository.findByKey(key);
+    if (!asset) return null;
+    if (asset.buffer && asset.buffer.length > 0) {
+        return `data:image/png;base64,${asset.buffer.toString('base64')}`;
+    }
+    if (asset.value && asset.value.length > 0) {
+        return asset.value.startsWith('data:') ? asset.value : `data:image/png;base64,${asset.value}`;
+    }
+    return null;
+}
 
 // Location consistency: same setting for all videos (no beach vs gym mix)
 const VIDEO_LOCATION_EXERCISE = 'Modern indoor gym, consistent set. Same environment for all fitness videos. No beach, no outdoor, no home. Professional fitness studio.';
@@ -232,8 +247,10 @@ export class VideoQueueService {
             prompt = `Cinematic food preparation shot. ${subjectName}. ${VIDEO_LOCATION_MEAL}. Gourmet 4k cooking video. Steam rising, delicious texture. 30-60 seconds, showing complete preparation steps.`;
         }
 
-        // Video generation runs only in the backend (this job processor or /admin/generate-asset).
-        const videoUrl = await aiService.generateVideo({ prompt });
+        // ALWAYS use coach reference image for Atlas/Nova so video face matches training images.
+        const referenceImage = persona ? await getCoachRefDataUri(persona as 'atlas' | 'nova') : null;
+        if (referenceImage) logger.info(`[VideoQueue] Using ${persona} reference image for video`);
+        const videoUrl = await aiService.generateVideo({ prompt, referenceImage: referenceImage || undefined });
         return videoUrl;
     }
 

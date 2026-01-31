@@ -212,11 +212,17 @@ FORBIDDEN:
     return { base64: `data:image/png;base64,${base64}` };
   }
 
-  async generateVideo({ prompt }: { prompt: string; model?: string }): Promise<string> {
-    // Veo via Gemini API: predictLongRunning + poll (see https://ai.google.dev/gemini-api/docs/video)
+  async generateVideo({ prompt, referenceImage }: { prompt: string; model?: string; referenceImage?: string }): Promise<string> {
+    // Veo via Gemini API: predictLongRunning + poll. Use coach reference image when provided for face consistency.
     const modelsToTry = ['models/veo-3.1-generate-preview', 'models/veo-3.1-fast-generate-preview', 'models/veo-3.0-generate-001'];
     const pollIntervalMs = 10000;
     const maxWaitMs = 360000;
+
+    const base64Image = referenceImage ? referenceImage.replace(/^data:image\/\w+;base64,/, '') : undefined;
+    const instance: any = { prompt };
+    if (base64Image && base64Image.length > 100) {
+      instance.image = { bytesBase64Encoded: base64Image };
+    }
 
     for (const model of modelsToTry) {
       try {
@@ -227,7 +233,7 @@ FORBIDDEN:
             'x-goog-api-key': this.apiKey
           },
           body: JSON.stringify({
-            instances: [{ prompt }],
+            instances: [instance],
             parameters: { aspectRatio: '16:9' }
           })
         });

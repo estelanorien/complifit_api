@@ -380,32 +380,39 @@ export async function assetsRoutes(app: FastifyInstance) {
       const originalMovementId = body.movementId;
       req.log.info(`[by-movement] Query for movementId: ${originalMovementId}, limit: ${limit}`);
 
-      // Omit text_context/text_context_simple from SELECT so this works before migration 046.
-      // We add them in the response map so the frontend always gets the same shape.
-      const { rows } = await pool.query(
-        `SELECT a.key, 
-                 CASE 
-                   WHEN a.asset_type = 'image' THEN COALESCE(ENCODE(b.data, 'base64'), a.value)
-                   ELSE a.value
-                 END as value,
-                 a.asset_type, a.status, a.created_at,
-                 m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id,
-                 m.translation_status, m.translation_error,
-                 m.video_status, m.video_error,
-                 m.step_index, m.persona
-          FROM cached_assets a
-          LEFT JOIN cached_asset_meta m ON m.key = a.key
-          LEFT JOIN asset_blob_storage b ON b.key = a.key
-          WHERE m.movement_id = $1 
-             OR a.key LIKE $2 
-             OR a.key LIKE $3
-             OR a.key LIKE $4 
-             OR a.key LIKE $5
-             OR a.key LIKE $6
-          ORDER BY a.created_at DESC
-          LIMIT $7`,
-        [originalMovementId, `ex:${originalMovementId}:%`, `meal:${originalMovementId}:%`, `ex_${originalMovementId}%`, `meal_${originalMovementId}%`, `${originalMovementId}%`, limit]
-      );
+      // Use a dedicated client with longer timeout to avoid "Query read timeout" when syncing many images
+      const client = await pool.connect();
+      let rows: any[];
+      try {
+        await client.query(`SET statement_timeout = '90000'`);
+        const res = await client.query(
+          `SELECT a.key, 
+                   CASE 
+                     WHEN a.asset_type = 'image' THEN COALESCE(ENCODE(b.data, 'base64'), a.value)
+                     ELSE a.value
+                   END as value,
+                   a.asset_type, a.status, a.created_at,
+                   m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id,
+                   m.translation_status, m.translation_error,
+                   m.video_status, m.video_error,
+                   m.step_index, m.persona
+            FROM cached_assets a
+            LEFT JOIN cached_asset_meta m ON m.key = a.key
+            LEFT JOIN asset_blob_storage b ON b.key = a.key
+            WHERE m.movement_id = $1 
+               OR a.key LIKE $2 
+               OR a.key LIKE $3
+               OR a.key LIKE $4 
+               OR a.key LIKE $5
+               OR a.key LIKE $6
+            ORDER BY a.created_at DESC
+            LIMIT $7`,
+          [originalMovementId, `ex:${originalMovementId}:%`, `meal:${originalMovementId}:%`, `ex_${originalMovementId}%`, `meal_${originalMovementId}%`, `${originalMovementId}%`, limit]
+        );
+        rows = res.rows;
+      } finally {
+        client.release();
+      }
 
       req.log.info(`[by-movement] Found ${rows.length} rows for ${originalMovementId}`);
       const processedRows = rows.map((row: any) => {
