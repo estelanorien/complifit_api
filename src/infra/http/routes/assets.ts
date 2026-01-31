@@ -217,13 +217,16 @@ export async function assetsRoutes(app: FastifyInstance) {
     return rows;
   });
 
-  app.post('/assets/batch', { preHandler: authGuard }, async (req) => {
-    const { keys } = req.body as any;
-    if (!Array.isArray(keys) || keys.length === 0) return {};
-    
-    // FIX: Return full asset data including status and metadata for frontend
-    // CRITICAL: Join with asset_blob_storage to get binary data if value column is empty
-    const { rows } = await pool.query(
+  app.post('/assets/batch', { preHandler: authGuard }, async (req: any, reply: any) => {
+    const keys = (req.body && (req.body as any).keys) ?? (req.body as any);
+    if (!Array.isArray(keys) || keys.length === 0) return reply.send({});
+
+    try {
+      const client = await pool.connect();
+      let rows: any[];
+      try {
+        await client.query(`SET statement_timeout = '60000'`);
+        const res = await client.query(
       `SELECT 
         a.key, 
         a.value, 
@@ -237,11 +240,15 @@ export async function assetsRoutes(app: FastifyInstance) {
       LEFT JOIN cached_asset_meta m ON m.key = a.key
       WHERE a.key = ANY($1) AND a.status IN ('active','auto','draft','generating')
       LIMIT 100`,
-      [keys]
-    );
-    
-    const result: Record<string, any> = {};
-    rows.forEach((r: any) => {
+          [keys]
+        );
+        rows = res.rows;
+      } finally {
+        client.release();
+      }
+
+      const result: Record<string, any> = {};
+      rows.forEach((r: any) => {
       let value = r.value || '';
       
       // CRITICAL FIX: If buffer exists (from asset_blob_storage), convert it to base64
@@ -272,7 +279,11 @@ export async function assetsRoutes(app: FastifyInstance) {
         textContextSimple: r.text_context_simple || ''
       };
     });
-    return result;
+      return reply.send(result);
+    } catch (e: any) {
+      req.log?.warn({ err: e }, '[assets/batch] Error, returning empty');
+      return reply.send({});
+    }
   });
 
   app.post('/assets/scan', { preHandler: authGuard }, async (req) => {
@@ -384,7 +395,7 @@ export async function assetsRoutes(app: FastifyInstance) {
       const client = await pool.connect();
       let rows: any[];
       try {
-        await client.query(`SET statement_timeout = '90000'`);
+        await client.query(`SET statement_timeout = '120000'`);
         const res = await client.query(
           `SELECT a.key, 
                    CASE 
