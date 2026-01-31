@@ -95,6 +95,9 @@ export class AssetPromptService {
                 // Value might already be base64 or data URI
                 refImage = asset.value.startsWith('data:image') ? asset.value : `data:image/png;base64,${asset.value}`;
             }
+            if (!refImage && type === 'image' && groupType === 'exercise') {
+                throw new Error('CRITICAL: Atlas coach reference image (system_coach_atlas_ref) is missing. Upload it in Admin (Refs Status) before generating exercise images. NEVER generate without reference—prevents wrong person (e.g. bald) in output.');
+            }
             // #region agent log
             fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:atlasRefResult',message:'Atlas refImage result',data:{refImageLen:refImage?.length,refImagePrefix:refImage?.slice(0,30)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
             // #endregion
@@ -110,6 +113,9 @@ export class AssetPromptService {
             } else if (asset?.value) {
                 // Value might already be base64 or data URI
                 refImage = asset.value.startsWith('data:image') ? asset.value : `data:image/png;base64,${asset.value}`;
+            }
+            if (!refImage && type === 'image' && groupType === 'exercise') {
+                throw new Error('CRITICAL: Nova coach reference image (system_coach_nova_ref) is missing. Upload it in Admin (Refs Status) before generating exercise images. NEVER generate without reference—prevents wrong person (e.g. bald) in output.');
             }
             // #region agent log
             fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:novaRefResult',message:'Nova refImage result',data:{refImageLen:refImage?.length,refImagePrefix:refImage?.slice(0,30)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});

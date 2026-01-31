@@ -193,7 +193,7 @@ export class AssetOrchestrator {
             }
 
 
-            // 3. Construct Prompt with Unified Logic
+            // 3. Construct Prompt with Unified Logic (ALWAYS uses coach ref for Atlas/Nova exercise images)
             const { prompt, referenceImage, referenceType } = await AssetPromptService.constructPrompt({
                 key: uKey.toString(),
                 groupName: id.replace(/_/g, ' '),
@@ -203,6 +203,10 @@ export class AssetOrchestrator {
                 type: 'image',
                 context: instruction
             });
+            // CRITICAL: Never generate Atlas/Nova exercise images without reference—prevents wrong person (e.g. bald) in output
+            if (type === 'ex' && (persona === 'atlas' || persona === 'nova') && (subtype === 'main' || subtype === 'step') && !referenceImage) {
+                throw new Error(`CRITICAL: Coach reference image missing for ${persona}. Upload system_coach_${persona}_ref in Admin (Refs Status) before generating. NEVER generate without reference image.`);
+            }
             // #region agent log
             fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AssetOrchestrator.ts:afterConstructPrompt',message:'After constructPrompt',data:{key:uKey.toString(),hasReferenceImage:!!referenceImage,referenceImageLen:referenceImage?.length,referenceType},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
             // #endregion

@@ -92,6 +92,10 @@ Return ONLY cleaned visual description.`;
   async generateImage({ prompt, model = 'models/gemini-2.5-flash-image', referenceImage, referenceType = 'identity' }: GenerateImageParams) {
     console.log(`[AiService] generateImage called with model: ${model}, type: ${referenceType}`);
     console.log(`[AiService] Prompt length: ${prompt?.length}, HasReference: ${!!referenceImage}`);
+    // CRITICAL: Never generate identity-type images without reference—prevents wrong person (e.g. bald) in output
+    if (referenceType === 'identity' && !referenceImage) {
+      throw new Error('CRITICAL: Identity generation requires a reference image. Coach reference (system_coach_atlas_ref / system_coach_nova_ref) must be uploaded in Admin (Refs Status). NEVER generate without reference.');
+    }
     // #region agent log
     if (!referenceImage) fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aiService.ts:generateImage:noRef',message:'No reference image passed',data:{promptLen:prompt?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
     // #endregion

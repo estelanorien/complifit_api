@@ -19,15 +19,30 @@ export class MovementRepository {
 
     /**
      * Fetch all available exercises with basic metadata.
+     * Returns only canonical (English) rows when is_canonical column exists; otherwise all rows.
      */
     static async findAllExercises(): Promise<any[]> {
-        const res = await pool.query(`
-            SELECT id, name, metadata, equipment, difficulty, created_at
-            FROM training_exercises
-            WHERE name IS NOT NULL AND name != ''
-            ORDER BY name ASC
-        `);
-        return res.rows;
+        try {
+            const res = await pool.query(`
+                SELECT id, name, metadata, equipment, difficulty, created_at
+                FROM training_exercises
+                WHERE name IS NOT NULL AND name != ''
+                  AND (is_canonical IS NOT DISTINCT FROM true)
+                ORDER BY name ASC
+            `);
+            return res.rows;
+        } catch (e: any) {
+            if (e.message?.includes('is_canonical')) {
+                const res = await pool.query(`
+                    SELECT id, name, metadata, equipment, difficulty, created_at
+                    FROM training_exercises
+                    WHERE name IS NOT NULL AND name != ''
+                    ORDER BY name ASC
+                `);
+                return res.rows;
+            }
+            throw e;
+        }
     }
 
     /**
@@ -89,15 +104,30 @@ export class MovementRepository {
 
     /**
      * Get unique movements (exercises and meals) for admin listing.
-     * Consolidates logic from multiple tables.
+     * Only canonical (English) exercises when is_canonical exists; otherwise all.
      */
     static async getMovementManifest(): Promise<{ exercises: any[], meals: any[] }> {
-        const exerciseRes = await pool.query(`
-            SELECT DISTINCT ON (name) name, metadata, id
-            FROM training_exercises
-            WHERE name IS NOT NULL AND name != ''
-            ORDER BY name, created_at DESC
-        `);
+        let exerciseRes: { rows: any[] };
+        try {
+            exerciseRes = await pool.query(`
+                SELECT DISTINCT ON (name) name, metadata, id
+                FROM training_exercises
+                WHERE name IS NOT NULL AND name != ''
+                  AND (is_canonical IS NOT DISTINCT FROM true)
+                ORDER BY name, created_at DESC
+            `);
+        } catch (e: any) {
+            if (e.message?.includes('is_canonical')) {
+                exerciseRes = await pool.query(`
+                    SELECT DISTINCT ON (name) name, metadata, id
+                    FROM training_exercises
+                    WHERE name IS NOT NULL AND name != ''
+                    ORDER BY name, created_at DESC
+                `);
+            } else {
+                throw e;
+            }
+        }
 
         const mealRes = await pool.query(`
             SELECT DISTINCT ON (name) name, instructions, id

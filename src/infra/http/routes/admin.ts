@@ -14,6 +14,7 @@ import { AssetOrchestrator } from '../../../application/services/AssetOrchestrat
 import { AssetRepository } from '../../db/repositories/AssetRepository.js';
 import { MovementRepository } from '../../db/repositories/MovementRepository.js';
 import { jobManager } from '../../../application/GenerationJobManager.js';
+import { standardizeCanonicalExercises } from '../../../application/services/standardizeCanonicalService.js';
 import { UnifiedKey } from '../../../domain/UnifiedKey.js';
 import { AssetPromptService } from '../../../application/services/assetPromptService.js';
 
@@ -1112,6 +1113,22 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
+  /**
+   * POST /admin/exercises/standardize-canonical
+   * Mark duplicate localized exercises as non-canonical so only one English entry
+   * per logical exercise appears in lists. Run after migration 051.
+   */
+  app.post('/admin/exercises/standardize-canonical', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      const result = await standardizeCanonicalExercises();
+      req.log?.info({ msg: 'Standardize canonical exercises', markedNonCanonical: result.markedNonCanonical, groups: result.groups.length });
+      return reply.send({ success: true, markedNonCanonical: result.markedNonCanonical, groups: result.groups });
+    } catch (e: any) {
+      req.log?.error({ error: 'standardize-canonical failed', message: e.message });
+      return reply.status(400).send({ error: e.message || 'Standardize failed' });
+    }
+  });
+
   // Cleanup orphaned assets (not referenced by any active movement)
   app.post('/admin/assets/cleanup-orphaned', { preHandler: adminGuard }, async (req: any, reply: any) => {
     try {
@@ -1664,6 +1681,7 @@ export async function adminRoutes(app: FastifyInstance) {
         
         req.log.info({ msg: 'Batch processing started', jobId, totalTasks: tasks.length });
         
+        const ASSET_GENERATION_TIMEOUT_MS = 5 * 60 * 1000; // 5 min per asset to avoid stuck jobs
         for (const key of tasks) {
           try {
             const currentJob = jobManager.getJob(jobId);
@@ -1675,8 +1693,13 @@ export async function adminRoutes(app: FastifyInstance) {
             processedCount++;
             req.log.info({ msg: 'Processing asset', jobId, key, progress: `${processedCount}/${tasks.length}` });
             jobManager.updateProgress(jobId, { currentItem: key });
-            
-            const result = await AssetOrchestrator.generateAssetForKey(key);
+
+            const result = await Promise.race([
+              AssetOrchestrator.generateAssetForKey(key),
+              new Promise<string | null>((_, reject) =>
+                setTimeout(() => reject(new Error('Asset generation timeout (5 min)')), ASSET_GENERATION_TIMEOUT_MS)
+              )
+            ]);
             req.log.info({ msg: 'Asset generation result', jobId, key, result });
 
             if (result === 'SUCCESS' || result === 'EXISTS') {
