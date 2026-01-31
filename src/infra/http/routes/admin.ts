@@ -1,5 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import path from 'path';
+import fs from 'fs';
 import { adminGuard, authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
 // Native fetch used
@@ -385,6 +387,70 @@ export async function adminRoutes(app: FastifyInstance) {
       return reply.status(500).send({
         error: (isRateLimitError || isVideoError || !isProduction) ? errorMessage : 'Asset generation service unavailable'
       });
+    }
+  });
+
+  // Serve assembled director-cut videos (scene pack + stitch, no loop)
+  app.get('/admin/assembled-video/:filename', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    const filename = (req.params as { filename: string }).filename;
+    if (!/^[a-zA-Z0-9-]+\.mp4$/.test(filename)) return reply.status(400).send({ error: 'Invalid filename' });
+    const assembledDir = path.join(process.cwd(), 'data', 'assembled');
+    const filePath = path.join(assembledDir, filename);
+    if (!path.resolve(filePath).startsWith(path.resolve(assembledDir)) || !fs.existsSync(filePath)) {
+      return reply.status(404).send({ error: 'Video not found' });
+    }
+    reply.header('content-type', 'video/mp4');
+    return reply.send(fs.createReadStream(filePath));
+  });
+
+  // Enqueue director-cut video job (multiple 8s angles stitched, no loop). For exercise: one job per persona (atlas/nova); for meal: one job.
+  // Body: either { assetKey, persona? } or { movementId, type: 'exercise'|'meal', persona? } to resolve assetKey from movement.
+  app.post('/admin/video-jobs/director', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      const body = z.object({
+        assetKey: z.string().min(1).optional(),
+        movementId: z.string().optional(),
+        type: z.enum(['exercise', 'meal']).optional(),
+        persona: z.enum(['atlas', 'nova']).nullable().optional()
+      }).parse(req.body || {});
+
+      let assetKey = body.assetKey;
+      if (!assetKey && body.movementId) {
+        const { rows } = await pool.query(
+          `SELECT m.key FROM cached_asset_meta m
+           JOIN cached_assets a ON a.key = m.key
+           WHERE m.movement_id = $1 AND (a.asset_type = 'json' OR a.value::text LIKE '{%')
+           LIMIT 1`,
+          [body.movementId]
+        );
+        if (rows.length === 0) return reply.status(404).send({ error: 'No JSON asset found for movement' });
+        assetKey = rows[0].key;
+      }
+      if (!assetKey) return reply.status(400).send({ error: 'Provide assetKey or movementId' });
+
+      const { videoQueue } = await import('../../../application/services/videoQueueService.js');
+      const jobId = await videoQueue.enqueue(assetKey, body.persona ?? null, { withVoiceover: false });
+      return reply.send({ jobId, message: 'Director-cut job enqueued (scene pack + stitch)' });
+    } catch (e: any) {
+      req.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  // Poll video job status and result URL
+  app.get('/admin/video-jobs/:jobId', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      const jobId = (req.params as { jobId: string }).jobId;
+      const { rows } = await pool.query(
+        `SELECT id, asset_key, persona, status, result_url, error_log, updated_at FROM video_jobs WHERE id = $1`,
+        [jobId]
+      );
+      if (rows.length === 0) return reply.status(404).send({ error: 'Job not found' });
+      const r = rows[0];
+      return reply.send({ jobId: r.id, status: r.status, resultUrl: r.result_url || null, errorLog: r.error_log || null, updatedAt: r.updated_at });
+    } catch (e: any) {
+      req.log.error(e);
+      return reply.status(500).send({ error: e.message });
     }
   });
 

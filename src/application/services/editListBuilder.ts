@@ -13,6 +13,7 @@ export interface Timepoint {
 export interface ClipRow {
   id: string;
   shot_type: string;
+  step_index?: number;
 }
 
 export interface EditSegment {
@@ -107,4 +108,45 @@ export function timepointsToSegmentEnds(
   for (let t = fixedStepSeconds; t < totalDurationSeconds; t += fixedStepSeconds) ends.push(t);
   ends.push(totalDurationSeconds);
   return ends;
+}
+
+/**
+ * Step-based edit list: one segment per step clip in order, aligned to narration "Step 1", "Step 2", ...
+ * Duration from TTS timepoints when available (stepCount+1 boundaries); otherwise 8s per step (last padded to total).
+ */
+export function buildStepBasedEditList(
+  timepoints: Timepoint[],
+  clipRows: ClipRow[],
+  totalDurationSeconds: number
+): EditSegment[] {
+  const stepCount = clipRows.length;
+  if (stepCount === 0) return [];
+
+  const sorted = [...timepoints].filter(t => t.timeSeconds != null).sort((a, b) => (a.timeSeconds ?? 0) - (b.timeSeconds ?? 0));
+  const times = sorted.map(t => t.timeSeconds ?? 0);
+  const useTimepoints = times.length >= stepCount + 1;
+
+  const segments: EditSegment[] = [];
+  let start = 0;
+  const defaultDuration = 8;
+  for (let i = 0; i < stepCount; i++) {
+    const clip = clipRows[i];
+    let durationSeconds: number;
+    if (useTimepoints && i + 1 < times.length) {
+      const end = Math.min(times[i + 1], totalDurationSeconds);
+      durationSeconds = Math.max(0.5, end - start);
+      start = end;
+    } else {
+      const remainingSteps = stepCount - i;
+      const remainingTime = totalDurationSeconds - start;
+      durationSeconds = remainingSteps === 1 ? Math.max(0.5, remainingTime) : defaultDuration;
+      start += durationSeconds;
+    }
+    segments.push({
+      clipId: clip.id,
+      shot_type: clip.shot_type as ShotType,
+      durationSeconds
+    });
+  }
+  return segments;
 }

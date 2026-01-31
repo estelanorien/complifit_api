@@ -26,7 +26,8 @@ export function buildNarrationScript(
     parts.push(`This is ${name}.`);
   }
 
-  steps.forEach((text, i) => {
+  steps.forEach((step: string | { simple?: string; detailed?: string; instruction?: string }, i) => {
+    const text = typeof step === 'string' ? step : (step?.detailed || step?.instruction || step?.simple || '');
     if (text?.trim()) {
       parts.push(`Step ${i + 1}: ${text.trim()}`);
     }

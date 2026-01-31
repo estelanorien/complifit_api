@@ -28,7 +28,7 @@ export type ShotType = typeof SHOT_TYPES[number];
 
 export interface VeoDirectorInput {
   assetKey: string;
-  assetMeta: { name: string; type?: 'exercise' | 'meal' };
+  assetMeta: { name: string; type?: 'exercise' | 'meal'; instructions?: { instructions?: Array<string | { simple?: string; detailed?: string; instruction?: string }> } };
   coachId?: string | null;
 }
 
@@ -82,8 +82,9 @@ export async function ensureScenePack(input: VeoDirectorInput): Promise<ClipResu
   const type: 'exercise' | 'meal' = assetMeta.type === 'meal' ? 'meal' : 'exercise';
 
   const existing = await pool.query(
-    `SELECT id, shot_type, uri, duration_seconds FROM video_source_clips WHERE parent_id = $1`,
-    [assetKey]
+    `SELECT id, shot_type, uri, duration_seconds FROM video_source_clips
+     WHERE parent_id = $1 AND (($2::text IS NULL AND coach_id IS NULL) OR coach_id = $2)`,
+    [assetKey, coachId ?? null]
   );
   if (existing.rows.length >= 3) {
     return existing.rows.map((r: any) => ({
@@ -104,7 +105,7 @@ export async function ensureScenePack(input: VeoDirectorInput): Promise<ClipResu
     const { rows } = await pool.query(
       `INSERT INTO video_source_clips (parent_id, coach_id, shot_type, uri, duration_seconds)
        VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (parent_id, shot_type) DO UPDATE SET uri = EXCLUDED.uri, duration_seconds = EXCLUDED.duration_seconds
+       ON CONFLICT (parent_id, coach_id, shot_type) DO UPDATE SET uri = EXCLUDED.uri, duration_seconds = EXCLUDED.duration_seconds
        RETURNING id`,
       [assetKey, coachId || null, shotType, uri, durationSeconds]
     );
@@ -118,24 +119,106 @@ export async function ensureScenePack(input: VeoDirectorInput): Promise<ClipResu
   return results;
 }
 
+/** Normalize step text from instructions.instructions[i] (string or { simple, detailed }). */
+function stepText(step: string | { simple?: string; detailed?: string; instruction?: string } | undefined): string {
+  if (step == null) return '';
+  if (typeof step === 'string') return step.trim();
+  return (step.detailed || step.instruction || step.simple || '').trim();
+}
+
 /**
- * Get clip rows for an asset (for edit list builder).
+ * Ensure step-based scene pack: one 8s clip per instruction step, with director angle variety per step.
+ * Persists to video_source_clips with step_index. Used for final stitch so each step is explicitly shown and narrated.
  */
-export async function getClipsForAsset(parentId: string): Promise<Array<{ id: string; shot_type: string }>> {
+export async function ensureStepScenePack(input: VeoDirectorInput): Promise<ClipResult[]> {
+  const { assetKey, assetMeta, coachId } = input;
+  const name = assetMeta.name || assetKey.split('_').slice(1).join(' ');
+  const type: 'exercise' | 'meal' = assetMeta.type === 'meal' ? 'meal' : 'exercise';
+  const rawSteps = assetMeta.instructions?.instructions ?? [];
+  const steps = rawSteps.map((s: any) => stepText(s)).filter(Boolean);
+  if (steps.length === 0) throw new Error('No instruction steps for step-based video');
+
+  const existing = await pool.query(
+    `SELECT id, step_index, shot_type, uri, duration_seconds FROM video_source_clips
+     WHERE parent_id = $1 AND (($2::text IS NULL AND coach_id IS NULL) OR coach_id = $2) AND step_index IS NOT NULL
+     ORDER BY step_index`,
+    [assetKey, coachId ?? null]
+  );
+  const existingByStep = new Map(existing.rows.map((r: any) => [r.step_index, r]));
+  const referenceImage = await getCoachRefDataUri(coachId ?? null);
+  const results: ClipResult[] = [];
+
+  for (let i = 0; i < steps.length; i++) {
+    const stepDesc = steps[i];
+    const shotType = SHOT_TYPES[i % SHOT_TYPES.length] as ShotType;
+    const existingRow = existingByStep.get(i);
+    if (existingRow?.uri) {
+      results.push({
+        shotType: existingRow.shot_type as ShotType,
+        uri: existingRow.uri,
+        durationSeconds: Number(existingRow.duration_seconds) || 8,
+        id: existingRow.id
+      });
+      continue;
+    }
+    const prompt = buildStepPrompt(shotType, name, type, coachId ?? null, i + 1, stepDesc);
+    const uri = await aiService.generateVideo({ prompt, referenceImage });
+    const durationSeconds = 8;
+    const { rows } = await pool.query(
+      `INSERT INTO video_source_clips (parent_id, coach_id, step_index, shot_type, uri, duration_seconds)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (parent_id, coach_id, step_index) DO UPDATE SET shot_type = EXCLUDED.shot_type, uri = EXCLUDED.uri, duration_seconds = EXCLUDED.duration_seconds
+       RETURNING id`,
+      [assetKey, coachId || null, i, shotType, uri, durationSeconds]
+    );
+    results.push({ shotType, uri, durationSeconds, id: rows[0]?.id });
+  }
+  return results;
+}
+
+function buildStepPrompt(shotType: ShotType, name: string, type: 'exercise' | 'meal', coachId: string | null, stepNum: number, stepDesc: string): string {
+  const isExercise = type === 'exercise';
+  const coachDesc = coachId === 'atlas'
+    ? 'Athletic male coach (Atlas), short hair, grey shirt'
+    : coachId === 'nova'
+      ? 'Athletic female coach (Nova), ponytail, green sports bra'
+      : '';
+  const base = isExercise
+    ? `Cinematic 4k fitness shot. ${coachDesc || 'Fitness coach'}. ${VIDEO_LOCATION_EXERCISE}. Moody lighting. 8 second clip, seamless.`
+    : `Cinematic food preparation shot. ${VIDEO_LOCATION_MEAL}. Gourmet 4k. 8 second clip.`;
+  const stepLine = `Step ${stepNum}: ${stepDesc}. Show exactly this step.`;
+  const angleLine = shotType === 'ESTABLISHING'
+    ? 'Wide shot, full body in frame.'
+    : shotType === 'CLOSE_UP'
+      ? 'Close-up of form and detail.'
+      : shotType === 'OVERHEAD'
+        ? 'Overhead angle.'
+        : 'Action angle, side or three-quarter view.';
+  return `${base} ${stepLine} ${angleLine}`;
+}
+
+/**
+ * Get clip rows for an asset (for edit list builder). Step-based: order by step_index; legacy: order by shot_type.
+ */
+export async function getClipsForAsset(parentId: string, coachId?: string | null): Promise<Array<{ id: string; shot_type: string; step_index?: number }>> {
   const { rows } = await pool.query(
-    `SELECT id, shot_type FROM video_source_clips WHERE parent_id = $1 ORDER BY array_position(ARRAY['ESTABLISHING','CLOSE_UP','OVERHEAD','ACTION'], shot_type)`,
-    [parentId]
+    `SELECT id, shot_type, step_index FROM video_source_clips
+     WHERE parent_id = $1 AND (($2::text IS NULL AND coach_id IS NULL) OR coach_id = $2)
+     ORDER BY step_index NULLS LAST, array_position(ARRAY['ESTABLISHING','CLOSE_UP','OVERHEAD','ACTION'], shot_type)`,
+    [parentId, coachId ?? null]
   );
   return rows;
 }
 
 /**
- * Get clip rows with URI for assembly.
+ * Get clip rows with URI for assembly. Step-based: order by step_index; legacy: order by shot_type.
  */
-export async function getClipsWithUriForAsset(parentId: string): Promise<Array<{ id: string; shot_type: string; uri: string }>> {
+export async function getClipsWithUriForAsset(parentId: string, coachId?: string | null): Promise<Array<{ id: string; shot_type: string; uri: string; step_index?: number }>> {
   const { rows } = await pool.query(
-    `SELECT id, shot_type, uri FROM video_source_clips WHERE parent_id = $1 ORDER BY array_position(ARRAY['ESTABLISHING','CLOSE_UP','OVERHEAD','ACTION'], shot_type)`,
-    [parentId]
+    `SELECT id, shot_type, uri, step_index FROM video_source_clips
+     WHERE parent_id = $1 AND (($2::text IS NULL AND coach_id IS NULL) OR coach_id = $2)
+     ORDER BY step_index NULLS LAST, array_position(ARRAY['ESTABLISHING','CLOSE_UP','OVERHEAD','ACTION'], shot_type)`,
+    [parentId, coachId ?? null]
   );
   return rows;
 }

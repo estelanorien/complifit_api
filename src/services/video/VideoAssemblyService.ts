@@ -41,6 +41,46 @@ async function downloadToTemp(uri: string, suffix: string): Promise<string> {
 }
 
 /**
+ * Assemble video-only (no TTS): concat segments per edit list → 1080p MP4. Used for director-cut (multiple angles stitched).
+ */
+export async function assembleVideoOnly(
+  editList: EditSegmentWithUri[],
+  outputPath: string
+): Promise<void> {
+  const tmpDir = path.join(os.tmpdir(), `assemble-vo-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  fs.mkdirSync(tmpDir, { recursive: true });
+
+  try {
+    const segPaths: string[] = [];
+    for (let i = 0; i < editList.length; i++) {
+      const seg = editList[i];
+      const local = await downloadToTemp(seg.uri, `.mp4`);
+      const outSeg = path.join(tmpDir, `seg_${i}.mp4`);
+      await runFfmpeg([
+        '-i', local,
+        '-t', String(seg.durationSeconds),
+        '-c:v', 'libx264', '-an', '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+        outSeg
+      ], tmpDir);
+      segPaths.push(outSeg);
+      try { fs.unlinkSync(local); } catch (_) {}
+    }
+
+    const listPath = path.join(tmpDir, 'list.txt');
+    fs.writeFileSync(listPath, segPaths.map(p => `file '${path.basename(p)}'`).join('\n'), 'utf8');
+
+    await runFfmpeg([
+      '-f', 'concat', '-safe', '0', '-i', listPath,
+      '-c:v', 'libx264', '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+      '-an',
+      outputPath
+    ], tmpDir);
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+  }
+}
+
+/**
  * Assemble final video: concat segments (per edit list) + TTS (+ optional music). Output 1080p.
  */
 export async function assemble(

@@ -10,9 +10,9 @@ import { buildNarrationScript } from './scriptBuilder.js';
 import { synthesize as synthesizeTTS } from '../../services/audio/TTSClient.js';
 import { mergeVideoAndAudio, getAudioDurationSeconds } from '../../services/video/ffmpegAssembler.js';
 import { uploadToYouTube } from '../../services/youtubeService.js';
-import { ensureScenePack, getClipsForAsset, getClipsWithUriForAsset } from '../../services/video/VeoDirector.js';
-import { buildEditList } from './editListBuilder.js';
-import { assemble } from '../../services/video/VideoAssemblyService.js';
+import { ensureScenePack, ensureStepScenePack, getClipsForAsset, getClipsWithUriForAsset } from '../../services/video/VeoDirector.js';
+import { buildEditList, buildStepBasedEditList } from './editListBuilder.js';
+import { assemble, assembleVideoOnly } from '../../services/video/VideoAssemblyService.js';
 import { AssetRepository } from '../../infra/db/repositories/AssetRepository.js';
 
 const aiService = new AiService();
@@ -169,7 +169,7 @@ export class VideoQueueService {
                             job.languages || ['en']
                         );
                     } else {
-                        resultUrl = await this.executeVideoGeneration(job.asset_key, job.persona);
+                        resultUrl = await this.executeVideoGeneration(job.asset_key, job.persona, job.id);
                     }
 
                     // Success
@@ -219,39 +219,41 @@ export class VideoQueueService {
         }
     }
 
-    private async executeVideoGeneration(assetKey: string, persona: string | null): Promise<string> {
-        // 1. Fetch Context (Exercise Name, Instructions)
+    /**
+     * Director-cut step-based: one 8s clip per instruction step (with angle variety per step), stitched in order.
+     * Each step is explicitly shown and can be narrated. Same for exercises and meals.
+     */
+    private async executeVideoGeneration(assetKey: string, persona: string | null, jobId: string): Promise<string> {
         const { rows } = await pool.query(
             `SELECT value, asset_type FROM cached_assets WHERE key = $1`,
             [assetKey]
         );
-
-        if (rows.length === 0) throw new Error("Asset not found");
+        if (rows.length === 0) throw new Error('Asset not found');
 
         const data = JSON.parse(rows[0].value);
-        const name = assetKey.split('_').slice(1).join(' '); // Rough name extraction if missing in data
-        const subjectName = data.name || name;
+        const name = assetKey.split('_').slice(1).join(' ');
+        const instructions = data.instructions ?? data.recipe;
+        const meta = { name: data.name || name, instructions, type: data.type || 'exercise' };
 
-        // 2. Construct Prompt
-        let prompt = "";
-        if (persona) {
-            // Exercise Video: same movement for both Atlas and Nova, longer take, athletic shoes
-            const coachDesc = persona === 'atlas'
-                ? "Athletic male coach (Atlas), short hair, grey shirt"
-                : "Athletic female coach (Nova), ponytail, green sports bra";
-            const movementDesc = `Clearly demonstrating the full ${subjectName} from start to finish so viewers can watch and learn. 8 second clip, seamless. Coach wearing athletic shoes (not barefoot).`;
+        // 1. Step scene pack: one 8s clip per instruction step (director angle variety per step)
+        await ensureStepScenePack({ assetKey, assetMeta: meta, coachId: persona });
+        const clipsWithUri = await getClipsWithUriForAsset(assetKey, persona);
+        if (clipsWithUri.length === 0) throw new Error('Step scene pack failed: no clips');
 
-            prompt = `Cinematic 4k fitness shot. ${coachDesc}. ${movementDesc}. ${VIDEO_LOCATION_EXERCISE}. Moody lighting. Both coaches perform the exact same movement.`;
-        } else {
-            // Meal Prep Video (location consistency)
-            prompt = `Cinematic food preparation shot. ${subjectName}. ${VIDEO_LOCATION_MEAL}. Gourmet 4k cooking video. Steam rising, delicious texture. 30-60 seconds, showing complete preparation steps.`;
-        }
+        // 2. Edit list: one segment per step in order, 8s each (each step explicitly shown)
+        const editListWithUri: Array<{ clipId: string; shot_type: string; durationSeconds: number; uri: string }> = clipsWithUri.map(
+            (c: { id: string; shot_type: string; uri: string }) => ({ clipId: c.id, shot_type: c.shot_type, durationSeconds: 8, uri: c.uri })
+        );
+        if (editListWithUri.length === 0) throw new Error('No clip URIs for assembly');
 
-        // ALWAYS use coach reference image for Atlas/Nova so video face matches training images.
-        const referenceImage = persona ? await getCoachRefDataUri(persona as 'atlas' | 'nova') : null;
-        if (referenceImage) logger.info(`[VideoQueue] Using ${persona} reference image for video`);
-        const videoUrl = await aiService.generateVideo({ prompt, referenceImage: referenceImage || undefined });
-        return videoUrl;
+        // 3. Assemble video-only (no TTS)
+        const assembledDir = path.join(process.cwd(), 'data', 'assembled');
+        fs.mkdirSync(assembledDir, { recursive: true });
+        const outPath = path.join(assembledDir, `${jobId}.mp4`);
+        await assembleVideoOnly(editListWithUri, outPath);
+
+        // 4. Return URL path the frontend can use (same-origin or API base + path)
+        return `/admin/assembled-video/${jobId}.mp4`;
     }
 
     /**
@@ -263,13 +265,20 @@ export class VideoQueueService {
         if (rows.length === 0) throw new Error('Asset not found');
         const data = JSON.parse(rows[0].value);
         const name = assetKey.split('_').slice(1).join(' ');
-        const meta = { name: data.name || name, instructions: data.instructions, type: data.type || 'exercise' };
+        const instructions = data.instructions ?? data.recipe;
+        const meta = { name: data.name || name, instructions, type: data.type || 'exercise' };
         const script = buildNarrationScript(meta, 200);
         if (!script.trim()) throw new Error('Empty narration script');
 
-        await ensureScenePack({ assetKey, assetMeta: meta, coachId: persona });
-        const clipsWithUri = await getClipsWithUriForAsset(assetKey);
+        const hasSteps = (meta.instructions?.instructions?.length ?? 0) > 0;
+        if (hasSteps) {
+            await ensureStepScenePack({ assetKey, assetMeta: meta, coachId: persona });
+        } else {
+            await ensureScenePack({ assetKey, assetMeta: meta, coachId: persona });
+        }
+        const clipsWithUri = await getClipsWithUriForAsset(assetKey, persona);
         const useBroll = clipsWithUri.length >= 3;
+        const useStepBased = useBroll && hasSteps && clipsWithUri.some((c: { step_index?: number }) => c.step_index != null);
 
         const tmpDir = path.join(os.tmpdir(), `voiceover-${Date.now()}-${Math.random().toString(36).slice(2)}`);
         fs.mkdirSync(tmpDir, { recursive: true });
@@ -278,13 +287,15 @@ export class VideoQueueService {
 
         try {
             if (useBroll) {
-                const clipRows = await getClipsForAsset(assetKey);
+                const clipRows = await getClipsForAsset(assetKey, persona);
                 for (const lang of languages) {
                     const { audioBuffer, timepoints } = await synthesizeTTS(script, lang, { enableTimePointing: true });
                     const ttsPath = path.join(tmpDir, `tts_${lang}.mp3`);
                     fs.writeFileSync(ttsPath, audioBuffer);
                     const totalDurationSeconds = await getAudioDurationSeconds(ttsPath);
-                    const editList = buildEditList(timepoints || [], clipRows, totalDurationSeconds);
+                    const editList = useStepBased
+                        ? buildStepBasedEditList(timepoints || [], clipRows, totalDurationSeconds)
+                        : buildEditList(timepoints || [], clipRows, totalDurationSeconds);
                     const clipById = new Map(clipsWithUri.map((c: { id: string; uri: string }) => [c.id, c]));
                     const editListWithUri: Array<{ clipId: string; shot_type: string; durationSeconds: number; uri: string }> = [];
                     for (const seg of editList) {
@@ -322,7 +333,8 @@ export class VideoQueueService {
                     );
                 }
             } else {
-                const videoUrl = await this.executeVideoGeneration(assetKey, persona);
+                const voiceoverJobId = `vo-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                const videoUrl = await this.executeVideoGeneration(assetKey, persona, voiceoverJobId);
                 for (const lang of languages) {
                     const { audioBuffer } = await synthesizeTTS(script, lang, { enableTimePointing: false });
                     const outPath = path.join(tmpDir, `merged_${lang}.mp4`);
