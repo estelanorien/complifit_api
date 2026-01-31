@@ -208,13 +208,16 @@ export async function errorHandler(
     });
   }
 
-  // Unknown errors - in production, don't expose internal error details
-  return reply.status(500).send({
-    error: isProduction ? 'An internal server error occurred. Please try again later.' : (error.message || 'Unknown error occurred'),
+  // Auth/profile paths: never return 500 so clients get retryable 503
+  const url = (req as any).url || (req as any).routerPath || '';
+  const isAuthOrProfile = typeof url === 'string' && (url.includes('/api/auth') || url.includes('/api/profiles'));
+  const status = isAuthOrProfile ? 503 : 500;
+  return reply.status(status).send({
+    error: isProduction ? (status === 503 ? 'Service temporarily unavailable. Please try again.' : 'An internal server error occurred. Please try again later.') : (error.message || 'Unknown error occurred'),
     requestId,
-    ...(isProduction ? {} : { 
+    ...(isProduction ? {} : {
       stack: error.stack,
-      details: error.message 
+      details: error.message
     }),
   });
 }

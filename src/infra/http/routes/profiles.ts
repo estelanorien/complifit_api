@@ -9,11 +9,11 @@ const saveSchema = z.object({
 });
 
 export async function profileRoutes(app: FastifyInstance) {
-  app.get('/profiles/me', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+  app.get('/profiles/me', { preHandler: authGuard }, async (req: any, reply: any) => {
+    const user = req.user;
     const safeProfile = () => ({
       profile: {
-        id: user?.userId,
+        id: user?.userId ?? user?.id,
         email: user?.email ?? '',
         username: (user?.email ?? '').split('@')[0] || 'user',
         name: user?.email ?? '',
@@ -23,6 +23,11 @@ export async function profileRoutes(app: FastifyInstance) {
     });
 
     try {
+      if (!user?.userId && !user?.id) {
+        reply.header('Access-Control-Allow-Origin', '*');
+        return reply.status(200).send(safeProfile());
+      }
+      const userId = user?.userId ?? user?.id;
       let rows: any[];
       try {
         const { rows: testRows } = await pool.query(
@@ -30,7 +35,7 @@ export async function profileRoutes(app: FastifyInstance) {
            FROM users u
            LEFT JOIN user_profiles up ON up.user_id = u.id
            WHERE u.id = $1`,
-          [user.userId]
+          [userId]
         );
         rows = testRows ?? [];
       } catch (e: any) {
@@ -40,13 +45,13 @@ export async function profileRoutes(app: FastifyInstance) {
              FROM users u
              LEFT JOIN user_profiles up ON up.user_id = u.id
              WHERE u.id = $1`,
-            [user.userId]
+            [userId]
           );
           rows = fallbackRows ?? [];
         } else if (e.code === '42P01') {
           const { rows: userRows } = await pool.query(
             `SELECT u.username, u.email, u.role, u.id FROM users u WHERE u.id = $1`,
-            [user.userId]
+            [userId]
           );
           rows = userRows?.length ? [{ ...userRows[0], profile_data: null, health_metrics: null }] : [];
         } else {
@@ -78,9 +83,13 @@ export async function profileRoutes(app: FastifyInstance) {
       reply.header('Access-Control-Allow-Origin', '*');
       return reply.status(200).send({ profile: profileData, metrics });
     } catch (e: any) {
-      req.log?.warn({ err: e }, '[profiles/me] fallback on error');
+      req.log?.warn({ err: e }, '[profiles/me] error - never 500, returning minimal profile');
       reply.header('Access-Control-Allow-Origin', '*');
-      return reply.status(200).send(safeProfile());
+      try {
+        return reply.status(200).send(safeProfile());
+      } catch {
+        return reply.status(200).send(MINIMAL_PROFILE);
+      }
     }
   });
 

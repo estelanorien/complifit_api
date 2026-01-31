@@ -83,8 +83,8 @@ export async function authRoutes(app: FastifyInstance) {
       if (isDbUnavailable) {
         return reply.status(503).send({ error: 'Service temporarily unavailable. Please try again in a moment.' });
       }
-      return reply.status(500).send({
-        error: isProduction ? 'Login temporarily unavailable. Please try again later.' : (e?.message || 'Internal server error'),
+      return reply.status(503).send({
+        error: isProduction ? 'Login temporarily unavailable. Please try again later.' : (e?.message || 'Service unavailable'),
       });
     }
   });

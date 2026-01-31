@@ -12,24 +12,25 @@ export async function authGuard(req: FastifyRequest, reply: FastifyReply) {
     if (header?.startsWith('Bearer ')) {
       token = header.substring('Bearer '.length);
     } else {
-      // Check query parameter for EventSource compatibility
       const query = (req as any).query as { token?: string };
       token = query?.token;
     }
-    
     if (!token) {
       reply.header('Access-Control-Allow-Origin', '*');
       reply.header('Access-Control-Allow-Credentials', 'false');
       return reply.status(401).send({ error: 'Unauthorized' });
     }
-    
     const payload = authService.verifyToken(token);
     (req as any).user = payload;
-  } catch (e) {
+  } catch {
     if (!reply.sent) {
       reply.header('Access-Control-Allow-Origin', '*');
       reply.header('Access-Control-Allow-Credentials', 'false');
-      return reply.status(401).send({ error: 'Unauthorized' });
+      try {
+        return reply.status(401).send({ error: 'Unauthorized' });
+      } catch {
+        // reply.send threw; do not rethrow so global handler does not return 500
+      }
     }
   }
 }
