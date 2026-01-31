@@ -159,6 +159,9 @@ export async function adminRoutes(app: FastifyInstance) {
         value = text;
       } else {
         // Video generation runs only in the backend (Veo via Gemini API; no Vertex AI).
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:video-gen-entry',message:'Video gen path: single Veo call only',data:{mode,key:key||null,singleVeoCall:true,noExtension:true,requestBodyHasDurationParam:false},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
         // ALWAYS use coach reference image when key indicates Atlas/Nova so video face matches training images.
         const baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
         const modelsToTry = ['models/veo-3.1-generate-preview', 'models/veo-3.1-fast-generate-preview', 'models/veo-3.0-generate-001'];
@@ -190,6 +193,10 @@ export async function adminRoutes(app: FastifyInstance) {
             const startEndpoint = `${baseUrl}/${model}:predictLongRunning`;
             console.log(`[Admin] Trying Veo model: ${model}`);
 
+            const veoParams = { aspectRatio: '16:9' };
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:veo-request-body',message:'Veo request has no duration or extension',data:{parameterKeys:Object.keys(veoParams),hasDuration:false,hasExtension:false},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
+            // #endregion
             const startRes = await fetch(startEndpoint, {
               method: 'POST',
               headers: {
@@ -198,7 +205,7 @@ export async function adminRoutes(app: FastifyInstance) {
               },
               body: JSON.stringify({
                 instances: [videoInstance],
-                parameters: { aspectRatio: '16:9' }
+                parameters: veoParams
               })
             });
 
@@ -262,6 +269,9 @@ export async function adminRoutes(app: FastifyInstance) {
                   findUri(resp?.generateVideoResponse ?? {}) ||
                   findUri(resp);
                 if (videoUri) {
+                  // #region agent log
+                  fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:video-uri-received',message:'Single Veo result returned; no extension calls',data:{videoUriPrefix:videoUri?.slice(0,50),singleCallOnly:true,extensionCallsCount:0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+                  // #endregion
                   console.log(`[Admin] Video generated successfully with model ${model}`);
                   break;
                 }
