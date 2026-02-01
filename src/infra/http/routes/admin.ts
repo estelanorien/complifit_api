@@ -417,13 +417,25 @@ export async function adminRoutes(app: FastifyInstance) {
 
       let assetKey = body.assetKey;
       if (!assetKey && body.movementId) {
-        const { rows } = await pool.query(
+        const movementId = body.movementId;
+        let { rows } = await pool.query(
           `SELECT m.key FROM cached_asset_meta m
            JOIN cached_assets a ON a.key = m.key
            WHERE m.movement_id = $1 AND (a.asset_type = 'json' OR a.value::text LIKE '{%')
            LIMIT 1`,
-          [body.movementId]
+          [movementId]
         );
+        if (rows.length === 0) {
+          const prefix = body.type === 'meal' ? 'meal' : 'ex';
+          const { rows: keyRows } = await pool.query(
+            `SELECT a.key FROM cached_assets a
+             WHERE (a.key LIKE $1 OR a.key LIKE $2) AND (a.asset_type = 'json' OR a.value::text LIKE '{%')
+             ORDER BY CASE WHEN a.key LIKE '%:meta:%' OR a.key LIKE '%_meta' THEN 0 ELSE 1 END
+             LIMIT 1`,
+            [`${prefix}:${movementId}:%`, `${prefix}_${movementId}%`]
+          );
+          rows = keyRows;
+        }
         if (rows.length === 0) return reply.status(404).send({ error: 'No JSON asset found for movement' });
         assetKey = rows[0].key;
       }
