@@ -1623,7 +1623,7 @@ export async function adminRoutes(app: FastifyInstance) {
           }
         }
       } else if (mode === 'next') {
-        // Fetch missing items based on type filter
+        // Fetch missing items based on type filter (incomplete by asset count)
         const types = type ? [type] : ['ex', 'meal'];
         for (const t of types) {
           const movements = t === 'ex' ? await MovementRepository.findAllExercises() : await MovementRepository.findAllMeals();
@@ -1638,49 +1638,92 @@ export async function adminRoutes(app: FastifyInstance) {
         }
       }
 
-      if (itemsToProcess.length === 0) {
-        req.log.warn({ msg: 'Batch generation: No items to process', mode, type, ids, count });
-        return reply.status(400).send({ error: 'No items found for generation' });
-      }
-
-      req.log.info({ msg: 'Batch generation: Processing items', itemCount: itemsToProcess.length, items: itemsToProcess.map(i => ({ type: i.type, name: i.name })) });
-
-      // Calculate total steps across all manifests - DYNAMIC based on instructions
+      // Build task list: full manifest (selected/next) or gaps-only (missing + failed keys)
       let totalSteps = 0;
       const tasks: string[] = [];
-      for (const item of itemsToProcess) {
-        // FIX: Load instructions first to get dynamic step count
-        let stepCount = 6; // Default fallback
-        try {
-          const movementId = AssetPromptService.normalizeToId(item.name);
-          // CRITICAL FIX: Use UnifiedKey format for meta key (was using old underscore format)
-          const metaKey = item.type === 'ex' 
-            ? `ex:${movementId}:none:meta:0` 
-            : `meal:${movementId}:none:meta:0`;
-          const metaAsset = await AssetRepository.findByKey(metaKey);
-          if (metaAsset?.value) {
-            const parsed = JSON.parse(metaAsset.value);
-            if (parsed.instructions && Array.isArray(parsed.instructions)) {
-              stepCount = Math.min(parsed.instructions.length, 10); // Cap at MAX_STEPS (10)
+      const maxGapTasks = Math.min(count, 500); // Cap gaps mode to avoid runaway jobs
+
+      if (mode === 'gaps') {
+        // Autodetect missing and failed assets across DB; enqueue only those so nothing stays missing
+        const types = type ? [type] : ['ex', 'meal'];
+        const allMovements: Array<{ type: 'ex' | 'meal'; id: string; name: string }> = [];
+        for (const t of types) {
+          const list = t === 'ex' ? await MovementRepository.findAllExercises() : await MovementRepository.findAllMeals();
+          for (const m of list) allMovements.push({ type: t as any, id: m.id, name: m.name });
+        }
+        for (const item of allMovements) {
+          if (tasks.length >= maxGapTasks) break;
+          let stepCount = 6;
+          try {
+            const movementId = AssetPromptService.normalizeToId(item.name);
+            const metaKey = item.type === 'ex' ? `ex:${movementId}:none:meta:0` : `meal:${movementId}:none:meta:0`;
+            const metaAsset = await AssetRepository.findByKey(metaKey);
+            if (metaAsset?.value) {
+              const parsed = JSON.parse(metaAsset.value);
+              if (parsed.instructions && Array.isArray(parsed.instructions)) {
+                stepCount = Math.min(parsed.instructions.length, 10);
+              }
+            } else if (metaAsset?.buffer) {
+              const parsed = JSON.parse(metaAsset.buffer.toString());
+              if (parsed.instructions && Array.isArray(parsed.instructions)) {
+                stepCount = Math.min(parsed.instructions.length, 10);
+              }
             }
-          } else if (metaAsset?.buffer) {
-            const parsed = JSON.parse(metaAsset.buffer.toString());
-            if (parsed.instructions && Array.isArray(parsed.instructions)) {
-              stepCount = Math.min(parsed.instructions.length, 10); // Cap at MAX_STEPS (10)
+            stepCount = Math.max(1, Math.min(stepCount, 10));
+          } catch (e) {
+            // use default stepCount
+          }
+          const movementSlug = AssetPromptService.normalizeToId(item.name);
+          const manifest = await UnifiedAssetService.getManifest(item.type, movementSlug, item.name, stepCount);
+          const existing = await AssetRepository.findByMovement(movementSlug);
+          const existingByKey = new Map(existing.map(a => [a.key, a]));
+          for (const key of manifest) {
+            if (tasks.length >= maxGapTasks) break;
+            const rec = existingByKey.get(key);
+            if (!rec || rec.status === 'failed') {
+              tasks.push(key);
+              if (!itemsToProcess.some(i => i.name === item.name && i.type === item.type)) {
+                itemsToProcess.push(item);
+              }
             }
           }
-          // Ensure stepCount is at least 1 and capped at 10
-          stepCount = Math.max(1, Math.min(stepCount, 10));
-        } catch (e) {
-          // If meta doesn't exist yet, use default - will be generated first
         }
-        
-        // CRITICAL: Use slug (normalized name) for manifest, not UUID - manifest generates keys like ex:slug:nova:main:0
-        const movementSlug = AssetPromptService.normalizeToId(item.name);
-        const manifest = await UnifiedAssetService.getManifest(item.type, movementSlug, item.name, stepCount);
-        req.log.info({ msg: 'Manifest generated', itemName: item.name, movementSlug, stepCount, manifestKeys: manifest.filter(k => k.includes(':nova:main:') || k.includes(':atlas:main:')), totalKeys: manifest.length });
-        tasks.push(...manifest);
-        totalSteps += manifest.length;
+        totalSteps = tasks.length;
+        req.log.info({ msg: 'Batch generation: Gaps mode', gapTaskCount: tasks.length, movementsWithGaps: itemsToProcess.length });
+      } else {
+        // selected / next: full manifest per movement
+        for (const item of itemsToProcess) {
+          let stepCount = 6;
+          try {
+            const movementId = AssetPromptService.normalizeToId(item.name);
+            const metaKey = item.type === 'ex' ? `ex:${movementId}:none:meta:0` : `meal:${movementId}:none:meta:0`;
+            const metaAsset = await AssetRepository.findByKey(metaKey);
+            if (metaAsset?.value) {
+              const parsed = JSON.parse(metaAsset.value);
+              if (parsed.instructions && Array.isArray(parsed.instructions)) {
+                stepCount = Math.min(parsed.instructions.length, 10);
+              }
+            } else if (metaAsset?.buffer) {
+              const parsed = JSON.parse(metaAsset.buffer.toString());
+              if (parsed.instructions && Array.isArray(parsed.instructions)) {
+                stepCount = Math.min(parsed.instructions.length, 10);
+              }
+            }
+            stepCount = Math.max(1, Math.min(stepCount, 10));
+          } catch (e) {
+            // use default
+          }
+          const movementSlug = AssetPromptService.normalizeToId(item.name);
+          const manifest = await UnifiedAssetService.getManifest(item.type, movementSlug, item.name, stepCount);
+          req.log.info({ msg: 'Manifest generated', itemName: item.name, movementSlug, stepCount, totalKeys: manifest.length });
+          tasks.push(...manifest);
+          totalSteps += manifest.length;
+        }
+      }
+
+      if (tasks.length === 0) {
+        req.log.warn({ msg: 'Batch generation: No tasks to process', mode, type, ids, count });
+        return reply.status(400).send({ error: mode === 'gaps' ? 'No missing or failed assets found' : 'No items found for generation' });
       }
 
       req.log.info({ msg: 'Creating batch job', jobId, totalSteps, taskCount: tasks.length, itemsCount: itemsToProcess.length });
