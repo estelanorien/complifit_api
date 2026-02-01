@@ -10,7 +10,12 @@ const saveSchema = z.object({
 
 export async function profileRoutes(app: FastifyInstance) {
   app.get('/profiles/me', { preHandler: authGuard }, async (req: any, reply: any) => {
-    const user = req.user;
+    let user: any;
+    try {
+      user = req.user;
+    } catch {
+      user = null;
+    }
     const safeProfile = () => ({
       profile: {
         id: user?.userId ?? user?.id,
@@ -88,7 +93,7 @@ export async function profileRoutes(app: FastifyInstance) {
       try {
         return reply.status(200).send(safeProfile());
       } catch {
-        return reply.status(200).send(MINIMAL_PROFILE);
+        return reply.status(200).send({ profile: { id: '', email: '', username: 'user', name: '', role: 'user' }, metrics: {} });
       }
     }
   });

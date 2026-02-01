@@ -22,14 +22,20 @@ export async function authGuard(req: FastifyRequest, reply: FastifyReply) {
     }
     const payload = authService.verifyToken(token);
     (req as any).user = payload;
-  } catch {
+  } catch (e) {
     if (!reply.sent) {
       reply.header('Access-Control-Allow-Origin', '*');
       reply.header('Access-Control-Allow-Credentials', 'false');
       try {
         return reply.status(401).send({ error: 'Unauthorized' });
-      } catch {
-        // reply.send threw; do not rethrow so global handler does not return 500
+      } catch (sendErr) {
+        if (!reply.sent) {
+          try {
+            reply.status(401).send({ error: 'Unauthorized' });
+          } catch {
+            // avoid rethrow so global handler does not double-respond with 500
+          }
+        }
       }
     }
   }

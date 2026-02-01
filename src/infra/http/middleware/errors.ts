@@ -104,6 +104,10 @@ export async function errorHandler(
   req: FastifyRequest,
   reply: FastifyReply
 ) {
+  if (reply.sent) {
+    req.log?.error({ err: error }, 'Error after response already sent');
+    return;
+  }
   // CORS on every error response - use * so browser never blocks (credentials false)
   reply.header('Access-Control-Allow-Origin', '*');
   reply.header('Access-Control-Allow-Credentials', 'false');
@@ -209,16 +213,30 @@ export async function errorHandler(
   }
 
   // Auth/profile paths: never return 500 so clients get retryable 503
-  const url = (req as any).url || (req as any).routerPath || '';
-  const isAuthOrProfile = typeof url === 'string' && (url.includes('/api/auth') || url.includes('/api/profiles'));
+  const rawUrl = (req as any).url || '';
+  const routerPath = (req as any).routerPath || (req as any).routeOptions?.url || '';
+  const url = `${rawUrl} ${routerPath}`;
+  const isAuthOrProfile = /auth|profiles/.test(url);
   const status = isAuthOrProfile ? 503 : 500;
-  return reply.status(status).send({
+  const body = {
     error: isProduction ? (status === 503 ? 'Service temporarily unavailable. Please try again.' : 'An internal server error occurred. Please try again later.') : (error.message || 'Unknown error occurred'),
     requestId,
     ...(isProduction ? {} : {
       stack: error.stack,
       details: error.message
     }),
-  });
+  };
+  try {
+    return await reply.status(status).send(body);
+  } catch (sendErr: any) {
+    req.log?.error({ err: sendErr, originalError: error.message }, 'Error handler failed to send response');
+    if (!reply.sent) {
+      try {
+        return reply.status(status).send({ error: 'Request failed', requestId });
+      } catch {
+        // ignore
+      }
+    }
+  }
 }
 
