@@ -394,10 +394,8 @@ export async function assetsRoutes(app: FastifyInstance) {
       // Use a dedicated client with longer timeout to avoid "Query read timeout" when syncing many images
       const client = await pool.connect();
       let rows: any[];
-      try {
-        await client.query(`SET statement_timeout = '120000'`);
-        const res = await client.query(
-          `SELECT a.key, 
+      const queryParams = [originalMovementId, `ex:${originalMovementId}:%`, `meal:${originalMovementId}:%`, `ex_${originalMovementId}%`, `meal_${originalMovementId}%`, `${originalMovementId}%`, limit];
+      const fullQuery = `SELECT a.key, 
                    CASE 
                      WHEN a.asset_type = 'image' THEN COALESCE(ENCODE(b.data, 'base64'), a.value)
                      ELSE a.value
@@ -417,10 +415,45 @@ export async function assetsRoutes(app: FastifyInstance) {
                OR a.key LIKE $5
                OR a.key LIKE $6
             ORDER BY a.created_at DESC
-            LIMIT $7`,
-          [originalMovementId, `ex:${originalMovementId}:%`, `meal:${originalMovementId}:%`, `ex_${originalMovementId}%`, `meal_${originalMovementId}%`, `${originalMovementId}%`, limit]
-        );
+            LIMIT $7`;
+      const fallbackQuery = `SELECT a.key, 
+                   CASE 
+                     WHEN a.asset_type = 'image' THEN COALESCE(ENCODE(b.data, 'base64'), a.value)
+                     ELSE a.value
+                   END as value,
+                   a.asset_type, a.status, a.created_at,
+                   m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id
+            FROM cached_assets a
+            LEFT JOIN cached_asset_meta m ON m.key = a.key
+            LEFT JOIN asset_blob_storage b ON b.key = a.key
+            WHERE m.movement_id = $1 
+               OR a.key LIKE $2 
+               OR a.key LIKE $3
+               OR a.key LIKE $4 
+               OR a.key LIKE $5
+               OR a.key LIKE $6
+            ORDER BY a.created_at DESC
+            LIMIT $7`;
+      try {
+        await client.query(`SET statement_timeout = '120000'`);
+        const res = await client.query(fullQuery, queryParams);
         rows = res.rows;
+      } catch (queryErr: any) {
+        if (queryErr?.code === '42703') {
+          req.log.warn({ err: queryErr }, '[by-movement] Full query failed (missing column), using fallback');
+          const fallbackRes = await client.query(fallbackQuery, queryParams);
+          rows = fallbackRes.rows.map((r: any) => ({
+            ...r,
+            translation_status: null,
+            translation_error: null,
+            video_status: null,
+            video_error: null,
+            step_index: null,
+            persona: null
+          }));
+        } else {
+          throw queryErr;
+        }
       } finally {
         client.release();
       }

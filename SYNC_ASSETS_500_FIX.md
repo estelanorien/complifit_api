@@ -24,3 +24,7 @@ SELECT column_name FROM information_schema.columns
 WHERE table_name = 'cached_asset_meta' AND column_name IN ('text_context','text_context_simple');
 ```
 You should see both `text_context` and `text_context_simple`.
+
+## Resilience (2026-02)
+
+The `POST /assets/by-movement` handler now tolerates missing columns in `cached_asset_meta` (e.g. if migrations 041/042/046 are not yet applied). On PostgreSQL error `42703` (undefined_column) it runs a fallback query that selects only base meta columns and returns the same response shape with null for optional fields. Applying the migrations is still recommended so translation/video status and text_context are returned when present.
