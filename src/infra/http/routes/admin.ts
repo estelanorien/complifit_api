@@ -1749,12 +1749,18 @@ export async function adminRoutes(app: FastifyInstance) {
             req.log.info({ msg: 'Processing asset', jobId, key, progress: `${processedCount}/${tasks.length}` });
             jobManager.updateProgress(jobId, { currentItem: key });
 
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:1752',message:'before generateAssetForKey',data:{jobId,key,processedCount,totalTasks:tasks.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+            // #endregion
             const result = await Promise.race([
               AssetOrchestrator.generateAssetForKey(key),
               new Promise<string | null>((_, reject) =>
                 setTimeout(() => reject(new Error('Asset generation timeout (5 min)')), ASSET_GENERATION_TIMEOUT_MS)
               )
             ]);
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:1758',message:'after generateAssetForKey',data:{jobId,key,result},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+            // #endregion
             req.log.info({ msg: 'Asset generation result', jobId, key, result });
 
             if (result === 'SUCCESS' || result === 'EXISTS') {
@@ -1775,6 +1781,9 @@ export async function adminRoutes(app: FastifyInstance) {
             } else if (result === 'FAILED') {
               const currentFailed = (jobManager.getJob(jobId)?.failed || 0) + 1;
               jobManager.updateProgress(jobId, { failed: currentFailed });
+              // #region agent log
+              fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:1778',message:'asset FAILED',data:{jobId,key,failed:currentFailed},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+              // #endregion
               req.log.warn({ msg: 'Asset generation failed', jobId, key, failed: currentFailed });
             } else {
               const currentSkipped = (jobManager.getJob(jobId)?.skipped || 0) + 1;
@@ -1784,6 +1793,9 @@ export async function adminRoutes(app: FastifyInstance) {
           } catch (e: any) {
             const currentFailed = (jobManager.getJob(jobId)?.failed || 0) + 1;
             jobManager.updateProgress(jobId, { failed: currentFailed });
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:1787',message:'asset exception',data:{jobId,key,error:e.message,stack:e.stack},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+            // #endregion
             req.log.error({ msg: 'Asset generation exception', jobId, key, error: e.message, stack: e.stack });
           }
         }

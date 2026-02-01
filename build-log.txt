@@ -1,0 +1,30 @@
+﻿AUTO_FIX_AND_GET_LOG report
+Project: bright-aloe-485517-n8
+Region:  europe-west1
+BuildId:  9b031a19-a60f-4ac0-b373-dba6bbe4bcf4
+Time:    2026-01-28T09:43:50
+
+Build describe (status/serviceAccount/logUrl):
+createTime: '2026-01-27T22:21:43.514914211Z'
+finishTime: '2026-01-27T22:24:19.125688Z'
+logUrl: https://console.cloud.google.com/cloud-build/builds;region=europe-west1/9b031a19-a60f-4ac0-b373-dba6bbe4bcf4?project=684095677071
+serviceAccount: projects/bright-aloe-485517-n8/serviceAccounts/vitality-api-cb@bright-aloe-485517-n8.iam.gserviceaccount.com
+status: FAILURE
+
+REMOTE BUILD OUTPUT (gcloud builds log):
+exitCode: 0
+--------------------------------------------------------------------------------
+python.exe : C:\Users\rmkoc\AppData\Local\Google\Cloud SDK\google-cloud-sdk\lib\third_party\google\cloud\__init__.py:20
+: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The 
+pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptool
+s<81.
+At C:\Users\rmkoc\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.ps1:114 char:3
++   & "$cloudsdk_python" $run_args_array
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\rmkoc\... Setuptools<81.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  import pkg_resources
+----------------------------- REMOTE BUILD OUTPUT ------------------------------
+--------------------------------------------------------------------------------
+

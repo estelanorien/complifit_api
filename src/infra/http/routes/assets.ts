@@ -219,6 +219,9 @@ export async function assetsRoutes(app: FastifyInstance) {
 
   app.post('/assets/batch', { preHandler: authGuard }, async (req: any, reply: any) => {
     const keys = (req.body && (req.body as any).keys) ?? (req.body as any);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:220',message:'batch entry',data:{keysCount:Array.isArray(keys)?keys.length:0,firstKey:Array.isArray(keys)?keys[0]:null},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
+    // #endregion
     if (!Array.isArray(keys) || keys.length === 0) return reply.send({});
 
     try {
@@ -226,6 +229,9 @@ export async function assetsRoutes(app: FastifyInstance) {
       let rows: any[];
       try {
         await client.query(`SET statement_timeout = '60000'`);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:230',message:'before batch query',data:{keysCount:keys.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
         const res = await client.query(
       `SELECT 
         a.key, 
@@ -243,6 +249,9 @@ export async function assetsRoutes(app: FastifyInstance) {
           [keys]
         );
         rows = res.rows;
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:247',message:'batch query success',data:{rowsCount:rows.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
       } finally {
         client.release();
       }
@@ -281,6 +290,9 @@ export async function assetsRoutes(app: FastifyInstance) {
     });
       return reply.send(result);
     } catch (e: any) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:284',message:'batch error',data:{msg:e?.message,code:e?.code,detail:e?.detail},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
+      // #endregion
       req.log?.warn({ err: e }, '[assets/batch] Error, returning empty');
       return reply.send({});
     }
@@ -374,6 +386,9 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   app.post('/assets/by-movement', { preHandler: authGuard }, async (req: any, reply: any) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:376',message:'by-movement entry',data:{body:req.body},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
+    // #endregion
     // CORS on every response path (success, error, and outer catch)
     const corsHeaders = () => {
       reply.header('Access-Control-Allow-Origin', '*');
@@ -434,23 +449,66 @@ export async function assetsRoutes(app: FastifyInstance) {
                OR a.key LIKE $6
             ORDER BY a.created_at DESC
             LIMIT $7`;
+      // No meta table: match by key pattern only (works when cached_asset_meta missing or broken)
+      const minimalQuery = `SELECT a.key,
+            CASE WHEN a.asset_type = 'image' THEN COALESCE(ENCODE(b.data, 'base64'), a.value) ELSE a.value END as value,
+            a.asset_type, a.status, a.created_at
+            FROM cached_assets a
+            LEFT JOIN asset_blob_storage b ON b.key = a.key
+            WHERE a.key LIKE $1 OR a.key LIKE $2 OR a.key LIKE $3 OR a.key LIKE $4 OR a.key LIKE $5
+            ORDER BY a.created_at DESC
+            LIMIT $6`;
+      const minimalParams = [`ex:${originalMovementId}:%`, `meal:${originalMovementId}:%`, `ex_${originalMovementId}%`, `meal_${originalMovementId}%`, `${originalMovementId}%`, limit];
+      const normalizeRow = (r: any) => ({
+        ...r,
+        prompt: r.prompt ?? null,
+        mode: r.mode ?? null,
+        source: r.source ?? null,
+        created_by: r.created_by ?? null,
+        meta_created_at: r.meta_created_at ?? null,
+        movement_id: r.movement_id ?? originalMovementId,
+        translation_status: r.translation_status ?? null,
+        translation_error: r.translation_error ?? null,
+        video_status: r.video_status ?? null,
+        video_error: r.video_error ?? null,
+        step_index: r.step_index ?? null,
+        persona: r.persona ?? null,
+        text_context: r.text_context ?? null,
+        text_context_simple: r.text_context_simple ?? null
+      });
       try {
         await client.query(`SET statement_timeout = '120000'`);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:465',message:'before fullQuery',data:{movementId:originalMovementId,queryParamsCount:queryParams.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
         const res = await client.query(fullQuery, queryParams);
         rows = res.rows;
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:468',message:'fullQuery success',data:{rowsCount:rows.length,firstKey:rows[0]?.key},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
       } catch (queryErr: any) {
-        if (queryErr?.code === '42703') {
+        const code = queryErr?.code;
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:471',message:'fullQuery error',data:{code,msg:queryErr?.message,detail:queryErr?.detail},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
+        // #endregion
+        if (code === '42703') {
           req.log.warn({ err: queryErr }, '[by-movement] Full query failed (missing column), using fallback');
-          const fallbackRes = await client.query(fallbackQuery, queryParams);
-          rows = fallbackRes.rows.map((r: any) => ({
-            ...r,
-            translation_status: null,
-            translation_error: null,
-            video_status: null,
-            video_error: null,
-            step_index: null,
-            persona: null
-          }));
+          try {
+            const fallbackRes = await client.query(fallbackQuery, queryParams);
+            rows = fallbackRes.rows.map((r: any) => normalizeRow({ ...r, translation_status: null, translation_error: null, video_status: null, video_error: null, step_index: null, persona: null }));
+          } catch (fallbackErr: any) {
+            if (fallbackErr?.code === '42P01') {
+              req.log.warn({ err: fallbackErr }, '[by-movement] Meta table missing, using minimal query');
+              const minRes = await client.query(minimalQuery, minimalParams);
+              rows = minRes.rows.map((r: any) => normalizeRow(r));
+            } else {
+              throw fallbackErr;
+            }
+          }
+        } else if (code === '42P01') {
+          req.log.warn({ err: queryErr }, '[by-movement] Meta table missing, using minimal query');
+          const minRes = await client.query(minimalQuery, minimalParams);
+          rows = minRes.rows.map((r: any) => normalizeRow(r));
         } else {
           throw queryErr;
         }
@@ -500,6 +558,9 @@ export async function assetsRoutes(app: FastifyInstance) {
       });
       return processedRows;
     } catch (e: any) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:537',message:'by-movement outer catch',data:{msg:e?.message,stack:e?.stack,code:e?.code},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
+      // #endregion
       req.log.error({ err: e }, '[by-movement] Error');
       if (!reply.sent) {
         corsHeaders();
