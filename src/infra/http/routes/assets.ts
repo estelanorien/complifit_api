@@ -218,92 +218,81 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   app.post('/assets/batch', { preHandler: authGuard }, async (req: any, reply: any) => {
-    const rawBody = req.body;
-    const keys: string[] = (rawBody && typeof rawBody === 'object' && Array.isArray((rawBody as any).keys))
-      ? (rawBody as any).keys
-      : Array.isArray(rawBody)
-        ? (rawBody as string[])
-        : [];
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:220',message:'batch entry',data:{keysCount:keys.length,firstKey:keys[0]??null},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
-    // #endregion
-    if (keys.length === 0) {
-      try { return reply.send({}); } catch (_) { return; }
-    }
-
+    const safeSendEmpty = () => { if (!reply.sent) try { reply.send({}); } catch (_) { /* ignore */ } };
     try {
+      const rawBody = req.body;
+      const keys: string[] = (rawBody && typeof rawBody === 'object' && Array.isArray((rawBody as any).keys))
+        ? (rawBody as any).keys
+        : Array.isArray(rawBody)
+          ? (rawBody as string[])
+          : [];
+      const cappedKeys = Array.isArray(keys) ? keys.slice(0, 150).filter((k: any) => typeof k === 'string') : [];
+      if (cappedKeys.length === 0) {
+        return safeSendEmpty();
+      }
+
       const client = await pool.connect();
-      let rows: any[];
+      let rows: any[] = [];
       try {
         await client.query(`SET statement_timeout = '60000'`);
+        // Primary query: no meta join so we always return results when keys exist (no schema dependency)
         const res = await client.query(
-          `SELECT a.key, a.value, a.asset_type, a.status, b.data as buffer, m.text_context, m.text_context_simple
+          `SELECT a.key, a.value, a.asset_type, a.status, b.data as buffer
            FROM cached_assets a
            LEFT JOIN asset_blob_storage b ON a.key = b.key
-           LEFT JOIN cached_asset_meta m ON m.key = a.key
            WHERE a.key = ANY($1) AND a.status IN ('active','auto','draft','generating')
            LIMIT 100`,
-          [keys]
+          [cappedKeys]
         );
-        rows = res.rows;
-      } catch (queryErr: any) {
-        req.log?.warn({ err: queryErr }, '[assets/batch] Main query failed, trying fallback (no meta join)');
-        try {
-          const fallbackRes = await client.query(
-            `SELECT a.key, a.value, a.asset_type, a.status, b.data as buffer
-             FROM cached_assets a
-             LEFT JOIN asset_blob_storage b ON a.key = b.key
-             WHERE a.key = ANY($1) AND a.status IN ('active','auto','draft','generating')
-             LIMIT 100`,
-            [keys]
-          );
-          rows = fallbackRes.rows.map((r: any) => ({ ...r, text_context: null, text_context_simple: null }));
-        } catch (fallbackErr: any) {
-          req.log?.warn({ err: fallbackErr }, '[assets/batch] Fallback failed, returning empty');
-          rows = [];
+        rows = res.rows || [];
+        if (rows.length > 0) {
+          try {
+            const metaRes = await client.query(
+              `SELECT key, text_context, text_context_simple FROM cached_asset_meta WHERE key = ANY($1)`,
+              [rows.map((r: any) => r.key)]
+            );
+            const metaByKey = new Map((metaRes.rows || []).map((m: any) => [m.key, m]));
+            rows = rows.map((r: any) => {
+              const meta = metaByKey.get(r.key);
+              return { ...r, text_context: meta?.text_context ?? null, text_context_simple: meta?.text_context_simple ?? null };
+            });
+          } catch (_) { /* optional */ }
         }
+      } catch (queryErr: any) {
+        req.log?.warn({ err: queryErr }, '[assets/batch] Query failed');
+        rows = [];
       } finally {
         client.release();
       }
 
       const result: Record<string, any> = {};
-      rows.forEach((r: any) => {
-      let value = r.value || '';
-      
-      // CRITICAL FIX: If buffer exists (from asset_blob_storage), convert it to base64
-      // buffer.toString() without encoding returns binary data with null bytes
-      if (r.buffer && Buffer.isBuffer(r.buffer)) {
-        if (r.asset_type === 'image') {
-          // Convert binary PNG buffer to base64 string
-          value = r.buffer.toString('base64');
-        } else if (r.asset_type === 'json') {
-          // For JSON, convert buffer to UTF-8 string
-          value = r.buffer.toString('utf-8');
-        } else {
-          // For other types, use base64
-          value = r.buffer.toString('base64');
+      for (const r of rows) {
+        try {
+          if (!r || r.key == null) continue;
+          let value: string = typeof r.value === 'string' ? r.value : '';
+          if (r.buffer && Buffer.isBuffer(r.buffer)) {
+            if (r.asset_type === 'image') value = r.buffer.toString('base64');
+            else if (r.asset_type === 'json') value = r.buffer.toString('utf-8');
+            else value = r.buffer.toString('base64');
+          }
+          if (r.asset_type === 'image' && value && !value.startsWith('data:image')) {
+            value = `data:image/png;base64,${value}`;
+          }
+          result[r.key] = {
+            value,
+            assetType: r.asset_type || 'image',
+            status: r.status,
+            textContext: r.text_context || '',
+            textContextSimple: r.text_context_simple || ''
+          };
+        } catch (rowErr: any) {
+          req.log?.warn({ key: r?.key, err: rowErr }, '[assets/batch] Skip row');
         }
       }
-      
-      // If image, ensure base64 prefix
-      if (r.asset_type === 'image' && value && !value.startsWith('data:image')) {
-        value = `data:image/png;base64,${value}`;
-      }
-      
-      result[r.key] = {
-        value,
-        assetType: r.asset_type,
-        status: r.status,
-        textContext: r.text_context || '',
-        textContextSimple: r.text_context_simple || ''
-      };
-    });
-      if (!reply.sent) return reply.send(result);
+      if (!reply.sent) reply.send(result);
     } catch (e: any) {
       req.log?.warn({ err: e }, '[assets/batch] Error, returning empty');
-      if (!reply.sent) {
-        try { return reply.send({}); } catch (sendErr: any) { req.log?.error({ err: sendErr }, '[assets/batch] Failed to send'); }
-      }
+      safeSendEmpty();
     }
   });
 
@@ -500,91 +489,66 @@ export async function assetsRoutes(app: FastifyInstance) {
       });
       try {
         await client.query(`SET statement_timeout = '120000'`);
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:465',message:'before fullQuery',data:{movementId:originalMovementId,queryParamsCount:queryParams.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-        // #endregion
-        const res = await client.query(fullQuery, queryParams);
-        rows = res.rows;
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:468',message:'fullQuery success',data:{rowsCount:rows.length,firstKey:rows[0]?.key},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-        // #endregion
-      } catch (queryErr: any) {
-        const code = queryErr?.code;
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:471',message:'fullQuery error',data:{code,msg:queryErr?.message,detail:queryErr?.detail},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
-        // #endregion
-        req.log.warn({ err: queryErr, code }, '[by-movement] Full query failed, trying fallbacks');
-        try {
-          const fallbackRes = await client.query(fallbackQuery, queryParams);
-          rows = fallbackRes.rows.map((r: any) => normalizeRow({ ...r, translation_status: null, translation_error: null, video_status: null, video_error: null, step_index: null, persona: null }));
-        } catch (fallbackErr: any) {
-          req.log.warn({ err: fallbackErr }, '[by-movement] Fallback query failed, using minimal (key pattern only)');
-          try {
-            const minRes = await client.query(minimalQuery, minimalParams);
-            rows = minRes.rows.map((r: any) => normalizeRow(r));
-          } catch (minErr: any) {
-            req.log.warn({ err: minErr }, '[by-movement] Minimal query failed, returning empty');
-            rows = [];
-          }
-        }
+        // Run minimal query first so we always get results (no dependency on cached_asset_meta schema)
+        const minRes = await client.query(minimalQuery, minimalParams);
+        rows = (minRes.rows || []).map((r: any) => normalizeRow(r));
+      } catch (minErr: any) {
+        req.log.warn({ err: minErr }, '[by-movement] Minimal query failed');
+        rows = [];
       } finally {
         client.release();
       }
 
       req.log.info(`[by-movement] Found ${rows.length} rows for ${originalMovementId}`);
-      const processedRows = rows.map((row: any) => {
-        // CRITICAL: Ensure image values are always valid base64 data URIs
-        if (row.asset_type === 'image' && row.value) {
-          if (typeof row.value === 'string') {
-            // If already a data URI, validate and clean it
-            if (row.value.startsWith('data:image')) {
-              const match = row.value.match(/data:image\/[^;]+;base64,(.+)/s);
-              if (match && match[1]) {
-                const base64Data = match[1].replace(/[\s\r\n\t]/g, '');
-                if (/^[A-Za-z0-9+/=]+$/.test(base64Data) && base64Data.length > 100) {
-                  row.value = `data:image/png;base64,${base64Data}`;
-                } else {
-                  req.log.warn(`[by-movement] Invalid base64 in data URI for ${row.key}, skipping`);
-                  row.value = null;
+      const processedRows: any[] = [];
+      for (const row of rows) {
+        try {
+          const out = { ...row };
+          if (out.asset_type === 'image' && out.value != null) {
+            if (typeof out.value === 'string') {
+              if (out.value.startsWith('data:image')) {
+                const match = out.value.match(/data:image\/[^;]+;base64,(.+)/s);
+                if (match && match[1]) {
+                  const base64Data = match[1].replace(/[\s\r\n\t]/g, '');
+                  if (/^[A-Za-z0-9+/=]+$/.test(base64Data) && base64Data.length > 100) {
+                    out.value = `data:image/png;base64,${base64Data}`;
+                  } else out.value = null;
                 }
-              }
-            } else {
-              // Raw base64 string - clean and validate
-              const cleaned = row.value.replace(/[\s\r\n\t]/g, '');
-              if (/^[A-Za-z0-9+/=]+$/.test(cleaned) && cleaned.length > 100) {
-                row.value = `data:image/png;base64,${cleaned}`;
               } else {
-                req.log.warn(`[by-movement] Invalid base64 for ${row.key}, skipping`);
-                row.value = null;
+                const cleaned = out.value.replace(/[\s\r\n\t]/g, '');
+                if (/^[A-Za-z0-9+/=]+$/.test(cleaned) && cleaned.length > 100) {
+                  out.value = `data:image/png;base64,${cleaned}`;
+                } else out.value = null;
               }
+            } else if (Buffer.isBuffer(out.value)) {
+              out.value = `data:image/png;base64,${out.value.toString('base64')}`;
+            } else {
+              out.value = null;
             }
-          } else if (Buffer.isBuffer(row.value)) {
-            // Binary buffer - convert to base64
-            row.value = `data:image/png;base64,${row.value.toString('base64')}`;
-          } else {
-            req.log.warn(`[by-movement] Unexpected image value type for ${row.key}: ${typeof row.value}`);
-            row.value = null;
           }
+          if (out.text_context === undefined) out.text_context = null;
+          if (out.text_context_simple === undefined) out.text_context_simple = null;
+          processedRows.push(out);
+        } catch (rowErr: any) {
+          req.log?.warn({ key: row?.key, err: rowErr }, '[by-movement] Skip row');
         }
-        // text_context/text_context_simple exist only after migration 046; default for same response shape
-        if (row.text_context === undefined) row.text_context = null;
-        if (row.text_context_simple === undefined) row.text_context_simple = null;
-        return row;
-      });
-      return processedRows;
+      }
+      if (!reply.sent) {
+        try {
+          return reply.send(processedRows);
+        } catch (sendErr: any) {
+          req.log?.warn({ err: sendErr }, '[by-movement] Send failed, returning empty');
+          if (!reply.sent) return reply.send([]);
+        }
+      }
     } catch (e: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:537',message:'by-movement outer catch',data:{msg:e?.message,stack:e?.stack,code:e?.code},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
-      // #endregion
       req.log.error({ err: e }, '[by-movement] Error');
       if (!reply.sent) {
         try {
           corsHeaders();
           reply.header('Content-Type', 'application/json');
-          return reply.status(200).send([]);
-        } catch (sendErr: any) {
-          req.log?.error({ err: sendErr }, '[by-movement] Failed to send error response');
-        }
+          return reply.send([]);
+        } catch (_) { /* ignore */ }
       }
     }
   });
