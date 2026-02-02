@@ -1628,7 +1628,8 @@ export async function adminRoutes(app: FastifyInstance) {
           let missingOrFailed = 0;
           for (const key of manifest) {
             const rec = existingByKey.get(key);
-            if (!rec || rec.status === 'failed') missingOrFailed++;
+            // Same definition as gaps/fill: no record, failed, or draft
+            if (!rec || rec.status === 'failed' || rec.status === 'draft') missingOrFailed++;
           }
           if (missingOrFailed > 0) {
             results.push({
@@ -1772,7 +1773,8 @@ export async function adminRoutes(app: FastifyInstance) {
             for (const key of manifest) {
               if (tasks.length >= maxFillTasks) break;
               const rec = existingByKey.get(key);
-              if (!rec || rec.status === 'failed') tasks.push(key);
+              // Standardized "missing": no record, failed, or draft (incomplete/no image)
+              if (!rec || rec.status === 'failed' || rec.status === 'draft') tasks.push(key);
             }
           }
         }
@@ -1823,7 +1825,8 @@ export async function adminRoutes(app: FastifyInstance) {
           for (const key of manifest) {
             if (tasks.length >= maxGapTasks) break;
             const rec = existingByKey.get(key);
-            if (!rec || rec.status === 'failed') {
+            // Standardized "missing": no record, failed, or draft (incomplete/no image)
+            if (!rec || rec.status === 'failed' || rec.status === 'draft') {
               tasks.push(key);
               if (!itemsToProcess.some(i => i.name === item.name && i.type === item.type)) {
                 itemsToProcess.push(item);

@@ -218,11 +218,18 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   app.post('/assets/batch', { preHandler: authGuard }, async (req: any, reply: any) => {
-    const keys = (req.body && (req.body as any).keys) ?? (req.body as any);
+    const rawBody = req.body;
+    const keys: string[] = (rawBody && typeof rawBody === 'object' && Array.isArray((rawBody as any).keys))
+      ? (rawBody as any).keys
+      : Array.isArray(rawBody)
+        ? (rawBody as string[])
+        : [];
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:220',message:'batch entry',data:{keysCount:Array.isArray(keys)?keys.length:0,firstKey:Array.isArray(keys)?keys[0]:null},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
+    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:220',message:'batch entry',data:{keysCount:keys.length,firstKey:keys[0]??null},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
     // #endregion
-    if (!Array.isArray(keys) || keys.length === 0) return reply.send({});
+    if (keys.length === 0) {
+      try { return reply.send({}); } catch (_) { return; }
+    }
 
     try {
       const client = await pool.connect();
@@ -291,10 +298,12 @@ export async function assetsRoutes(app: FastifyInstance) {
         textContextSimple: r.text_context_simple || ''
       };
     });
-      return reply.send(result);
+      if (!reply.sent) return reply.send(result);
     } catch (e: any) {
       req.log?.warn({ err: e }, '[assets/batch] Error, returning empty');
-      if (!reply.sent) return reply.send({});
+      if (!reply.sent) {
+        try { return reply.send({}); } catch (sendErr: any) { req.log?.error({ err: sendErr }, '[assets/batch] Failed to send'); }
+      }
     }
   });
 
@@ -398,10 +407,22 @@ export async function assetsRoutes(app: FastifyInstance) {
     };
     corsHeaders();
 
+    let body: { movementId: string; limit?: number };
     try {
-      const body = z.object({ movementId: z.string(), limit: z.number().min(1).max(50).optional() }).parse(req.body || {});
+      body = z.object({ movementId: z.string().min(1), limit: z.number().min(1).max(50).optional() }).parse(req.body || {});
+    } catch (parseErr: any) {
+      req.log?.warn({ err: parseErr }, '[by-movement] Validation failed');
+      if (!reply.sent) {
+        corsHeaders();
+        reply.header('Content-Type', 'application/json');
+        return reply.status(400).send({ error: parseErr?.message || 'Invalid request: movementId required' });
+      }
+      return;
+    }
+
+    try {
       // Cap limit aggressively to avoid Cloud Run response-size issues
-      const requestedLimit = body.limit ?? 40;
+      const requestedLimit = body?.limit ?? 40;
       const limit = Math.min(requestedLimit, 40);
       const originalMovementId = body.movementId;
       req.log.info(`[by-movement] Query for movementId: ${originalMovementId}, limit: ${limit}`);
@@ -556,9 +577,13 @@ export async function assetsRoutes(app: FastifyInstance) {
       // #endregion
       req.log.error({ err: e }, '[by-movement] Error');
       if (!reply.sent) {
-        corsHeaders();
-        reply.header('Content-Type', 'application/json');
-        return reply.status(200).send([]);
+        try {
+          corsHeaders();
+          reply.header('Content-Type', 'application/json');
+          return reply.status(200).send([]);
+        } catch (sendErr: any) {
+          req.log?.error({ err: sendErr }, '[by-movement] Failed to send error response');
+        }
       }
     }
   });
