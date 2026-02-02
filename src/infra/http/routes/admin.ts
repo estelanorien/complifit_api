@@ -1587,12 +1587,74 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   /**
+   * GET /admin/generation/missing
+   * Discover movements with missing or failed assets (read-only, no generation).
+   */
+  app.get('/admin/generation/missing', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      const typeParam = (req.query as any).type as string | undefined; // ex | meal | all
+      const limit = Math.min(parseInt(String((req.query as any).limit || 100), 10) || 100, 500);
+      const types: Array<'ex' | 'meal'> = typeParam === 'ex' ? ['ex'] : typeParam === 'meal' ? ['meal'] : ['ex', 'meal'];
+
+      const results: Array<{ movementId: string; name: string; type: 'ex' | 'meal'; existingCount: number; missingOrFailedCount: number }> = [];
+      for (const t of types) {
+        const list = t === 'ex' ? await MovementRepository.findAllExercises() : await MovementRepository.findAllMeals();
+        for (const m of list) {
+          if (results.length >= limit) break;
+          let stepCount = 6;
+          try {
+            const movementId = AssetPromptService.normalizeToId(m.name);
+            const metaKey = t === 'ex' ? `ex:${movementId}:none:meta:0` : `meal:${movementId}:none:meta:0`;
+            const metaAsset = await AssetRepository.findByKey(metaKey);
+            if (metaAsset?.value) {
+              const parsed = JSON.parse(metaAsset.value);
+              if (parsed.instructions && Array.isArray(parsed.instructions)) {
+                stepCount = Math.min(parsed.instructions.length, 10);
+              }
+            } else if (metaAsset?.buffer) {
+              const parsed = JSON.parse((metaAsset as any).buffer.toString());
+              if (parsed.instructions && Array.isArray(parsed.instructions)) {
+                stepCount = Math.min(parsed.instructions.length, 10);
+              }
+            }
+            stepCount = Math.max(1, Math.min(stepCount, 10));
+          } catch (e) {
+            // use default
+          }
+          const movementSlug = AssetPromptService.normalizeToId(m.name);
+          const existing = await AssetRepository.findByMovement(movementSlug);
+          const manifest = await UnifiedAssetService.getManifest(t, movementSlug, m.name, stepCount);
+          const existingByKey = new Map(existing.map((a: any) => [a.key, a]));
+          let missingOrFailed = 0;
+          for (const key of manifest) {
+            const rec = existingByKey.get(key);
+            if (!rec || rec.status === 'failed') missingOrFailed++;
+          }
+          if (missingOrFailed > 0) {
+            results.push({
+              movementId: movementSlug,
+              name: m.name,
+              type: t,
+              existingCount: existing.length,
+              missingOrFailedCount: missingOrFailed
+            });
+          }
+        }
+      }
+      return reply.send({ movements: results, total: results.length });
+    } catch (e: any) {
+      req.log?.error({ error: 'GET /admin/generation/missing failed', message: e.message });
+      return reply.status(500).send({ error: e.message || 'Internal server error' });
+    }
+  });
+
+  /**
    * POST /admin/generation/batch
    * Start batch asset generation
    */
   app.post('/admin/generation/batch', { preHandler: adminGuard }, async (req: any, reply: any) => {
     try {
-      const { mode, type, ids, count = 10 } = req.body as any;
+      const { mode, type, ids, count = 10, dryRun } = req.body as any;
       const jobId = `job_${Date.now()}`;
 
       let itemsToProcess: Array<{ type: 'ex' | 'meal', id: string, name: string }> = [];
@@ -1657,14 +1719,66 @@ export async function adminRoutes(app: FastifyInstance) {
             req.log.warn(`Gaps item not found: ${item.id} (Type: ${item.type})`);
           }
         }
+      } else if (mode === 'fill') {
+        // Fill DB: all movements of type(s); each movement gets full manifest (if 0 assets) or gaps only (if ≥1 asset)
+        const types = type ? [type] : ['ex', 'meal'];
+        for (const t of types) {
+          const list = t === 'ex' ? await MovementRepository.findAllExercises() : await MovementRepository.findAllMeals();
+          for (const m of list) itemsToProcess.push({ type: t as any, id: m.id, name: m.name });
+        }
       }
 
-      // Build task list: full manifest (selected/next) or gaps-only (missing + failed keys)
+      // Build task list: full manifest (selected/next) or gaps-only (missing + failed keys) or fill (full or gaps per movement)
       let totalSteps = 0;
       const tasks: string[] = [];
       const maxGapTasks = Math.min(count, 500); // Cap gaps mode to avoid runaway jobs
+      const maxFillTasks = Math.min(count || 500, 2000); // Cap fill mode
 
-      if (mode === 'gaps') {
+      if (mode === 'fill') {
+        // Fill database: for each movement, full manifest if 0 assets, else only missing/failed (same stepCount/manifest logic as elsewhere)
+        req.log.info({ msg: 'Batch generation: Fill mode', type: type || 'all', movementsCount: itemsToProcess.length, maxTasks: maxFillTasks });
+        for (const item of itemsToProcess) {
+          if (tasks.length >= maxFillTasks) break;
+          let stepCount = 6;
+          try {
+            const movementId = AssetPromptService.normalizeToId(item.name);
+            const metaKey = item.type === 'ex' ? `ex:${movementId}:none:meta:0` : `meal:${movementId}:none:meta:0`;
+            const metaAsset = await AssetRepository.findByKey(metaKey);
+            if (metaAsset?.value) {
+              const parsed = JSON.parse(metaAsset.value);
+              if (parsed.instructions && Array.isArray(parsed.instructions)) {
+                stepCount = Math.min(parsed.instructions.length, 10);
+              }
+            } else if (metaAsset?.buffer) {
+              const parsed = JSON.parse((metaAsset as any).buffer.toString());
+              if (parsed.instructions && Array.isArray(parsed.instructions)) {
+                stepCount = Math.min(parsed.instructions.length, 10);
+              }
+            }
+            stepCount = Math.max(1, Math.min(stepCount, 10));
+          } catch (e) {
+            // use default stepCount
+          }
+          const movementSlug = AssetPromptService.normalizeToId(item.name);
+          const existing = await AssetRepository.findByMovement(movementSlug);
+          const manifest = await UnifiedAssetService.getManifest(item.type, movementSlug, item.name, stepCount);
+          if (existing.length === 0) {
+            for (const key of manifest) {
+              if (tasks.length >= maxFillTasks) break;
+              tasks.push(key);
+            }
+          } else {
+            const existingByKey = new Map(existing.map((a: any) => [a.key, a]));
+            for (const key of manifest) {
+              if (tasks.length >= maxFillTasks) break;
+              const rec = existingByKey.get(key);
+              if (!rec || rec.status === 'failed') tasks.push(key);
+            }
+          }
+        }
+        totalSteps = tasks.length;
+        req.log.info({ msg: 'Batch generation: Fill mode done', taskCount: tasks.length });
+      } else if (mode === 'gaps') {
         // Autodetect missing and failed assets; scope to itemsToProcess if set (from ids), else whole DB
         let allMovements: Array<{ type: 'ex' | 'meal'; id: string; name: string }>;
         if (itemsToProcess.length > 0) {
@@ -1752,7 +1866,13 @@ export async function adminRoutes(app: FastifyInstance) {
 
       if (tasks.length === 0) {
         req.log.warn({ msg: 'Batch generation: No tasks to process', mode, type, ids, count });
-        return reply.status(400).send({ error: mode === 'gaps' ? 'No missing or failed assets found' : 'No items found for generation' });
+        const errMsg = mode === 'gaps' ? 'No missing or failed assets found' : mode === 'fill' ? 'No missing or failed assets to fill' : 'No items found for generation';
+        return reply.status(400).send({ error: errMsg });
+      }
+
+      if (dryRun) {
+        req.log.info({ msg: 'Batch generation: dry run', taskCount: tasks.length, mode, type });
+        return reply.send({ dryRun: true, taskCount: tasks.length, tasks, movements: itemsToProcess });
       }
 
       req.log.info({ msg: 'Creating batch job', jobId, totalSteps, taskCount: tasks.length, itemsCount: itemsToProcess.length });
