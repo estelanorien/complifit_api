@@ -1722,6 +1722,16 @@ export async function adminRoutes(app: FastifyInstance) {
               const fallback = await MovementRepository.findMealByNameFuzzy(item.id);
               if (fallback) movement = fallback;
             }
+            if (!movement && item.type === 'ex') {
+              const slug = AssetPromptService.normalizeToId(item.id);
+              const bySlug = await MovementRepository.findExerciseBySlug(slug);
+              if (bySlug) movement = bySlug;
+            }
+            if (!movement && item.type === 'meal') {
+              const slug = AssetPromptService.normalizeToId(item.id);
+              const bySlug = await MovementRepository.findMealBySlug(slug);
+              if (bySlug) movement = bySlug;
+            }
           }
           if (movement) {
             itemsToProcess.push({ type: item.type, id: movement.id, name: movement.name });
@@ -1830,27 +1840,34 @@ export async function adminRoutes(app: FastifyInstance) {
           const movementSlug = AssetPromptService.normalizeToId(item.name);
           const existing = await AssetRepository.findByMovement(movementSlug);
           req.log.info({ msg: 'Gaps per movement', name: item.name, movementSlug, existingCount: existing.length, stepCount });
-          // Only fix gaps for movements that already have at least one generated asset (generation has happened but has failed/missing elements)
-          if (existing.length === 0) {
-            req.log.warn({ msg: 'Gaps skip (no existing assets)', name: item.name, movementSlug });
-            continue;
-          }
           const manifest = await UnifiedAssetService.getManifest(item.type, movementSlug, item.name, stepCount);
           const existingByKey = new Map(existing.map(a => [a.key, a]));
           let added = 0;
-          for (const key of manifest) {
-            if (tasks.length >= maxGapTasks) break;
-            const rec = existingByKey.get(key);
-            // Standardized "missing": no record, failed, or draft (incomplete/no image)
-            if (!rec || rec.status === 'failed' || rec.status === 'draft') {
+          // When user explicitly selected this movement (ids provided), always enqueue: full manifest if 0 existing, else only missing/failed/draft
+          if (existing.length === 0) {
+            for (const key of manifest) {
+              if (tasks.length >= maxGapTasks) break;
               tasks.push(key);
               added++;
-              if (!itemsToProcess.some(i => i.name === item.name && i.type === item.type)) {
-                itemsToProcess.push(item);
+            }
+            if (!itemsToProcess.some(i => i.name === item.name && i.type === item.type)) {
+              itemsToProcess.push(item);
+            }
+            req.log.info({ msg: 'Gaps movement result (full manifest, 0 existing)', name: item.name, manifestLength: manifest.length, added });
+          } else {
+            for (const key of manifest) {
+              if (tasks.length >= maxGapTasks) break;
+              const rec = existingByKey.get(key);
+              if (!rec || rec.status === 'failed' || rec.status === 'draft') {
+                tasks.push(key);
+                added++;
+                if (!itemsToProcess.some(i => i.name === item.name && i.type === item.type)) {
+                  itemsToProcess.push(item);
+                }
               }
             }
+            req.log.info({ msg: 'Gaps movement result', name: item.name, manifestLength: manifest.length, added });
           }
-          req.log.info({ msg: 'Gaps movement result', name: item.name, manifestLength: manifest.length, added });
         }
         totalSteps = tasks.length;
         req.log.info({ msg: 'Batch generation: Gaps mode', gapTaskCount: tasks.length, movementsWithGaps: itemsToProcess.length });

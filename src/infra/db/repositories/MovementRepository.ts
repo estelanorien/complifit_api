@@ -136,6 +136,37 @@ export class MovementRepository {
     }
 
     /**
+     * Find exercise by normalized slug (e.g. ankle_alphabet_ankle_sprain).
+     * Used when frontend sends display name; we normalize and match DB name normalized the same way.
+     */
+    static async findExerciseBySlug(slug: string): Promise<any | null> {
+        if (!slug || !/^[a-z0-9_]+$/.test(slug)) return null;
+        const res = await pool.query(
+            `SELECT id, name, metadata, equipment FROM training_exercises
+             WHERE REGEXP_REPLACE(LOWER(TRIM(name)), '[^a-z0-9]+', '_', 'g') = $1
+             ORDER BY LENGTH(name) ASC
+             LIMIT 1`,
+            [slug]
+        );
+        return res.rows[0] || null;
+    }
+
+    /**
+     * Find meal by normalized slug.
+     */
+    static async findMealBySlug(slug: string): Promise<any | null> {
+        if (!slug || !/^[a-z0-9_]+$/.test(slug)) return null;
+        const res = await pool.query(
+            `SELECT id, name, instructions, metadata FROM meals
+             WHERE REGEXP_REPLACE(LOWER(TRIM(name)), '[^a-z0-9]+', '_', 'g') = $1
+             ORDER BY LENGTH(name) ASC
+             LIMIT 1`,
+            [slug]
+        );
+        return res.rows[0] || null;
+    }
+
+    /**
      * Get unique movements (exercises and meals) for admin listing.
      * Only canonical (English) exercises when is_canonical exists; otherwise all.
      */
