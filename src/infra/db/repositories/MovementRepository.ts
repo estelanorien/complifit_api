@@ -103,6 +103,39 @@ export class MovementRepository {
     }
 
     /**
+     * Find exercise by name with fuzzy match (ILIKE) when exact match fails.
+     * Used when frontend sends display name that may differ slightly from DB.
+     */
+    static async findExerciseByNameFuzzy(name: string): Promise<any | null> {
+        const trimmed = (name || '').trim();
+        if (!trimmed) return null;
+        const res = await pool.query(
+            `SELECT id, name, metadata, equipment FROM training_exercises
+             WHERE name ILIKE $1 OR TRIM(name) ILIKE $1
+             ORDER BY LENGTH(name) ASC
+             LIMIT 1`,
+            [trimmed]
+        );
+        return res.rows[0] || null;
+    }
+
+    /**
+     * Find meal by name with fuzzy match (ILIKE) when exact match fails.
+     */
+    static async findMealByNameFuzzy(name: string): Promise<any | null> {
+        const trimmed = (name || '').trim();
+        if (!trimmed) return null;
+        const res = await pool.query(
+            `SELECT id, name, instructions, metadata FROM meals
+             WHERE name ILIKE $1 OR TRIM(name) ILIKE $1
+             ORDER BY LENGTH(name) ASC
+             LIMIT 1`,
+            [trimmed]
+        );
+        return res.rows[0] || null;
+    }
+
+    /**
      * Get unique movements (exercises and meals) for admin listing.
      * Only canonical (English) exercises when is_canonical exists; otherwise all.
      */

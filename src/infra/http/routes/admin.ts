@@ -1701,6 +1701,7 @@ export async function adminRoutes(app: FastifyInstance) {
         }
       } else if (mode === 'gaps' && Array.isArray(ids) && ids.length > 0) {
         // Gaps mode scoped to selected movements only (e.g. "Fix missing for this movement")
+        req.log.info({ msg: 'Batch generation: Gaps ids received', ids: ids.map((i: any) => ({ type: i.type, id: i.id })) });
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         for (const item of ids) {
           let movement = null;
@@ -1713,13 +1714,23 @@ export async function adminRoutes(app: FastifyInstance) {
             movement = item.type === 'ex'
               ? await MovementRepository.findExerciseByName(item.id)
               : await MovementRepository.findMealByName(item.id);
+            if (!movement && item.type === 'ex') {
+              const fallback = await MovementRepository.findExerciseByNameFuzzy(item.id);
+              if (fallback) movement = fallback;
+            }
+            if (!movement && item.type === 'meal') {
+              const fallback = await MovementRepository.findMealByNameFuzzy(item.id);
+              if (fallback) movement = fallback;
+            }
           }
           if (movement) {
             itemsToProcess.push({ type: item.type, id: movement.id, name: movement.name });
+            req.log.info({ msg: 'Gaps movement resolved', id: item.id, name: movement.name });
           } else {
             req.log.warn(`Gaps item not found: ${item.id} (Type: ${item.type})`);
           }
         }
+        req.log.info({ msg: 'Batch generation: Gaps itemsToProcess after resolve', count: itemsToProcess.length });
       } else if (mode === 'fill') {
         // Fill DB: all movements of type(s); each movement gets full manifest (if 0 assets) or gaps only (if ≥1 asset)
         const types = type ? [type] : ['ex', 'meal'];
@@ -1818,21 +1829,28 @@ export async function adminRoutes(app: FastifyInstance) {
           }
           const movementSlug = AssetPromptService.normalizeToId(item.name);
           const existing = await AssetRepository.findByMovement(movementSlug);
+          req.log.info({ msg: 'Gaps per movement', name: item.name, movementSlug, existingCount: existing.length, stepCount });
           // Only fix gaps for movements that already have at least one generated asset (generation has happened but has failed/missing elements)
-          if (existing.length === 0) continue;
+          if (existing.length === 0) {
+            req.log.warn({ msg: 'Gaps skip (no existing assets)', name: item.name, movementSlug });
+            continue;
+          }
           const manifest = await UnifiedAssetService.getManifest(item.type, movementSlug, item.name, stepCount);
           const existingByKey = new Map(existing.map(a => [a.key, a]));
+          let added = 0;
           for (const key of manifest) {
             if (tasks.length >= maxGapTasks) break;
             const rec = existingByKey.get(key);
             // Standardized "missing": no record, failed, or draft (incomplete/no image)
             if (!rec || rec.status === 'failed' || rec.status === 'draft') {
               tasks.push(key);
+              added++;
               if (!itemsToProcess.some(i => i.name === item.name && i.type === item.type)) {
                 itemsToProcess.push(item);
               }
             }
           }
+          req.log.info({ msg: 'Gaps movement result', name: item.name, manifestLength: manifest.length, added });
         }
         totalSteps = tasks.length;
         req.log.info({ msg: 'Batch generation: Gaps mode', gapTaskCount: tasks.length, movementsWithGaps: itemsToProcess.length });

@@ -395,6 +395,7 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   app.post('/assets/by-movement', { preHandler: authGuard }, async (req: any, reply: any) => {
+    req.log.info('[by-movement] handler entered');
     // #region agent log
     fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:376',message:'by-movement entry',data:{body:req.body},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
     // #endregion
