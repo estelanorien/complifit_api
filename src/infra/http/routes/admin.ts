@@ -1636,6 +1636,27 @@ export async function adminRoutes(app: FastifyInstance) {
           }
           if (itemsToProcess.length >= count) break;
         }
+      } else if (mode === 'gaps' && Array.isArray(ids) && ids.length > 0) {
+        // Gaps mode scoped to selected movements only (e.g. "Fix missing for this movement")
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        for (const item of ids) {
+          let movement = null;
+          const isUUID = uuidRegex.test(item.id);
+          if (isUUID) {
+            movement = item.type === 'ex'
+              ? await MovementRepository.findExerciseById(item.id)
+              : await MovementRepository.findMealById(item.id);
+          } else {
+            movement = item.type === 'ex'
+              ? await MovementRepository.findExerciseByName(item.id)
+              : await MovementRepository.findMealByName(item.id);
+          }
+          if (movement) {
+            itemsToProcess.push({ type: item.type, id: movement.id, name: movement.name });
+          } else {
+            req.log.warn(`Gaps item not found: ${item.id} (Type: ${item.type})`);
+          }
+        }
       }
 
       // Build task list: full manifest (selected/next) or gaps-only (missing + failed keys)
@@ -1644,13 +1665,19 @@ export async function adminRoutes(app: FastifyInstance) {
       const maxGapTasks = Math.min(count, 500); // Cap gaps mode to avoid runaway jobs
 
       if (mode === 'gaps') {
-        // Autodetect missing and failed assets across DB; enqueue only those so nothing stays missing
-        const types = type ? [type] : ['ex', 'meal'];
-        const allMovements: Array<{ type: 'ex' | 'meal'; id: string; name: string }> = [];
-        for (const t of types) {
-          const list = t === 'ex' ? await MovementRepository.findAllExercises() : await MovementRepository.findAllMeals();
-          for (const m of list) allMovements.push({ type: t as any, id: m.id, name: m.name });
+        // Autodetect missing and failed assets; scope to itemsToProcess if set (from ids), else whole DB
+        let allMovements: Array<{ type: 'ex' | 'meal'; id: string; name: string }>;
+        if (itemsToProcess.length > 0) {
+          allMovements = itemsToProcess;
+        } else {
+          const types = type ? [type] : ['ex', 'meal'];
+          allMovements = [];
+          for (const t of types) {
+            const list = t === 'ex' ? await MovementRepository.findAllExercises() : await MovementRepository.findAllMeals();
+            for (const m of list) allMovements.push({ type: t as any, id: m.id, name: m.name });
+          }
         }
+        req.log.info({ msg: 'Batch generation: Gaps mode', scope: itemsToProcess.length > 0 ? 'selected' : 'all', movementsCount: allMovements.length });
         for (const item of allMovements) {
           if (tasks.length >= maxGapTasks) break;
           let stepCount = 6;
@@ -1674,8 +1701,10 @@ export async function adminRoutes(app: FastifyInstance) {
             // use default stepCount
           }
           const movementSlug = AssetPromptService.normalizeToId(item.name);
-          const manifest = await UnifiedAssetService.getManifest(item.type, movementSlug, item.name, stepCount);
           const existing = await AssetRepository.findByMovement(movementSlug);
+          // Only fix gaps for movements that already have at least one generated asset (generation has happened but has failed/missing elements)
+          if (existing.length === 0) continue;
+          const manifest = await UnifiedAssetService.getManifest(item.type, movementSlug, item.name, stepCount);
           const existingByKey = new Map(existing.map(a => [a.key, a]));
           for (const key of manifest) {
             if (tasks.length >= maxGapTasks) break;
