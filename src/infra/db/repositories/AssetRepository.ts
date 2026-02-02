@@ -191,17 +191,22 @@ export class AssetRepository {
     }
 
     /**
-     * Gets all keys for a specific movement (id).
+     * Gets all keys for a specific movement (id/slug).
+     * Matches both colon format (ex:slug:persona:...) and underscore format (ex_slug_...).
      */
     static async findByMovement(movementId: string): Promise<AssetRecord[]> {
-        // Since movementId is part of the key type:id:..., we use LIKE
         const res = await pool.query(`
-            SELECT a.key, a.value, a.status, a.asset_type, a.metadata, a.updated_at, b.data as buffer
+            SELECT DISTINCT ON (a.key) a.key, a.value, a.status, a.asset_type, a.metadata, a.updated_at, b.data as buffer
             FROM cached_assets a
             LEFT JOIN asset_blob_storage b ON a.key = b.key
-            WHERE a.key LIKE $1
-        `, [`%:${movementId}:%`]);
-
+            WHERE a.key LIKE $1 OR a.key LIKE $2 OR a.key LIKE $3 OR a.key LIKE $4
+            ORDER BY a.key
+        `, [
+            `ex:${movementId}:%`,
+            `meal:${movementId}:%`,
+            `ex_${movementId}%`,
+            `meal_${movementId}%`
+        ]);
         return res.rows;
     }
 

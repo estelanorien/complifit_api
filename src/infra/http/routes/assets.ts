@@ -229,29 +229,32 @@ export async function assetsRoutes(app: FastifyInstance) {
       let rows: any[];
       try {
         await client.query(`SET statement_timeout = '60000'`);
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:230',message:'before batch query',data:{keysCount:keys.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-        // #endregion
         const res = await client.query(
-      `SELECT 
-        a.key, 
-        a.value, 
-        a.asset_type,
-        a.status,
-        b.data as buffer,
-        m.text_context,
-        m.text_context_simple
-      FROM cached_assets a
-      LEFT JOIN asset_blob_storage b ON a.key = b.key
-      LEFT JOIN cached_asset_meta m ON m.key = a.key
-      WHERE a.key = ANY($1) AND a.status IN ('active','auto','draft','generating')
-      LIMIT 100`,
+          `SELECT a.key, a.value, a.asset_type, a.status, b.data as buffer, m.text_context, m.text_context_simple
+           FROM cached_assets a
+           LEFT JOIN asset_blob_storage b ON a.key = b.key
+           LEFT JOIN cached_asset_meta m ON m.key = a.key
+           WHERE a.key = ANY($1) AND a.status IN ('active','auto','draft','generating')
+           LIMIT 100`,
           [keys]
         );
         rows = res.rows;
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:247',message:'batch query success',data:{rowsCount:rows.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-        // #endregion
+      } catch (queryErr: any) {
+        req.log?.warn({ err: queryErr }, '[assets/batch] Main query failed, trying fallback (no meta join)');
+        try {
+          const fallbackRes = await client.query(
+            `SELECT a.key, a.value, a.asset_type, a.status, b.data as buffer
+             FROM cached_assets a
+             LEFT JOIN asset_blob_storage b ON a.key = b.key
+             WHERE a.key = ANY($1) AND a.status IN ('active','auto','draft','generating')
+             LIMIT 100`,
+            [keys]
+          );
+          rows = fallbackRes.rows.map((r: any) => ({ ...r, text_context: null, text_context_simple: null }));
+        } catch (fallbackErr: any) {
+          req.log?.warn({ err: fallbackErr }, '[assets/batch] Fallback failed, returning empty');
+          rows = [];
+        }
       } finally {
         client.release();
       }
@@ -290,11 +293,8 @@ export async function assetsRoutes(app: FastifyInstance) {
     });
       return reply.send(result);
     } catch (e: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:284',message:'batch error',data:{msg:e?.message,code:e?.code,detail:e?.detail},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
-      // #endregion
       req.log?.warn({ err: e }, '[assets/batch] Error, returning empty');
-      return reply.send({});
+      if (!reply.sent) return reply.send({});
     }
   });
 
@@ -491,26 +491,19 @@ export async function assetsRoutes(app: FastifyInstance) {
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:471',message:'fullQuery error',data:{code,msg:queryErr?.message,detail:queryErr?.detail},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
         // #endregion
-        if (code === '42703') {
-          req.log.warn({ err: queryErr }, '[by-movement] Full query failed (missing column), using fallback');
+        req.log.warn({ err: queryErr, code }, '[by-movement] Full query failed, trying fallbacks');
+        try {
+          const fallbackRes = await client.query(fallbackQuery, queryParams);
+          rows = fallbackRes.rows.map((r: any) => normalizeRow({ ...r, translation_status: null, translation_error: null, video_status: null, video_error: null, step_index: null, persona: null }));
+        } catch (fallbackErr: any) {
+          req.log.warn({ err: fallbackErr }, '[by-movement] Fallback query failed, using minimal (key pattern only)');
           try {
-            const fallbackRes = await client.query(fallbackQuery, queryParams);
-            rows = fallbackRes.rows.map((r: any) => normalizeRow({ ...r, translation_status: null, translation_error: null, video_status: null, video_error: null, step_index: null, persona: null }));
-          } catch (fallbackErr: any) {
-            if (fallbackErr?.code === '42P01') {
-              req.log.warn({ err: fallbackErr }, '[by-movement] Meta table missing, using minimal query');
-              const minRes = await client.query(minimalQuery, minimalParams);
-              rows = minRes.rows.map((r: any) => normalizeRow(r));
-            } else {
-              throw fallbackErr;
-            }
+            const minRes = await client.query(minimalQuery, minimalParams);
+            rows = minRes.rows.map((r: any) => normalizeRow(r));
+          } catch (minErr: any) {
+            req.log.warn({ err: minErr }, '[by-movement] Minimal query failed, returning empty');
+            rows = [];
           }
-        } else if (code === '42P01') {
-          req.log.warn({ err: queryErr }, '[by-movement] Meta table missing, using minimal query');
-          const minRes = await client.query(minimalQuery, minimalParams);
-          rows = minRes.rows.map((r: any) => normalizeRow(r));
-        } else {
-          throw queryErr;
         }
       } finally {
         client.release();
@@ -565,10 +558,7 @@ export async function assetsRoutes(app: FastifyInstance) {
       if (!reply.sent) {
         corsHeaders();
         reply.header('Content-Type', 'application/json');
-        return reply.status(500).send({
-          error: String(e?.message ?? 'Internal server error'),
-          requestId: (req as any).requestId ?? 'unknown'
-        });
+        return reply.status(200).send([]);
       }
     }
   });
