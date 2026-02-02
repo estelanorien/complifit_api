@@ -1655,12 +1655,24 @@ export async function adminRoutes(app: FastifyInstance) {
    */
   app.post('/admin/generation/batch', { preHandler: adminGuard }, async (req: any, reply: any) => {
     try {
-      const { mode, type, ids, count = 10, dryRun } = req.body as any;
+      const { mode, type, ids, keys: keysBody, count = 10, dryRun } = req.body as any;
       const jobId = `job_${Date.now()}`;
 
       let itemsToProcess: Array<{ type: 'ex' | 'meal', id: string, name: string }> = [];
+      let totalSteps = 0;
+      const tasks: string[] = [];
+      const maxGapTasks = Math.min(count, 500);
+      const maxFillTasks = Math.min(count || 500, 2000);
 
-      if (mode === 'selected' && Array.isArray(ids)) {
+      // Mode 'keys': frontend sends exact asset keys to generate (no DB lookup, no movement resolve)
+      if (mode === 'keys' && Array.isArray(keysBody) && keysBody.length > 0) {
+        const keyList = (keysBody as string[]).filter((k: string) => typeof k === 'string' && /^(ex|meal):[a-z0-9_]+:(atlas|nova|none):(main|step|meta):\d+$/.test(k));
+        tasks.push(...keyList.slice(0, maxGapTasks));
+        totalSteps = tasks.length;
+        req.log.info({ msg: 'Batch generation: Keys mode', keysReceived: keysBody.length, keysValid: keyList.length, tasksEnqueued: tasks.length });
+      }
+
+      if (!tasks.length && mode === 'selected' && Array.isArray(ids)) {
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
         for (const item of ids) {
@@ -1750,9 +1762,8 @@ export async function adminRoutes(app: FastifyInstance) {
         }
       }
 
-      // Build task list: full manifest (selected/next) or gaps-only (missing + failed keys) or fill (full or gaps per movement)
-      let totalSteps = 0;
-      const tasks: string[] = [];
+      // Build task list: only when we don't already have tasks (e.g. from keys mode)
+      if (tasks.length === 0) {
       const maxGapTasks = Math.min(count, 500); // Cap gaps mode to avoid runaway jobs
       const maxFillTasks = Math.min(count || 500, 2000); // Cap fill mode
 
@@ -1905,6 +1916,7 @@ export async function adminRoutes(app: FastifyInstance) {
           tasks.push(...manifest);
           totalSteps += manifest.length;
         }
+      }
       }
 
       if (tasks.length === 0) {
