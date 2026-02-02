@@ -1815,6 +1815,7 @@ export async function adminRoutes(app: FastifyInstance) {
           }
         }
         req.log.info({ msg: 'Batch generation: Gaps mode', scope: itemsToProcess.length > 0 ? 'selected' : 'all', movementsCount: allMovements.length });
+        const scopedToSelected = itemsToProcess.length > 0;
         for (const item of allMovements) {
           if (tasks.length >= maxGapTasks) break;
           let stepCount = 6;
@@ -1836,6 +1837,10 @@ export async function adminRoutes(app: FastifyInstance) {
             stepCount = Math.max(1, Math.min(stepCount, 10));
           } catch (e) {
             // use default stepCount
+          }
+          // When user explicitly selected this movement, always use at least 10 steps so steps 7–10 are in manifest (fixes "no missing" when meta missing/capped at 6)
+          if (scopedToSelected && item.type === 'ex') {
+            stepCount = Math.max(stepCount, 10);
           }
           const movementSlug = AssetPromptService.normalizeToId(item.name);
           const existing = await AssetRepository.findByMovement(movementSlug);
