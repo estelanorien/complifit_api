@@ -2,8 +2,13 @@
 import { pool } from '../../infra/db/pool.js';
 import { logger } from '../../infra/logger.js';
 import { AiService } from './aiService.js';
+import { retryManager } from './RetryManager.js';
 
 const aiService = new AiService();
+
+// Retry configuration for translation jobs
+const TRANSLATION_MAX_RETRIES = 5;
+const RETRYABLE_ERROR_PATTERNS = ['429', '503', 'overloaded', 'quota', 'rate', 'timeout', 'UNAVAILABLE'];
 
 export class TranslationQueueService {
     private processing = false;
@@ -112,15 +117,49 @@ export class TranslationQueueService {
 
                 } catch (err: any) {
                     logger.error(`[TranslationQueue] Job ${job.id} FAILED`, err);
-                    // Retry logic? For now just fail. V2.1 can add retries.
-                    await pool.query(
-                        `UPDATE translation_jobs SET status = 'failed', error_log = $1, updated_at = NOW() WHERE id = $2`,
-                        [err.message, job.id]
+
+                    // Check if error is retryable
+                    const isRetryable = RETRYABLE_ERROR_PATTERNS.some(pattern =>
+                        err.message?.toLowerCase().includes(pattern.toLowerCase())
                     );
-                    await pool.query(
-                        `UPDATE cached_asset_meta SET translation_status = 'failed', translation_error = $1 WHERE key = $2`,
-                        [err.message, job.asset_key]
+
+                    // Get current retry count
+                    const retryResult = await pool.query(
+                        `SELECT retry_count FROM translation_jobs WHERE id = $1`,
+                        [job.id]
                     );
+                    const currentRetryCount = retryResult.rows[0]?.retry_count || 0;
+
+                    if (isRetryable && currentRetryCount < TRANSLATION_MAX_RETRIES) {
+                        // Increment retry count and reset to pending for retry
+                        await pool.query(
+                            `UPDATE translation_jobs SET status = 'pending', retry_count = $1, last_error = $2, updated_at = NOW() WHERE id = $3`,
+                            [currentRetryCount + 1, err.message, job.id]
+                        );
+                        logger.info(`[TranslationQueue] Job ${job.id} will retry (attempt ${currentRetryCount + 1}/${TRANSLATION_MAX_RETRIES})`);
+                    } else {
+                        // Max retries reached or non-retryable error - move to dead-letter
+                        await pool.query(
+                            `UPDATE translation_jobs SET status = 'failed', retry_count = $1, last_error = $2, updated_at = NOW() WHERE id = $3`,
+                            [currentRetryCount, err.message, job.id]
+                        );
+                        await pool.query(
+                            `UPDATE cached_asset_meta SET translation_status = 'failed', translation_error = $1 WHERE key = $2`,
+                            [err.message, job.asset_key]
+                        );
+
+                        // Move to dead-letter queue
+                        await retryManager.moveToDeadLetter(
+                            job.id,
+                            'translation',
+                            job.asset_key,
+                            { jobId: job.id, assetKey: job.asset_key, targetLanguages: job.target_languages },
+                            err.message,
+                            err.stack || null,
+                            currentRetryCount + 1
+                        );
+                        logger.error(`[TranslationQueue] Job ${job.id} moved to dead-letter queue after ${currentRetryCount + 1} attempts`);
+                    }
                 }
 
             } catch (err) {

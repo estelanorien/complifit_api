@@ -6,6 +6,7 @@ import { AssetPromptService } from './assetPromptService.js';
 import { logger } from '../../infra/logger.js';
 import { AssetRepository } from '../../infra/db/repositories/AssetRepository.js';
 import { UnifiedKey } from '../../domain/UnifiedKey.js';
+import { unifiedGenerationPipeline } from './UnifiedGenerationPipeline.js';
 
 const aiService = new AiService();
 
@@ -22,7 +23,7 @@ const COACH_PROFILES = {
     }
 };
 
-type JobType = 'MEAL_PLAN' | 'IMAGE' | 'MEAL_DETAILS' | 'EXERCISE_GENERATION' | 'MEAL_GENERATION' | 'CONTENT_UPGRADE' | 'BATCH_ASSET_GENERATION';
+type JobType = 'MEAL_PLAN' | 'IMAGE' | 'MEAL_DETAILS' | 'EXERCISE_GENERATION' | 'MEAL_GENERATION' | 'CONTENT_UPGRADE' | 'BATCH_ASSET_GENERATION' | 'UNIFIED_PIPELINE';
 
 export class JobProcessor {
     private processing = false;
@@ -229,6 +230,8 @@ export class JobProcessor {
                 return this.handleContentUpgrade(payload);
             case 'BATCH_ASSET_GENERATION':
                 return { success: false, error: 'Legacy Batch Generation is disabled. Use Admin UI with SSE.' };
+            case 'UNIFIED_PIPELINE':
+                return this.handleUnifiedPipeline(payload);
             default:
                 throw new Error(`Unknown job type: ${type}`);
         }
@@ -579,6 +582,50 @@ export class JobProcessor {
         }
     }
 
+
+    /**
+     * Handle unified pipeline job - orchestrates complete asset generation
+     * Generates: meta -> images (Atlas + Nova) -> videos -> translations
+     */
+    private async handleUnifiedPipeline(payload: any): Promise<any> {
+        const { entityType, entityId, entityName, priority, triggeredBy, userId, options } = payload;
+
+        logger.info(`[JobProcessor] UNIFIED_PIPELINE: Starting for ${entityType}:${entityId}`);
+
+        try {
+            const result = await unifiedGenerationPipeline.execute({
+                entityType,
+                entityId,
+                entityName,
+                priority: priority || 'MEDIUM',
+                triggeredBy: triggeredBy || 'system',
+                userId,
+                options
+            });
+
+            logger.info(`[JobProcessor] UNIFIED_PIPELINE: Completed for ${entityType}:${entityId}`, {
+                success: result.success,
+                totalGenerated: result.totalGenerated,
+                totalFailed: result.totalFailed,
+                duration: result.duration
+            });
+
+            return {
+                success: result.success,
+                entityKey: result.entityKey,
+                pipelineId: result.pipelineId,
+                stages: result.stages,
+                totalGenerated: result.totalGenerated,
+                totalFailed: result.totalFailed,
+                errors: result.errors,
+                duration: result.duration
+            };
+
+        } catch (e: any) {
+            logger.error(`[JobProcessor] UNIFIED_PIPELINE failed for ${entityType}:${entityId}`, e);
+            throw e;
+        }
+    }
 
     private async saveAsset(key: string, value: string, meta: any) {
         try {

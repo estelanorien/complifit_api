@@ -14,8 +14,13 @@ import { ensureScenePack, ensureStepScenePack, getClipsForAsset, getClipsWithUri
 import { buildEditList, buildStepBasedEditList } from './editListBuilder.js';
 import { assemble, assembleVideoOnly } from '../../services/video/VideoAssemblyService.js';
 import { AssetRepository } from '../../infra/db/repositories/AssetRepository.js';
+import { retryManager } from './RetryManager.js';
 
 const aiService = new AiService();
+
+// Retry configuration for video jobs
+const VIDEO_MAX_RETRIES = 3;
+const RETRYABLE_ERROR_PATTERNS = ['429', '503', 'overloaded', 'quota', 'rate', 'timeout', 'UNAVAILABLE'];
 
 /** Load coach reference image as data URI for video consistency. */
 async function getCoachRefDataUri(persona: 'atlas' | 'nova'): Promise<string | null> {
@@ -197,14 +202,48 @@ export class VideoQueueService {
                 } catch (err: any) {
                     logger.error(`[VideoQueue] Job ${job.id} FAILED`, err);
 
-                    await pool.query(
-                        `UPDATE video_jobs SET status = 'failed', error_log = $1, updated_at = NOW() WHERE id = $2`,
-                        [err.message, job.id]
+                    // Check if error is retryable
+                    const isRetryable = RETRYABLE_ERROR_PATTERNS.some(pattern =>
+                        err.message?.toLowerCase().includes(pattern.toLowerCase())
                     );
-                    await pool.query(
-                        `UPDATE cached_asset_meta SET video_status = 'failed', video_error = $1 WHERE key = $2`,
-                        [err.message, job.asset_key]
+
+                    // Get current retry count
+                    const retryResult = await pool.query(
+                        `SELECT retry_count FROM video_jobs WHERE id = $1`,
+                        [job.id]
                     );
+                    const currentRetryCount = retryResult.rows[0]?.retry_count || 0;
+
+                    if (isRetryable && currentRetryCount < VIDEO_MAX_RETRIES) {
+                        // Increment retry count and reset to pending for retry
+                        await pool.query(
+                            `UPDATE video_jobs SET status = 'pending', retry_count = $1, last_error = $2, updated_at = NOW() WHERE id = $3`,
+                            [currentRetryCount + 1, err.message, job.id]
+                        );
+                        logger.info(`[VideoQueue] Job ${job.id} will retry (attempt ${currentRetryCount + 1}/${VIDEO_MAX_RETRIES})`);
+                    } else {
+                        // Max retries reached or non-retryable error - move to dead-letter
+                        await pool.query(
+                            `UPDATE video_jobs SET status = 'failed', retry_count = $1, last_error = $2, updated_at = NOW() WHERE id = $3`,
+                            [currentRetryCount, err.message, job.id]
+                        );
+                        await pool.query(
+                            `UPDATE cached_asset_meta SET video_status = 'failed', video_error = $1 WHERE key = $2`,
+                            [err.message, job.asset_key]
+                        );
+
+                        // Move to dead-letter queue
+                        await retryManager.moveToDeadLetter(
+                            job.id,
+                            'video',
+                            job.asset_key,
+                            { jobId: job.id, assetKey: job.asset_key, persona: job.persona, withVoiceover: job.with_voiceover },
+                            err.message,
+                            err.stack || null,
+                            currentRetryCount + 1
+                        );
+                        logger.error(`[VideoQueue] Job ${job.id} moved to dead-letter queue after ${currentRetryCount + 1} attempts`);
+                    }
                 }
 
             } catch (err) {
