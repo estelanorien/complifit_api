@@ -421,8 +421,8 @@ export async function assetsRoutes(app: FastifyInstance) {
       const client = await pool.connect();
       let rows: any[];
       const queryParams = [originalMovementId, `ex:${originalMovementId}:%`, `meal:${originalMovementId}:%`, `ex_${originalMovementId}%`, `meal_${originalMovementId}%`, `${originalMovementId}%`, limit];
-      const fullQuery = `SELECT a.key, 
-                   CASE 
+      const fullQuery = `SELECT a.key,
+                   CASE
                      WHEN a.asset_type = 'image' THEN COALESCE(ENCODE(b.data, 'base64'), a.value)
                      ELSE a.value
                    END as value,
@@ -430,7 +430,8 @@ export async function assetsRoutes(app: FastifyInstance) {
                    m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id,
                    m.translation_status, m.translation_error,
                    m.video_status, m.video_error,
-                   m.step_index, m.persona
+                   m.step_index, m.persona,
+                   m.text_context, m.text_context_simple
             FROM cached_assets a
             LEFT JOIN cached_asset_meta m ON m.key = a.key
             LEFT JOIN asset_blob_storage b ON b.key = a.key
@@ -489,11 +490,28 @@ export async function assetsRoutes(app: FastifyInstance) {
       });
       try {
         await client.query(`SET statement_timeout = '120000'`);
-        // Run minimal query first so we always get results (no dependency on cached_asset_meta schema)
-        const minRes = await client.query(minimalQuery, minimalParams);
-        rows = (minRes.rows || []).map((r: any) => normalizeRow(r));
-      } catch (minErr: any) {
-        req.log.warn({ err: minErr }, '[by-movement] Minimal query failed');
+        // Try fullQuery first (has all meta columns including text_context)
+        try {
+          const fullRes = await client.query(fullQuery, queryParams);
+          rows = (fullRes.rows || []).map((r: any) => normalizeRow(r));
+          req.log.info(`[by-movement] fullQuery succeeded: ${rows.length} rows`);
+        } catch (fullErr: any) {
+          req.log.warn({ err: fullErr.message }, '[by-movement] fullQuery failed, trying fallback');
+          // Try fallbackQuery (fewer meta columns, no text_context/step_index/persona)
+          try {
+            const fbRes = await client.query(fallbackQuery, queryParams);
+            rows = (fbRes.rows || []).map((r: any) => normalizeRow(r));
+            req.log.info(`[by-movement] fallbackQuery succeeded: ${rows.length} rows`);
+          } catch (fbErr: any) {
+            req.log.warn({ err: fbErr.message }, '[by-movement] fallbackQuery failed, using minimal');
+            // Final fallback: minimalQuery (no meta join at all)
+            const minRes = await client.query(minimalQuery, minimalParams);
+            rows = (minRes.rows || []).map((r: any) => normalizeRow(r));
+            req.log.info(`[by-movement] minimalQuery: ${rows.length} rows`);
+          }
+        }
+      } catch (outerErr: any) {
+        req.log.error({ err: outerErr }, '[by-movement] All queries failed');
         rows = [];
       } finally {
         client.release();

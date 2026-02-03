@@ -508,6 +508,36 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
+  // Schema verification: check if all required columns exist in cached_asset_meta
+  app.get('/admin/verify-asset-schema', { preHandler: adminGuard }, async (req: any, reply: any) => {
+    try {
+      const result = await pool.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'cached_asset_meta'
+      `);
+      const columns = result.rows.map((r: { column_name: string }) => r.column_name);
+      const required = [
+        'text_context', 'text_context_simple',   // migration 046
+        'step_index', 'persona',                 // migration 042_fix
+        'translation_status', 'translation_error', // migration 041
+        'video_status', 'video_error'            // migration 042
+      ];
+      const missing = required.filter(c => !columns.includes(c));
+      return reply.send({
+        columns,
+        required,
+        missing,
+        ok: missing.length === 0,
+        message: missing.length === 0
+          ? 'All required columns exist'
+          : `Missing columns: ${missing.join(', ')}. Run migrations 041, 042, 046.`
+      });
+    } catch (e: any) {
+      req.log.error({ error: 'schema check failed', e });
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
   // Voiceover videos: list localized_videos (only verification_status=passed shown for review)
   app.get('/admin/voiceover-videos', { preHandler: adminGuard }, async (req: any, reply: any) => {
     try {
