@@ -511,8 +511,14 @@ export async function assetsRoutes(app: FastifyInstance) {
           }
         }
       } catch (outerErr: any) {
-        req.log.error({ err: outerErr }, '[by-movement] All queries failed');
-        rows = [];
+        req.log.error({ err: outerErr, message: outerErr?.message, code: outerErr?.code }, '[by-movement] All queries failed');
+        // Return error info instead of empty array so we can debug
+        client.release();
+        return reply.status(500).send({
+          error: 'Query execution failed',
+          details: outerErr?.message,
+          code: outerErr?.code
+        });
       } finally {
         client.release();
       }
@@ -560,12 +566,16 @@ export async function assetsRoutes(app: FastifyInstance) {
         }
       }
     } catch (e: any) {
-      req.log.error({ err: e }, '[by-movement] Error');
+      req.log.error({ err: e, stack: e?.stack }, '[by-movement] Error');
       if (!reply.sent) {
         try {
           corsHeaders();
           reply.header('Content-Type', 'application/json');
-          return reply.send([]);
+          // Return error details for debugging
+          return reply.status(500).send({
+            error: e?.message || 'Unknown error',
+            stack: process.env.NODE_ENV !== 'production' ? e?.stack : undefined
+          });
         } catch (_) { /* ignore */ }
       }
     }
