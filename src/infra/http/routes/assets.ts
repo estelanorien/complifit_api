@@ -226,7 +226,9 @@ export async function assetsRoutes(app: FastifyInstance) {
         : Array.isArray(rawBody)
           ? (rawBody as string[])
           : [];
-      const cappedKeys = Array.isArray(keys) ? keys.slice(0, 150).filter((k: any) => typeof k === 'string') : [];
+      // Deduplicate and limit keys to prevent huge responses (each image ~2MB)
+      const uniqueKeys = [...new Set(keys.filter((k: any) => typeof k === 'string'))];
+      const cappedKeys = uniqueKeys.slice(0, 15); // Max 15 images (~30MB max response)
       if (cappedKeys.length === 0) {
         return safeSendEmpty();
       }
