@@ -21,8 +21,7 @@ export class AssetOrchestrator {
         let uKey: UnifiedKey;
         try {
             uKey = UnifiedKey.parse(keyStr);
-        } catch (e: any) {
-            console.error(`[Orchestrator] ${e.message}`);
+        } catch {
             return null;
         }
 
@@ -35,7 +34,6 @@ export class AssetOrchestrator {
                 // BACKFILL: Even if asset exists, update text_context if missing
                 const needsTextBackfill = !existing.metadata?.text_context && !existing.metadata?.text_context_simple;
                 if (needsTextBackfill && (type === 'ex' || type === 'meal')) {
-                    console.log(`[Orchestrator] Backfilling text for existing asset ${keyStr}`);
                     try {
                         // Fetch instructions from meta
                         const metaKey = uKey.toMetaKey();
@@ -50,7 +48,6 @@ export class AssetOrchestrator {
                         // CRITICAL: If meta is empty/broken, REGENERATE it
                         // FIX: Also check for EMPTY arrays (length === 0)
                         if (!instructions.instructions || !Array.isArray(instructions.instructions) || instructions.instructions.length === 0) {
-                            console.log(`[Orchestrator] Meta empty/broken for ${id}, regenerating...`);
                             const newInstr = await AssetPromptService.generateInstructions(id.replace(/_/g, ' '), type === 'ex' ? 'exercise' : 'meal');
                             // SAFEGUARD: Only save if we got actual instructions (not empty array)
                             if (newInstr && Array.isArray(newInstr.instructions) && newInstr.instructions.length > 0) {
@@ -61,9 +58,6 @@ export class AssetOrchestrator {
                                     metadata: { movementId: id }
                                 });
                                 instructions = newInstr;
-                                console.log(`[Orchestrator] Meta regenerated for ${id} with ${instructions.instructions.length} steps`);
-                            } else {
-                                console.warn(`[Orchestrator] Meta regeneration returned empty for ${id}, keeping existing`);
                             }
                         }
                         
@@ -83,7 +77,6 @@ export class AssetOrchestrator {
                                 const exerciseName = id.replace(/_/g, ' ');
                                 textSimple = `Step ${index}`;
                                 textDetailed = `${exerciseName} - execution step ${index}`;
-                                console.log(`[Orchestrator] Using fallback text for ${keyStr}`);
                             }
                         }
                         
@@ -100,10 +93,9 @@ export class AssetOrchestrator {
                                     textContextSimple: textSimple
                                 }
                             });
-                            console.log(`[Orchestrator] Text backfilled for ${keyStr}: "${textSimple}" / "${textDetailed.substring(0,50)}..."`);
                         }
-                    } catch (e: any) {
-                        console.warn(`[Orchestrator] Text backfill failed for ${keyStr}: ${e.message}`);
+                    } catch {
+                        // Text backfill failed - non-critical
                     }
                 }
                 return 'EXISTS';
@@ -124,7 +116,6 @@ export class AssetOrchestrator {
         });
 
         try {
-            console.log(`[Orchestrator] Generating ${uKey.toString()}...`);
             // 2. Resolve Context/Prompt
             let instruction = "";
             let context = "";
@@ -147,7 +138,6 @@ export class AssetOrchestrator {
 
                 // Auto-Generate Meta if missing (also regenerate if empty array)
                 if (!instructions.instructions || !Array.isArray(instructions.instructions) || instructions.instructions.length === 0) {
-                    console.log(`[Orchestrator] Missing/empty instructions for ${id}, generating meta...`);
                     const newInstr = await AssetPromptService.generateInstructions(id.replace(/_/g, ' '), type === 'ex' ? 'exercise' : 'meal');
                     // SAFEGUARD: Only save if we got actual instructions (not empty array)
                     if (newInstr && Array.isArray(newInstr.instructions) && newInstr.instructions.length > 0) {
@@ -158,17 +148,13 @@ export class AssetOrchestrator {
                             metadata: { movementId: id }
                         });
                         instructions = newInstr;
-                        console.log(`[Orchestrator] Meta generated for ${id} with ${instructions.instructions.length} steps`);
 
                         // SYNC TO ENTITY TABLE (Critical for App UI) via MovementRepository
                         try {
                             await MovementRepository.updateMetadata(type, id, newInstr);
-                            console.log(`[Orchestrator] Synced metadata to entity table for ${id}`);
-                        } catch (e: any) {
-                            console.error(`[Orchestrator] Entity sync failed: ${e.message}`);
+                        } catch {
+                            // Entity sync failed - non-critical
                         }
-                    } else {
-                        console.warn(`[Orchestrator] Meta generation returned empty for ${id}`);
                     }
                 }
 
@@ -207,10 +193,6 @@ export class AssetOrchestrator {
             if (type === 'ex' && (persona === 'atlas' || persona === 'nova') && (subtype === 'main' || subtype === 'step') && !referenceImage) {
                 throw new Error(`CRITICAL: Coach reference image missing for ${persona}. Upload system_coach_${persona}_ref in Admin (Refs Status) before generating. NEVER generate without reference image.`);
             }
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AssetOrchestrator.ts:afterConstructPrompt',message:'After constructPrompt',data:{key:uKey.toString(),hasReferenceImage:!!referenceImage,referenceImageLen:referenceImage?.length,referenceType},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-            // #endregion
-
             // Equipment Enrichment via Repository
             let finalPrompt = prompt;
             if (type === 'ex') {
@@ -221,8 +203,8 @@ export class AssetOrchestrator {
                         const maxEq = eq.slice(0, 3).join(', ');
                         finalPrompt += ` EQUIPMENT: ${maxEq}.`;
                     }
-                } catch (err) {
-                    console.warn(`[Orchestrator] Failed to fetch equipment for ${id}`);
+                } catch {
+                    // Failed to fetch equipment - non-critical
                 }
             }
 
@@ -235,7 +217,6 @@ export class AssetOrchestrator {
             
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
-                    console.log(`[Orchestrator] Generation attempt ${attempt}/${maxRetries} for ${uKey.toString()}`);
                     
                     result = await AssetOrchestrator.ai.generateImage({
                         prompt: finalPrompt,
@@ -248,17 +229,14 @@ export class AssetOrchestrator {
                     
                 } catch (e: any) {
                     lastError = e;
-                    const isRetryable = e.message?.includes('429') || 
-                                       e.message?.includes('503') || 
+                    const isRetryable = e.message?.includes('429') ||
+                                       e.message?.includes('503') ||
                                        e.message?.includes('overloaded') ||
                                        e.message?.includes('quota') ||
                                        e.message?.includes('rate');
-                    
-                    console.warn(`[Orchestrator] Attempt ${attempt} failed for ${uKey.toString()}: ${e.message}`);
-                    
+
                     if (isRetryable && attempt < maxRetries) {
                         const delay = retryDelay * attempt; // Exponential backoff
-                        console.log(`[Orchestrator] Retrying in ${delay}ms...`);
                         await new Promise(resolve => setTimeout(resolve, delay));
                         continue;
                     }
@@ -288,11 +266,9 @@ export class AssetOrchestrator {
                 }
             });
 
-            console.log(`[Orchestrator] Success: ${uKey.toString()}`);
             return 'SUCCESS';
 
         } catch (e: any) {
-            console.error(`[Orchestrator] Failed ${uKey.toString()}:`, e.message);
             await AssetRepository.save(uKey, {
                 status: 'failed',
                 type: 'image',

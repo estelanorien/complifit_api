@@ -299,7 +299,6 @@ Return JSON:
             }
         }
         
-        console.error("[AssetPromptService] Failed to generate instructions after retries:", lastError);
         // IMPORTANT: Return meaningful fallback instead of empty instructions
         // This ensures text ALWAYS gets saved, even if AI fails
         return this.generateFallbackInstructions(name, type);
@@ -310,7 +309,6 @@ Return JSON:
      * These are generic but usable defaults based on the exercise/meal name.
      */
     static generateFallbackInstructions(name: string, type: 'exercise' | 'meal'): any {
-        console.log(`[AssetPromptService] Generating fallback instructions for ${name} (${type})`);
         
         const cleanName = name.replace(/_/g, ' ').toLowerCase();
         

@@ -67,11 +67,11 @@ export const saveTrainingProgram = async (
           for (const key of manifest) {
             await AssetOrchestrator.generateAssetForKey(key);
           }
-        } catch (err) {
-          console.error(`[SavePlan] Asset generation failed for ${ex.name}:`, err);
+        } catch {
+          // Asset generation failed - non-critical, skip
         }
       }
-    })().catch(e => console.error('[SavePlan] Global asset loop failed:', e));
+    })().catch(() => { /* Global asset loop failed - non-critical */ });
   }
 
   // Get current profile_data to preserve all existing data

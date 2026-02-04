@@ -4,6 +4,7 @@ import fs from 'fs';
 const ATLAS_PATH = 'C:/Users/rmkoc/.gemini/antigravity/brain/bd4eab35-474c-440c-ab28-e40d24b54ef9/coach_atlas_reference_1768943383279.png';
 const NOVA_PATH = 'C:/Users/rmkoc/.gemini/antigravity/brain/bd4eab35-474c-440c-ab28-e40d24b54ef9/coach_nova_reference_1768943396358.png';
 
+
 async function seed() {
     try {
         console.log("Seeding Coach Master Images...");

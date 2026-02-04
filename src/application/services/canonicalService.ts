@@ -99,11 +99,9 @@ export class CanonicalService {
             } catch (e: any) {
                 const isRetryable = e?.message?.includes('503') || e?.message?.includes('overloaded') || e?.message?.includes('UNAVAILABLE');
                 if (isRetryable && attempt < maxRetries) {
-                    console.warn(`[CanonicalService] LLM attempt ${attempt} failed, retrying in ${retryDelayMs}ms...`, e?.message);
                     await new Promise(r => setTimeout(r, retryDelayMs));
                     continue;
                 }
-                console.warn("[CanonicalService] LLM failed, using fallback:", e?.message);
                 if (type === 'exercise' && EXERCISE_NAME_ALIASES[trimmed]) {
                     const englishName = EXERCISE_NAME_ALIASES[trimmed];
                     return { canonicalId: `movement_${this.simpleNormalize(englishName)}`, originalName: trimmed, language: 'tr' };
@@ -129,8 +127,7 @@ export class CanonicalService {
                 originalName: trimmed,
                 language: lang
             };
-        } catch (e) {
-            console.error("[CanonicalService] Parse Error:", e);
+        } catch {
             if (type === 'exercise' && EXERCISE_NAME_ALIASES[trimmed]) {
                 const englishName = EXERCISE_NAME_ALIASES[trimmed];
                 return { canonicalId: `movement_${this.simpleNormalize(englishName)}`, originalName: trimmed, language: 'tr' };

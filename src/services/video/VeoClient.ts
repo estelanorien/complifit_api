@@ -30,7 +30,6 @@ export class VeoClient {
    * Veo 3.1 supports Image-to-Video.
    */
   async generateVideo(params: VideoGenerationParams): Promise<void> {
-    console.log(`[VeoClient] Starting generation for: "${params.prompt}"`);
 
     try {
       // 1. Prepare Content
@@ -68,7 +67,6 @@ export class VeoClient {
       await this.generateVideoRest(params);
 
     } catch (error) {
-      console.error("[VeoClient] Error generating video:", error);
       throw error;
     }
   }
@@ -111,11 +109,7 @@ export class VeoClient {
       // Veo returns a long-running operation or direct content?
       // Usually it's an Operation. We need to poll.
       if (data.name) {
-          console.log(`[VeoClient] Operation started: ${data.name}. Polling...`);
           await this.pollOperation(data.name, params.outputPath, apiKey!);
-      } else {
-          // Direct return (unlikely for video)
-          console.warn("[VeoClient] Unexpected response format (no operation name).", data);
       }
   }
 
@@ -141,16 +135,12 @@ export class VeoClient {
               const videoUri = data.response?.generatedVideos?.[0]?.video?.uri;
               if (videoUri) {
                   await this.downloadVideo(videoUri, outputPath);
-                  console.log(`[VeoClient] Video saved to ${outputPath}`);
                   return;
               } else {
-                 // Sometimes it might come as bytes?
-                 console.error("No video URI in response", data);
                  throw new Error("No video URI found in completed operation.");
               }
           }
           
-          console.log(`[VeoClient] Still processing... (Attempt ${attempts + 1})`);
           attempts++;
       }
       

@@ -189,12 +189,9 @@ export async function adminRoutes(app: FastifyInstance) {
           if (b64.length > 100) videoInstance.image = { bytesBase64Encoded: b64 };
         }
 
-        console.log(`[Admin] Starting video generation for mode=${mode}, key=${key}, hasRef=${!!videoRefImage}`);
-
         for (const model of modelsToTry) {
           try {
             const startEndpoint = `${baseUrl}/${model}:predictLongRunning`;
-            console.log(`[Admin] Trying Veo model: ${model}`);
 
             const veoParams = { aspectRatio: '16:9' };
             // #region agent log
@@ -214,7 +211,6 @@ export async function adminRoutes(app: FastifyInstance) {
 
             if (!startRes.ok) {
               const errorText = await startRes.text();
-              console.error(`[Admin] Veo start error (${model}): ${startRes.status} - ${errorText.substring(0, 200)}`);
               if (startRes.status === 404) {
                 lastError = new Error(`Model ${model} not found`);
                 continue;
@@ -275,22 +271,18 @@ export async function adminRoutes(app: FastifyInstance) {
                   // #region agent log
                   fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'admin.ts:video-uri-received',message:'Single Veo result returned; no extension calls',data:{videoUriPrefix:videoUri?.slice(0,50),singleCallOnly:true,extensionCallsCount:0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
                   // #endregion
-                  console.log(`[Admin] Video generated successfully with model ${model}`);
                   break;
                 }
                 const respPreview = JSON.stringify(resp).slice(0, 800);
                 const topKeys = Object.keys(pollData).join(', ');
-                console.error('[Admin] Veo done but no video URI. pollData keys:', topKeys, 'response preview:', respPreview);
                 lastError = new Error(`Veo returned no video URI. Response keys: ${topKeys}. Preview: ${respPreview.slice(0, 200)}`);
                 break;
               }
-              console.log(`[Admin] Veo polling... (${waited / 1000}s)`);
             }
 
             if (videoUri) break;
             if (lastError && !lastError.message?.includes('404')) break;
           } catch (e: any) {
-            console.error(`[Admin] Veo attempt failed (${model}):`, e.message);
             lastError = e;
             if (e.message?.includes('404')) continue;
             throw e;
@@ -303,7 +295,6 @@ export async function adminRoutes(app: FastifyInstance) {
             'Ensure your API key from aistudio.google.com has access to Veo (paid preview). ' +
             'Original error: ' + (lastError?.message || 'No Veo models available')
           );
-          console.error('[Admin] Veo not available:', veoError.message);
           throw veoError;
         }
 
@@ -1447,7 +1438,6 @@ export async function adminRoutes(app: FastifyInstance) {
     try {
       // Construct LIKE patterns: prefix%
       const patterns = prefixes.map(p => `${p}%`);
-      console.log("[AdminScan] LIKE Patterns:", patterns);
 
       const res = await pool.query(
         `SELECT a.key, a.asset_type, a.status,
@@ -1461,7 +1451,6 @@ export async function adminRoutes(app: FastifyInstance) {
       );
       return reply.send(res.rows);
     } catch (e: any) {
-      console.error("[AdminScan] Failed:", e.message);
       req.log.error(e);
       return reply.status(500).send({ error: `Scan failed: ${e.message}` });
     }

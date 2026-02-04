@@ -90,16 +90,10 @@ Return ONLY cleaned visual description.`;
   }
 
   async generateImage({ prompt, model = 'models/gemini-2.5-flash-image', referenceImage, referenceType = 'identity' }: GenerateImageParams) {
-    console.log(`[AiService] generateImage called with model: ${model}, type: ${referenceType}`);
-    console.log(`[AiService] Prompt length: ${prompt?.length}, HasReference: ${!!referenceImage}`);
     // CRITICAL: Never generate identity-type images without reference—prevents wrong person (e.g. bald) in output
     if (referenceType === 'identity' && !referenceImage) {
       throw new Error('CRITICAL: Identity generation requires a reference image. Coach reference (system_coach_atlas_ref / system_coach_nova_ref) must be uploaded in Admin (Refs Status). NEVER generate without reference.');
     }
-    // #region agent log
-    if (!referenceImage) fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aiService.ts:generateImage:noRef',message:'No reference image passed',data:{promptLen:prompt?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
-    // #endregion
-
     const parts: any[] = [];
     const cleanedPrompt = await this.cleanImagePrompt(prompt);
     let enhancedPrompt = cleanedPrompt;
@@ -107,9 +101,6 @@ Return ONLY cleaned visual description.`;
     if (referenceImage) {
       // CRITICAL: Put image FIRST, then text prompt - order matters for identity preservation
       const base64Data = referenceImage.replace(/^data:image\/\w+;base64,/, "");
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aiService.ts:generateImage:ref',message:'Reference image in generateImage',data:{hasReferenceImage:true,referenceImageLen:referenceImage?.length,base64DataLen:base64Data?.length,startsWithDataUri:referenceImage?.startsWith('data:')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
-      // #endregion
       parts.push({
         inlineData: {
           mimeType: 'image/png',
@@ -171,8 +162,6 @@ FORBIDDEN:
 
     parts.push({ text: enhancedPrompt });
 
-    console.log(`[AiService] Sending request to: ${this.baseUrl}/${model}:generateContent`);
-
     const requestBody = {
       contents: [{ parts }],
       generationConfig: {
@@ -191,28 +180,23 @@ FORBIDDEN:
 
     if (!res.ok) {
       const text = await res.text();
-      console.error(`[AiService] ❌ API Error: ${res.status} - ${text}`);
       throw new Error(`Gemini image error: ${res.status} - ${text.substring(0, 500)}`);
     }
 
     const data = await res.json() as any;
-    console.log(`[AiService] Response received. Candidates: ${data?.candidates?.length || 0}`);
 
     // Check for safety blocks
     const candidate = data?.candidates?.[0];
     if (candidate?.finishReason === 'SAFETY') {
-      console.error(`[AiService] ❌ SAFETY BLOCK detected`);
       throw new Error('SAFETY_BLOCK: The generated content was blocked by AI safety filters.');
     }
 
     const part = candidate?.content?.parts?.find((p: any) => p.inlineData?.data);
     const base64 = part?.inlineData?.data;
     if (!base64) {
-      console.error(`[AiService] ❌ No image data in response:`, JSON.stringify(data).substring(0, 500));
       throw new Error('No image data returned from API');
     }
 
-    console.log(`[AiService] ✅ Image generated successfully (base64 length: ${base64.length})`);
     return { base64: `data:image/png;base64,${base64}` };
   }
 

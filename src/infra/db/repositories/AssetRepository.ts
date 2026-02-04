@@ -81,9 +81,8 @@ export class AssetRepository {
                         metadata.textContext || null,
                         metadata.textContextSimple || null
                     ]);
-                } catch (metaError: any) {
+                } catch {
                     // Don't fail the whole transaction if meta insert fails
-                    console.warn(`[AssetRepository] Failed to insert cached_asset_meta for ${keyStr}: ${metaError.message}`);
                 }
             }
 
@@ -91,8 +90,7 @@ export class AssetRepository {
             // For video and json, we store the value as string, no blob needed
             if (buffer && buffer.length > 0) {
                 if (type !== 'image') {
-                    // Log warning if buffer provided for non-image type
-                    console.warn(`[AssetRepository] Buffer provided for non-image type ${type}. Storing value only.`);
+                    // Buffer provided for non-image type - storing value only
                 } else {
                     const blobResult = await client.query(`
                         INSERT INTO asset_blob_storage (key, data)
@@ -107,8 +105,7 @@ export class AssetRepository {
                 }
             } else if (type === 'image' && !value) {
                 // For images, we should have either buffer or value
-                // If neither, log a warning but don't fail (might be updating status only)
-                console.warn(`[AssetRepository] No buffer or value provided for image asset: ${keyStr}`);
+                // If neither, don't fail (might be updating status only)
             }
 
             await client.query('COMMIT');
