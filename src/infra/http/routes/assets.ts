@@ -528,27 +528,15 @@ export async function assetsRoutes(app: FastifyInstance) {
       for (const row of rows) {
         try {
           const out = { ...row };
-          if (out.asset_type === 'image' && out.value != null) {
-            if (typeof out.value === 'string') {
-              if (out.value.startsWith('data:image')) {
-                const match = out.value.match(/data:image\/[^;]+;base64,(.+)/s);
-                if (match && match[1]) {
-                  const base64Data = match[1].replace(/[\s\r\n\t]/g, '');
-                  if (/^[A-Za-z0-9+/=]+$/.test(base64Data) && base64Data.length > 100) {
-                    out.value = `data:image/png;base64,${base64Data}`;
-                  } else out.value = null;
-                }
-              } else {
-                const cleaned = out.value.replace(/[\s\r\n\t]/g, '');
-                if (/^[A-Za-z0-9+/=]+$/.test(cleaned) && cleaned.length > 100) {
-                  out.value = `data:image/png;base64,${cleaned}`;
-                } else out.value = null;
-              }
-            } else if (Buffer.isBuffer(out.value)) {
-              out.value = `data:image/png;base64,${out.value.toString('base64')}`;
-            } else {
-              out.value = null;
-            }
+          // IMPORTANT: Don't include full image data in by-movement response to avoid huge payloads
+          // Images are fetched separately via /assets/batch with specific keys
+          if (out.asset_type === 'image') {
+            // Just indicate if the image exists, don't send the actual data
+            const hasValue = out.value != null && (
+              (typeof out.value === 'string' && out.value.length > 100) ||
+              Buffer.isBuffer(out.value)
+            );
+            out.value = hasValue ? 'HAS_IMAGE' : null;
           }
           if (out.text_context === undefined) out.text_context = null;
           if (out.text_context_simple === undefined) out.text_context_simple = null;
