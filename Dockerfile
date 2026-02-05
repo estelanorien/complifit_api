@@ -18,8 +18,11 @@ RUN npm run build
 # Expose port
 EXPOSE 8080
 
+# Clean dev dependencies for a smaller image
+# RUN npm prune --production
+
 # Set Node.js memory options
 ENV NODE_OPTIONS="--max-old-space-size=1536"
 
-# Run built JS (no tsx at runtime = more reliable on Cloud Run)
-CMD ["npm", "run", "start"]
+# Start application
+CMD ["node", "dist/server.cjs"]

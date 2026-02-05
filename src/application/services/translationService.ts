@@ -110,6 +110,8 @@ ${trimmedText}`;
      */
     async publishAndTranslate(groupId: string, groupName: string, groupType: 'exercise' | 'meal'): Promise<void> {
         try {
+            console.log(`[TranslationService] Publishing Group: ${groupName} (${groupId})`);
+
             // 1. Promote ALL assets in this group to 'active'
             await pool.query(
                 `UPDATE cached_assets 
@@ -130,6 +132,7 @@ ${trimmedText}`;
                 [groupId]
             );
 
+            console.log(`[TranslationService] Enqueueing translations for ${jsonRows.length} assets`);
             for (const row of jsonRows) {
                 await translationQueue.enqueue(row.key);
             }
@@ -141,14 +144,17 @@ ${trimmedText}`;
                 const mainJsonAsset = jsonRows[0].key; // Usually the Instructions JSON
 
                 if (groupType === 'exercise') {
+                    console.log(`[TranslationService] Enqueueing Video jobs for Atlas & Nova: ${groupId}`);
                     await videoQueue.enqueue(mainJsonAsset, 'atlas');
                     await videoQueue.enqueue(mainJsonAsset, 'nova');
                 } else {
+                    console.log(`[TranslationService] Enqueueing Video job for Meal: ${groupId}`);
                     await videoQueue.enqueue(mainJsonAsset, null);
                 }
             }
 
         } catch (e) {
+            console.error(`[TranslationService] publishAndTranslate failed for ${groupId}`, e);
             throw e;
         }
     }

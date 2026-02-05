@@ -33,13 +33,7 @@ export const uploadToYouTube = async (options: UploadOptions) => {
     let videoBody: any;
 
     if (options.videoUrl.startsWith('http')) {
-        const headers: Record<string, string> = {};
-        // If it's a Google GenAI file, we likely need the API key
-        if (options.videoUrl.includes('generativelanguage.googleapis.com') && env.geminiApiKey) {
-            headers['x-goog-api-key'] = env.geminiApiKey;
-        }
-
-        const response = await fetch(options.videoUrl, { headers });
+        const response = await fetch(options.videoUrl);
         if (!response.ok) throw new Error(`Failed to fetch video: ${response.statusText}`);
         videoBody = response.body;
     } else {

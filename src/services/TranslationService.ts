@@ -1,9 +1,7 @@
+
 import { pool } from '../infra/db/pool.js';
-import { AssetRepository } from '../infra/db/repositories/AssetRepository.js';
+import { generateAsset } from './AssetGenerationService.js';
 import { env } from '../config/env.js';
-import { AssetPromptService } from '../application/services/assetPromptService.js';
-import { AiService } from '../application/services/aiService.js';
-import { UnifiedKey } from '../domain/UnifiedKey.js';
 
 const TARGET_LANGUAGES = ['es', 'fr', 'de', 'it', 'pt', 'ru', 'tr', 'zh', 'ja', 'ko', 'ar', 'hi'];
 
@@ -13,7 +11,8 @@ export class TranslationService {
      * Publishes a group (sets status to active) and triggers translation for its text content.
      */
     static async publishAndTranslate(groupId: string, groupName: string, groupType: 'exercise' | 'meal') {
-        const movementId = AssetPromptService.normalizeToId(groupName);
+        const movementId = this.normalizeToId(groupName);
+        console.log(`[Translation] Publishing and Translating ${groupName} (${groupId})`);
 
         // 1. Promote Status: auto -> active
         // Function to update status for a key pattern
@@ -24,82 +23,47 @@ export class TranslationService {
             );
         };
 
-        // 2. Fetch Text Content for Translation via Repository
-        const slug = AssetPromptService.normalizeToId(groupName);
-        const metaKey = new UnifiedKey({
-            type: groupType === 'exercise' ? 'ex' : 'meal',
-            id: groupId.length > 20 ? groupId : slug,
-            persona: 'none',
-            subtype: 'meta',
-            index: 0
-        });
+        const mainKey = groupType === 'exercise' ? `ex_${movementId}` : `meal_${movementId}`;
+        await promoteAssets(mainKey);
 
-        const asset = await AssetRepository.findByKey(metaKey);
+        // 2. Fetch Text Content for Translation
+        // We need: Main Description (from _meta), Step Instructions (from _meta or individual steps?)
+        // Currently instructions are in `_meta`.
 
-        if (asset && asset.buffer) {
+        const metaKey = `${mainKey}_meta`;
+        const metaRes = await pool.query(`SELECT value FROM cached_assets WHERE key=$1`, [metaKey]);
+
+        if (metaRes.rows.length > 0) {
             try {
-                const meta = JSON.parse(asset.buffer.toString());
+                const meta = JSON.parse(metaRes.rows[0].value);
 
                 // Collect texts to translate
                 const textsToTranslate: { text: string, category: string }[] = [];
 
-                if (meta.description) textsToTranslate.push({ text: meta.description, category: 'description' });
+                if (meta.textContext) textsToTranslate.push({ text: meta.textContext, category: 'description' });
+                if (meta.textContextSimple) textsToTranslate.push({ text: meta.textContextSimple, category: 'cue' });
 
-                // Exercise specific fields
-                if (meta.safety_warnings && Array.isArray(meta.safety_warnings)) {
-                    meta.safety_warnings.forEach((text: string, idx: number) => {
-                        textsToTranslate.push({ text, category: `safety_${idx + 1}` });
-                    });
-                }
-                if (meta.pro_tips && Array.isArray(meta.pro_tips)) {
-                    meta.pro_tips.forEach((text: string, idx: number) => {
-                        textsToTranslate.push({ text, category: `pro_tip_${idx + 1}` });
-                    });
-                }
-                if (meta.common_mistakes && Array.isArray(meta.common_mistakes)) {
-                    meta.common_mistakes.forEach((text: string, idx: number) => {
-                        textsToTranslate.push({ text, category: `mistake_${idx + 1}` });
-                    });
-                }
-
-                // Meal specific fields
-                if (meta.nutrition_science) textsToTranslate.push({ text: meta.nutrition_science, category: 'nutrition' });
-                if (meta.prep_tips && Array.isArray(meta.prep_tips)) {
-                    meta.prep_tips.forEach((text: string, idx: number) => {
-                        textsToTranslate.push({ text, category: `prep_tip_${idx + 1}` });
-                    });
-                }
-
-                if (meta.instructions && Array.isArray(meta.instructions)) {
-                    meta.instructions.forEach((step: any, idx: number) => {
-                        if (step.label) {
+                if (meta.steps && Array.isArray(meta.steps)) {
+                    meta.steps.forEach((step: any, idx: number) => {
+                        if (step.instruction) {
                             textsToTranslate.push({
-                                text: step.label,
-                                category: `step_label_${idx + 1}`
-                            });
-                        }
-                        if (step.detailed) {
-                            textsToTranslate.push({
-                                text: step.detailed,
-                                category: `step_detailed_${idx + 1}`
-                            });
-                        }
-                        if (step.simple) {
-                            textsToTranslate.push({
-                                text: step.simple,
-                                category: `step_simple_${idx + 1}`
+                                text: step.instruction,
+                                category: `step_${idx + 1}`
                             });
                         }
                     });
                 }
 
                 // 3. Process Translations (Batch)
+                // We process each distinct text string.
                 for (const item of textsToTranslate) {
                     await this.translateContent(item.text, item.category);
                 }
 
-            } catch {
-                // Failed to parse meta - skip
+                console.log(`[Translation] Completed for ${groupName}`);
+
+            } catch (e) {
+                console.error(`[Translation] Failed to parse meta for ${groupName}`, e);
             }
         }
     }
@@ -111,14 +75,17 @@ export class TranslationService {
     static async translateContent(originalText: string, category: string) {
         if (!originalText || originalText.length < 2) return;
 
-        // Check cache first
+        // Check cache first (for at least one language to see if we did this)
         const cacheCheck = await pool.query(
             `SELECT 1 FROM content_translations WHERE original_text=$1 LIMIT 1`,
             [originalText]
         );
         if ((cacheCheck.rowCount || 0) > 0) {
+            console.log(`[Translation] Cache hit for: "${originalText.substring(0, 20)}..."`);
             return;
         }
+
+        console.log(`[Translation] Generating translations for: "${originalText.substring(0, 20)}..."`);
 
         const prompt = `
             Translate the following text into these languages: ${TARGET_LANGUAGES.join(', ')}.
@@ -130,14 +97,14 @@ export class TranslationService {
         `;
 
         try {
-            const ai = new AiService();
-            const { text: jsonStr } = await ai.generateText({ prompt });
+            const jsonStr = await generateAsset({
+                mode: 'json',
+                prompt: prompt
+            });
 
-            if (!jsonStr) throw new Error("No response from AI");
+            if (!jsonStr) throw new Error("No response from Gemini");
 
-            // Clean JSON in case of markdown blocks
-            const cleanJson = jsonStr.replace(/```json\n?/, '').replace(/```\n?$/, '').trim();
-            const translations = JSON.parse(cleanJson);
+            const translations = JSON.parse(jsonStr);
 
             // Save to DB
             for (const lang of TARGET_LANGUAGES) {
@@ -152,8 +119,16 @@ export class TranslationService {
                 }
             }
 
-        } catch {
-            // Translation error - skip
+        } catch (e) {
+            console.error(`[Translation] Error translating "${originalText.substring(0, 20)}..."`, e);
         }
+    }
+
+    private static normalizeToId(name: string): string {
+        if (!name) return 'unknown';
+        let clean = name.toLowerCase().trim();
+        clean = clean.replace(/[^a-z0-9]+/g, ' ');
+        const words = clean.split(' ').filter(w => w.length > 0).sort();
+        return words.join('_');
     }
 }

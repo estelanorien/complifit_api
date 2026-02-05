@@ -38,20 +38,7 @@ const envSchema = z.object({
   DB_SSL_REJECT_UNAUTHORIZED: z.string().optional().transform(val => {
     if (val === undefined || val === null) return undefined;
     return val === 'true' || val === '1';
-  }),
-  // Video voiceover pipeline: optional background music (GCS or HTTPS URI). When set, mixed under TTS at low level.
-  VIDEO_MUSIC_TRACK_URI: z.string().optional(),
-  // Google Cloud TTS: use Application Default Credentials or set GOOGLE_APPLICATION_CREDENTIALS to service account JSON path
-  GOOGLE_APPLICATION_CREDENTIALS: z.string().optional(),
-  // Email Configuration (SMTP)
-  SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.string().optional().transform(val => val ? Number(val) : 587),
-  SMTP_SECURE: z.string().optional().transform(val => val === 'true'),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASS: z.string().optional(),
-  EMAIL_FROM: z.string().optional(),
-  // Frontend URL for password reset links
-  FRONTEND_URL: z.string().optional()
+  })
 });
 
 const parseEnv = () => {
@@ -77,16 +64,7 @@ const parseEnv = () => {
     APPLE_CLIENT_ID: process.env.APPLE_CLIENT_ID,
     APPLE_TEAM_ID: process.env.APPLE_TEAM_ID,
     APPLE_KEY_ID: process.env.APPLE_KEY_ID,
-    DB_SSL_REJECT_UNAUTHORIZED: process.env.DB_SSL_REJECT_UNAUTHORIZED,
-    VIDEO_MUSIC_TRACK_URI: process.env.VIDEO_MUSIC_TRACK_URI || undefined,
-    GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS,
-    SMTP_HOST: process.env.SMTP_HOST,
-    SMTP_PORT: process.env.SMTP_PORT,
-    SMTP_SECURE: process.env.SMTP_SECURE,
-    SMTP_USER: process.env.SMTP_USER,
-    SMTP_PASS: process.env.SMTP_PASS,
-    EMAIL_FROM: process.env.EMAIL_FROM,
-    FRONTEND_URL: process.env.FRONTEND_URL
+    DB_SSL_REJECT_UNAUTHORIZED: process.env.DB_SSL_REJECT_UNAUTHORIZED
     });
     return parsed;
   } catch (error: any) {
@@ -133,17 +111,6 @@ export const env = {
       keyId: envVars.APPLE_KEY_ID
     }
   },
-  dbSslRejectUnauthorized: envVars.DB_SSL_REJECT_UNAUTHORIZED ?? (envVars.NODE_ENV === 'production' ? true : false),
-  videoMusicTrackUri: envVars.VIDEO_MUSIC_TRACK_URI && envVars.VIDEO_MUSIC_TRACK_URI !== '' ? envVars.VIDEO_MUSIC_TRACK_URI : undefined,
-  googleApplicationCredentials: envVars.GOOGLE_APPLICATION_CREDENTIALS,
-  email: {
-    host: envVars.SMTP_HOST,
-    port: envVars.SMTP_PORT,
-    secure: envVars.SMTP_SECURE,
-    user: envVars.SMTP_USER,
-    pass: envVars.SMTP_PASS,
-    from: envVars.EMAIL_FROM || 'noreply@complifit.app'
-  },
-  frontendUrl: envVars.FRONTEND_URL || 'https://app.complifit.com'
+  dbSslRejectUnauthorized: envVars.DB_SSL_REJECT_UNAUTHORIZED ?? (envVars.NODE_ENV === 'production' ? true : false)
 };
 

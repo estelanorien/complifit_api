@@ -1,7 +1,4 @@
 import { TrainingPlan } from '../../../../application/services/trainingService.js';
-import { UnifiedAssetService } from '../../../../application/services/UnifiedAssetService.js';
-import { AssetOrchestrator } from '../../../../application/services/AssetOrchestrator.js';
-import { AssetPromptService } from '../../../../application/services/assetPromptService.js';
 
 export const saveTrainingProgram = async (
   client: any,
@@ -54,24 +51,6 @@ export const saveTrainingProgram = async (
         }
       }
     }
-  }
-
-  // Ensure assets exist for all exercises (fire-and-forget)
-  if (Array.isArray(trainingPlan?.schedule)) {
-    const allExercises = trainingPlan.schedule.flatMap(day => day.exercises || []);
-    (async () => {
-      for (const ex of allExercises) {
-        try {
-          const name = ex.name || 'Exercise';
-          const manifest = await UnifiedAssetService.getManifest('ex', AssetPromptService.normalizeToId(name), name);
-          for (const key of manifest) {
-            await AssetOrchestrator.generateAssetForKey(key);
-          }
-        } catch {
-          // Asset generation failed - non-critical, skip
-        }
-      }
-    })().catch(() => { /* Global asset loop failed - non-critical */ });
   }
 
   // Get current profile_data to preserve all existing data

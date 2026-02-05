@@ -58,7 +58,6 @@ export async function aiRoutes(app: FastifyInstance) {
     return reply.send(result);
   });
 
-
   app.post('/ai/image', { preHandler: authGuard }, async (req, reply) => {
     const inputSchema = imageSchema.extend({
       referenceImage: z.string().optional() // Base64 image data
@@ -69,69 +68,10 @@ export async function aiRoutes(app: FastifyInstance) {
     return reply.send(result);
   });
 
-  // Image quality analysis endpoint
-  app.post('/ai/analyze-image-quality', { preHandler: authGuard }, async (req, reply) => {
-    const schema = z.object({
-      imageBase64: z.string(),
-      context: z.string().optional()
-    });
-
-    const { imageBase64, context = 'coach exercise demonstration' } = schema.parse(req.body);
-
-    try {
-      const parts: any[] = [];
-      const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-      parts.push({ inlineData: { mimeType: 'image/png', data: cleanBase64 } });
-      parts.push({
-        text: `Analyze this image for quality issues. Context: ${context}.
-        
-        Rate the image on these criteria (1-10 each):
-        1. Clarity/Sharpness
-        2. Lighting
-        3. Composition
-        4. Subject visibility
-        5. Professional appearance
-        
-        Return JSON: { "overall": number, "details": { "clarity": number, "lighting": number, "composition": number, "visibility": number, "professional": number }, "issues": string[], "suggestions": string[] }` });
-
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': aiConfig.geminiApiKey
-        },
-        body: JSON.stringify({
-          contents: [{ parts }],
-          generationConfig: { responseMimeType: 'application/json' }
-        })
-      });
-
-      if (!res.ok) {
-        throw new Error(`Quality analysis failed: ${res.status}`);
-      }
-
-      const data: any = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-      const result = JSON.parse(text);
-
-      return reply.send(result);
-    } catch (e: any) {
-      req.log.error({ error: 'analyze-image-quality failed', e });
-      return reply.send({ overall: 5, details: {}, issues: ['Analysis failed'], suggestions: [] });
-    }
-  });
-
   // General Gemini proxy (server-side key)
   app.post('/ai/generate-content', { preHandler: authGuard }, async (req, reply) => {
     const body = generateSchema.parse(req.body || {});
-    let { parts, model = 'gemini-3-flash-preview', generationConfig, tools } = body;
-
-    // Ensure model has 'models/' prefix
-    if (!model.startsWith('models/')) {
-      model = `models/${model}`;
-    }
-
-    req.log.info({ model, partsCount: parts?.length, message: '[AI] generate-content called' });
+    const { parts, model = 'models/gemini-3-flash-preview', generationConfig, tools } = body;
 
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`, {
@@ -148,7 +88,6 @@ export async function aiRoutes(app: FastifyInstance) {
       });
       if (!res.ok) {
         const txt = await res.text();
-        req.log.error({ status: res.status, model, error: txt, message: '[AI] generate-content failed' });
         const isProduction = process.env.NODE_ENV === 'production';
         throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini generate error ${res.status}: ${txt}`);
       }
@@ -393,7 +332,7 @@ export async function aiRoutes(app: FastifyInstance) {
       parts.push({ text: prompt });
     }
 
-    const model = 'models/gemini-1.5-flash';
+    const model = 'models/gemini-3-flash-preview';
 
     // Helper function to ensure response has all required fields
     // CRITICAL: Only use defaults if AI didn't provide values. If AI provided values, use them!
@@ -527,7 +466,7 @@ export async function aiRoutes(app: FastifyInstance) {
         req.log.warn({ error: e, requestId: (req as any).requestId, message: 'food-log cache lookup failed' });
       }
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -813,7 +752,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       }
       sys += ` Language: ${lang}. Keep responses concise.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

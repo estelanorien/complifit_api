@@ -2,11 +2,7 @@ import { pool } from '../../infra/db/pool.js';
 import { AiService } from './aiService.js';
 import { translationService } from './translationService.js';
 import { canonicalService } from './canonicalService.js';
-import { AssetPromptService } from './assetPromptService.js';
 import { logger } from '../../infra/logger.js';
-import { AssetRepository } from '../../infra/db/repositories/AssetRepository.js';
-import { UnifiedKey } from '../../domain/UnifiedKey.js';
-import { unifiedGenerationPipeline } from './UnifiedGenerationPipeline.js';
 
 const aiService = new AiService();
 
@@ -14,16 +10,16 @@ const VITALITY_IMAGE_STYLE = "photorealistic, 8k resolution, cinematic lighting,
 
 const COACH_PROFILES = {
     atlas: {
-        description: "Caucasian male, 28 years old, SHORT GOLDEN-BLONDE HAIR (NOT black, NOT brown - must be light brownish-gold), STRICTLY clean shaven no facial hair. Wearing a simple grey athletic t-shirt and athletic shoes (sports sneakers). Maintain identical facial features, HAIR COLOR, and athletic footwear consistency across all shots.",
+        description: "Caucasian male, 28 years old, short faded dark-blonde hair, clean shaven. Wearing a simple grey athletic t-shirt. Friendly but professional, trustworthy.",
         refKey: "system_coach_atlas_ref"
     },
     nova: {
-        description: "Caucasian female, 28 years old, LONG GOLDEN-BLONDE HAIR in a high ponytail (NOT black, NOT brown - must be light blonde). Wearing a simple black athletic tank top and athletic shoes (sports sneakers). Friendly, confident smile, strictly maintain hairstyle, HAIR COLOR, face, and athletic footwear consistency across all shots.",
+        description: "Caucasian female, 28 years old, long blonde hair in a high ponytail. Wearing a simple black athletic tank top. Friendly, confident smile, approachable.",
         refKey: "system_coach_nova_ref"
     }
 };
 
-type JobType = 'MEAL_PLAN' | 'IMAGE' | 'MEAL_DETAILS' | 'EXERCISE_GENERATION' | 'MEAL_GENERATION' | 'CONTENT_UPGRADE' | 'BATCH_ASSET_GENERATION' | 'UNIFIED_PIPELINE';
+type JobType = 'MEAL_PLAN' | 'IMAGE' | 'MEAL_DETAILS' | 'EXERCISE_GENERATION' | 'MEAL_GENERATION' | 'CONTENT_UPGRADE' | 'BATCH_ASSET_GENERATION';
 
 export class JobProcessor {
     private processing = false;
@@ -94,24 +90,7 @@ export class JobProcessor {
        WHERE id = $1 AND user_id = $2`,
             [jobId, userId]
         );
-        if (!rows[0]) return null;
-
-        const job = rows[0];
-
-        // Parse result if it's JSON string
-        let resultData = job.result;
-        if (typeof resultData === 'string') {
-            try { resultData = JSON.parse(resultData); } catch (e) { /* ignore */ }
-        }
-
-        // If PROCESSING, result contains progress data
-        return {
-            id: job.id,
-            status: job.status,
-            result: job.status === 'COMPLETED' ? resultData : undefined,
-            progress: job.status === 'PROCESSING' ? resultData : undefined,
-            error: job.error
-        };
+        return rows[0] || null;
     }
 
     private async processNextJob() {
@@ -125,27 +104,15 @@ export class JobProcessor {
                 await client.query('BEGIN');
 
                 // 1. Claim a job with SKIP LOCKED to prevent race conditions
-                // STRICTLY SEQUENTIAL: Check if ANY job is currently PROCESSING
-                const start = Date.now();
-                const { rows: active } = await client.query(
-                    `SELECT id FROM generation_jobs WHERE status = 'PROCESSING' AND started_at > NOW() - INTERVAL '30 minutes'`
-                );
-
-                // If any job found processing (that is not stale), we wait.
-                // UNLESS it's a high priority job? No, user requested STRICT sequential.
-                if (active.length > 0) {
-                    await client.query('ROLLBACK');
-                    return;
-                }
-
                 // Priority ordering: HIGH (3) > MEDIUM (2) > LOW (1)
-                // Also reclaim jobs stuck in PROCESSING for > 30 minutes (heartbeat timeout)
+                // Also reclaim jobs stuck in PROCESSING for > 5 minutes (heartbeat timeout)
+                // Skip expired jobs
                 const { rows } = await client.query(`
                     SELECT id, user_id, type, payload 
                     FROM generation_jobs 
                     WHERE (
                         status = 'PENDING' 
-                        OR (status = 'PROCESSING' AND started_at < NOW() - INTERVAL '30 minutes')
+                        OR (status = 'PROCESSING' AND started_at < NOW() - INTERVAL '5 minutes')
                     )
                     AND (expires_at IS NULL OR expires_at > NOW())
                     ORDER BY priority DESC, created_at ASC 
@@ -174,21 +141,7 @@ export class JobProcessor {
 
                 // 2. Execute Work
                 try {
-                    // Pass the jobId inside context if needed, but mainly we want the callback for Batch Jobs
-                    const tick = async (progress: any) => {
-                        try {
-                            await pool.query(
-                                `UPDATE generation_jobs SET status = 'PROCESSING', result = $1, updated_at = NOW() WHERE id = $2`,
-                                [progress as any, job.id]
-                            );
-                            logger.info(`[JobProcessor] Job ${job.id} TICK: Generated ${progress.generated}`);
-                        } catch (e: any) {
-                            logger.warn(`[JobProcessor] Failed to tick progress for ${job.id}`, e);
-                        }
-                    };
-
-                    // Add progress callback to payload for handlers that support it
-                    const result = await this.executeJob(job.type, { ...(job.payload as Record<string, any>), onProgress: tick });
+                    const result = await this.executeJob(job.type, job.payload);
 
                     await pool.query(
                         `UPDATE generation_jobs SET status = 'COMPLETED', result = $1, updated_at = now() WHERE id = $2`,
@@ -229,9 +182,7 @@ export class JobProcessor {
             case 'CONTENT_UPGRADE':
                 return this.handleContentUpgrade(payload);
             case 'BATCH_ASSET_GENERATION':
-                return { success: false, error: 'Legacy Batch Generation is disabled. Use Admin UI with SSE.' };
-            case 'UNIFIED_PIPELINE':
-                return this.handleUnifiedPipeline(payload);
+                return this.handleBatchAssetGeneration(payload);
             default:
                 throw new Error(`Unknown job type: ${type}`);
         }
@@ -253,8 +204,14 @@ export class JobProcessor {
         return { assetUrl: image }; // Return same base64 for immediate UI use if needed
     }
 
-    // MOVED TO AssetPromptService.normalizeToId
-    // Kept briefly for reference but unused
+    private normalizeKey(str: string, prefix: string): string {
+        if (!str) return `${prefix}_unknown`;
+        let clean = str.toLowerCase().trim();
+        // Frontend-compatible normalization: No sorting, preserve order, use underscores
+        clean = clean.replace(/[^a-z0-9]+/g, '_');
+        clean = clean.replace(/^_+|_+$/g, '');
+        return prefix ? `${prefix}_${clean}` : clean;
+    }
 
     private getContentHash(text: string): string {
         if (!text) return '0';
@@ -365,7 +322,7 @@ export class JobProcessor {
                     try {
                         const { base64: pStepImg } = await aiService.generateImage({
                             prompt: pStepPrompt,
-                            referenceImage: primaryRef || primaryImage // Prefer master coach headshot for maximum facial consistency
+                            referenceImage: primaryImage // Use generated main image to keep outfit consistency for steps
                         });
                         if (pStepImg) {
                             await this.saveAsset(pStepKey, pStepImg, { prompt: pStepPrompt, source: 'exercise-job-step', persona: primaryId, step: stepIndex, movementId: baseKey, originalName, language });
@@ -384,7 +341,7 @@ export class JobProcessor {
                         try {
                             const { base64: sStepImg } = await aiService.generateImage({
                                 prompt: sStepPrompt,
-                                referenceImage: secondaryRef || secondaryMainImage // Prefer master coach headshot
+                                referenceImage: secondaryMainImage // Use generated main image for steps
                             });
                             if (sStepImg) {
                                 await this.saveAsset(sStepKey, sStepImg, { prompt: sStepPrompt, source: 'exercise-job-step', persona: secondaryId, step: stepIndex, movementId: baseKey, originalName, language });
@@ -404,16 +361,14 @@ export class JobProcessor {
         }
     }
 
-    /** Returns coach reference as data URI or base64 so it can be passed to generateImage. Never use buffer.toString() (UTF-8) for binary image. */
     private async getAsset(key: string): Promise<string | null> {
         try {
-            const asset = await AssetRepository.findByKey(key);
-            if (!asset) return null;
-            if (asset.buffer && asset.buffer.length > 0) {
-                return `data:image/png;base64,${asset.buffer.toString('base64')}`;
-            }
-            if (asset.value && asset.value.length > 0) {
-                return asset.value.startsWith('data:') ? asset.value : `data:image/png;base64,${asset.value}`;
+            const { rows } = await pool.query(
+                `SELECT value FROM cached_assets WHERE key = $1 LIMIT 1`,
+                [key]
+            );
+            if (rows.length > 0) {
+                return rows[0].value;
             }
             return null;
         } catch (e) {
@@ -428,9 +383,8 @@ export class JobProcessor {
 
         // 1. Canonicalization (Language Agnostic Matching)
         // Maps localized name to standardized English ID and detects language
-        // Maps localized name to standardized English ID and detects language
         const { canonicalId: baseKey, originalName, language } = await canonicalService.getCanonicalId(name, 'meal');
-        const originalKey = `meal_${AssetPromptService.normalizeToId(name)}`; // Unify with Frontend
+        const originalKey = this.normalizeKey(name, 'meal'); // Still need local key for legacy/direct matching
         const canonicalName = baseKey.replace(/^meal_/, '').replace(/_/g, ' ');
 
         // Save metadata about the group origin for later search and discovery
@@ -499,18 +453,12 @@ export class JobProcessor {
                     const canonicalHash = this.getContentHash(stepText);
                     const canonicalStepKey = `${baseKey}_step_${stepIndex}_${canonicalHash}`;
 
-                    // CRITICAL: Meal step images must show PREPARATION ACTION, not finished dish
-                    // Extract action verbs from step text (chop, stir, season, heat, etc.)
-                    const actionWords = stepText.match(/\b(chop|slice|dice|mince|stir|mix|season|heat|sauté|fry|boil|simmer|add|pour|combine|fold|whisk|marinate|rub|coat|arrange|garnish|plate|serve)\w*/gi) || [];
-                    const actionPhrase = actionWords.length > 0 ? actionWords[0] : "preparing";
-                    const stepPrompt = `Professional food photography: Chef hands ${actionPhrase} for ${canonicalName}. Step: ${stepText}. Close-up on hands, ingredients, and cooking action. In-progress preparation, NOT finished dish. Bright kitchen setting. ${VITALITY_IMAGE_STYLE}. No text, no labels, no finished plate.`;
+                    const stepPrompt = `Food preparation step for ${canonicalName}: ${stepText}. Close-up, professional food photography style. ${VITALITY_IMAGE_STYLE}. No text.`;
 
                     try {
-                        // CRITICAL: Don't use main meal image as reference for steps - it biases toward finished dishes
-                        // Use kitchen background reference instead (or no reference)
                         const { base64: stepImg } = await aiService.generateImage({
-                            prompt: stepPrompt
-                            // Removed referenceImage: mainImage to prevent hero asset bias
+                            prompt: stepPrompt,
+                            referenceImage: mainImage // Use main meal as reference
                         });
                         if (stepImg) {
                             // Save Canonical
@@ -582,82 +530,69 @@ export class JobProcessor {
         }
     }
 
+    private async handleBatchAssetGeneration(payload: any): Promise<any> {
+        // This is a wrapper around BatchAssetService logic
+        // We import it dynamically to avoid circular dependency issues if any
+        const { BatchAssetService } = await import('../../services/BatchAssetService.js');
 
-    /**
-     * Handle unified pipeline job - orchestrates complete asset generation
-     * Generates: meta -> images (Atlas + Nova) -> videos -> translations
-     */
-    private async handleUnifiedPipeline(payload: any): Promise<any> {
-        const { entityType, entityId, entityName, priority, triggeredBy, userId, options } = payload;
+        // Pass the payload directly to the service
+        // The service will now perform the one-by-one generation
+        // IMPORTANT: We need to update the service to be "job-aware" if we want granular progress updates here
+        // For now, let's let it run and return the final report.
 
-        logger.info(`[JobProcessor] UNIFIED_PIPELINE: Starting for ${entityType}:${entityId}`);
+        // TODO: Refactor BatchAssetService to take a "progressCallback" if possible, 
+        // OR rely on the fact that it updates the DB row-by-row, so the frontend can polling 
+        // the "assets" table independently if it wants deep granular verification.
 
-        try {
-            const result = await unifiedGenerationPipeline.execute({
-                entityType,
-                entityId,
-                entityName,
-                priority: priority || 'MEDIUM',
-                triggeredBy: triggeredBy || 'system',
-                userId,
-                options
-            });
-
-            logger.info(`[JobProcessor] UNIFIED_PIPELINE: Completed for ${entityType}:${entityId}`, {
-                success: result.success,
-                totalGenerated: result.totalGenerated,
-                totalFailed: result.totalFailed,
-                duration: result.duration
-            });
-
-            return {
-                success: result.success,
-                entityKey: result.entityKey,
-                pipelineId: result.pipelineId,
-                stages: result.stages,
-                totalGenerated: result.totalGenerated,
-                totalFailed: result.totalFailed,
-                errors: result.errors,
-                duration: result.duration
-            };
-
-        } catch (e: any) {
-            logger.error(`[JobProcessor] UNIFIED_PIPELINE failed for ${entityType}:${entityId}`, e);
-            throw e;
-        }
+        return await BatchAssetService.generateGroupAssets(payload);
     }
 
     private async saveAsset(key: string, value: string, meta: any) {
         try {
-            const uKey = UnifiedKey.parse(key);
-            const buffer = Buffer.from(value.replace(/^data:image\/\w+;base64,/, ""), 'base64');
+            // Ensure value has proper format for storage if it's a raw base64
+            let processedValue = value;
+            if (processedValue && !processedValue.startsWith('data:image')) {
+                processedValue = `data:image/png;base64,${processedValue}`;
+            }
 
-            await AssetRepository.save(uKey, {
-                buffer,
-                status: 'active',
-                type: 'image',
-                metadata: {
-                    prompt: meta.prompt || null,
-                    source: meta.source || 'auto-gen',
-                    movement_id: meta.movementId || null,
-                    persona: meta.persona || null,
-                    step_index: meta.step !== undefined ? meta.step : null,
-                    original_name: meta.originalName || null,
-                    language: meta.language || null
-                }
-            });
+            // 1. Save to cached_assets
+            await pool.query(
+                `INSERT INTO cached_assets(key, value, asset_type, status)
+                 VALUES($1, $2, 'image', 'active')
+                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, status = 'active'`,
+                [key, processedValue]
+            );
+
+            // 2. Save to cached_asset_meta
+            await pool.query(
+                `INSERT INTO cached_asset_meta(key, prompt, source, mode, movement_id, persona, step_index, created_by, original_name, language)
+                 VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 ON CONFLICT (key) DO UPDATE SET 
+                    prompt = EXCLUDED.prompt, 
+                    source = EXCLUDED.source, 
+                    mode = EXCLUDED.mode, 
+                    movement_id = EXCLUDED.movement_id,
+                    persona = EXCLUDED.persona,
+                    step_index = EXCLUDED.step_index,
+                    created_by = EXCLUDED.created_by,
+                    original_name = EXCLUDED.original_name,
+                    language = EXCLUDED.language`,
+                [
+                    key,
+                    meta.prompt || null,
+                    meta.source || 'auto-gen',
+                    meta.persona || meta.mode || null,
+                    // Infer movement_id from key if not provided (now handles meals)
+                    meta.movementId || (key.match(/^(movement_|meal_)/) ? key.replace(/_(main|step_\d+.*|atlas|nova)$/, '') : null),
+                    meta.persona || null,
+                    meta.step !== undefined ? meta.step : null,
+                    'system',
+                    meta.originalName || null,
+                    meta.language || null
+                ]
+            );
         } catch (e) {
             logger.error(`[JobProcessor] Failed to save asset ${key}`, e as Error);
-        }
-    }
-    private async getAssetValue(key: string): Promise<string | null> {
-        try {
-            const { rows } = await pool.query('SELECT value FROM cached_assets WHERE key = $1', [key]);
-            if (rows.length > 0) return rows[0].value;
-            return null;
-        } catch (e) {
-            logger.warn(`[JobProcessor] Failed to fetch asset value for ${key}`, e as Error);
-            return null;
         }
     }
 }

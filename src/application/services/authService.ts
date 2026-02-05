@@ -43,21 +43,15 @@ export class AuthService {
 
   async signIn(identifier: string, password: string) {
     const normalized = identifier.trim().toLowerCase();
-    const result = await pool.query(
+    const { rows } = await pool.query(
       'SELECT id, email, password_hash, username, role FROM users WHERE LOWER(email) = $1 OR LOWER(username) = $1',
       [normalized]
     );
-    const rows = result.rows ?? [];
     if (rows.length === 0) throw new Error('Invalid credentials');
     const user = rows[0];
-    if (!user?.password_hash) throw new Error('Invalid credentials');
-    let ok = false;
-    try {
-      ok = await bcrypt.compare(password, user.password_hash);
-    } catch {
-      throw new Error('Invalid credentials');
-    }
+    const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) throw new Error('Invalid credentials');
+
     const token = this.issueToken({ userId: user.id, email: user.email });
     return { user: { id: user.id, email: user.email, username: user.username, role: user.role }, token };
   }
@@ -138,9 +132,7 @@ export class AuthService {
   }
 
   verifyToken(token: string): JwtPayload {
-    return jwt.verify(token, env.jwtSecret, {
-      clockTolerance: 300, // 5 min tolerance for server/client clock skew
-    }) as JwtPayload;
+    return jwt.verify(token, env.jwtSecret) as JwtPayload;
   }
 
   async refreshToken(token: string) {
