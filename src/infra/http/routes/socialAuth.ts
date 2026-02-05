@@ -6,6 +6,71 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import fetch from 'node-fetch';
 import { sendPasswordResetEmail, isEmailConfigured } from '../../../services/emailService.js';
+import jwksClient from 'jwks-rsa';
+
+// Apple JWKS client for JWT signature verification
+const appleJwksClient = jwksClient({
+    jwksUri: 'https://appleid.apple.com/auth/keys',
+    cache: true,
+    cacheMaxAge: 86400000, // 24 hours
+    rateLimit: true,
+    jwksRequestsPerMinute: 10
+});
+
+// Helper to get Apple signing key
+const getAppleSigningKey = (kid: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        appleJwksClient.getSigningKey(kid, (err, key) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+            if (!key) {
+                reject(new Error('No signing key found'));
+                return;
+            }
+            const signingKey = key.getPublicKey();
+            resolve(signingKey);
+        });
+    });
+};
+
+// Helper to verify Apple JWT with full signature verification
+const verifyAppleToken = async (identityToken: string): Promise<{
+    sub: string;
+    email?: string;
+    email_verified?: string;
+    iss: string;
+    aud: string;
+    exp: number;
+}> => {
+    // First decode header to get the key ID (kid)
+    const decodedHeader = jwt.decode(identityToken, { complete: true });
+    if (!decodedHeader || typeof decodedHeader === 'string' || !decodedHeader.header.kid) {
+        throw new Error('Invalid token: cannot decode header');
+    }
+
+    const kid = decodedHeader.header.kid;
+
+    // Get the signing key from Apple's JWKS endpoint
+    const signingKey = await getAppleSigningKey(kid);
+
+    // Verify the token with the signing key
+    const verified = jwt.verify(identityToken, signingKey, {
+        algorithms: ['RS256'],
+        issuer: 'https://appleid.apple.com',
+        audience: env.oauth.apple.clientId
+    }) as {
+        sub: string;
+        email?: string;
+        email_verified?: string;
+        iss: string;
+        aud: string;
+        exp: number;
+    };
+
+    return verified;
+};
 
 // Helper to issue JWT token
 const issueToken = (payload: { userId: string; email: string }) => {
@@ -196,35 +261,27 @@ export async function socialAuthRoutes(app: FastifyInstance) {
         }).parse(req.body);
 
         try {
-            // Decode Apple identity token (JWT)
-            const decoded = jwt.decode(body.identityToken) as {
+            // Verify Apple identity token with full cryptographic signature verification
+            let decoded: {
                 sub: string;
                 email?: string;
                 email_verified?: string;
-                iss?: string;
-                aud?: string;
-                exp?: number;
-            } | null;
+                iss: string;
+                aud: string;
+                exp: number;
+            };
 
-            if (!decoded || !decoded.sub) {
-                return reply.status(401).send({ error: 'Invalid Apple token: Missing sub' });
+            try {
+                decoded = await verifyAppleToken(body.identityToken);
+            } catch (verifyError: any) {
+                req.log.warn({
+                    type: 'apple_token_verification_failed',
+                    error: verifyError.message
+                });
+                return reply.status(401).send({
+                    error: 'Invalid Apple token: Signature verification failed'
+                });
             }
-
-            // --- SECURITY HARDENING ---
-            // 1. Verify Issuer
-            if (decoded.iss !== 'https://appleid.apple.com') {
-                return reply.status(401).send({ error: 'Invalid Apple token: Incorrect issuer' });
-            }
-            // 2. Verify Audience (Client ID)
-            if (decoded.aud !== env.oauth.apple.clientId) {
-                return reply.status(401).send({ error: 'Invalid Apple token: Incorrect audience' });
-            }
-            // 3. Verify Expiration
-            const now = Math.floor(Date.now() / 1000);
-            if (decoded.exp && decoded.exp < now) {
-                return reply.status(401).send({ error: 'Invalid Apple token: Expired' });
-            }
-            // NOTE: Signature verification should be implemented with jwks-rsa in production
 
             // Apple may not always provide email (only on first login)
             const email = decoded.email || body.user?.email;

@@ -78,17 +78,11 @@ export class AssetPromptService {
 
         const lowerKey = key.toLowerCase();
         const lowerLabel = (label || "").toLowerCase();
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:constructPrompt:entry',message:'constructPrompt entry',data:{key,lowerKey,label:label||'',lowerLabel,hasAtlas:lowerKey.includes('atlas')||lowerLabel.includes('atlas'),hasNova:lowerKey.includes('nova')||lowerLabel.includes('nova')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
-        // #endregion
 
         // 1. Resolve Identity and References
         if (lowerKey.includes('atlas') || lowerLabel.includes('atlas')) {
             identity = 'atlas';
             const asset = await AssetRepository.findByKey('system_coach_atlas_ref');
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:atlasRef',message:'Atlas ref load',data:{key:options.key,identity,assetNull:!asset,hasBuffer:!!asset?.buffer,bufferLen:asset?.buffer?.length,hasValue:!!asset?.value,valueLen:asset?.value?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
-            // #endregion
             if (asset?.buffer) {
                 refImage = `data:image/png;base64,${asset.buffer.toString('base64')}`;
             } else if (asset?.value) {
@@ -98,16 +92,10 @@ export class AssetPromptService {
             if (!refImage && type === 'image' && groupType === 'exercise') {
                 throw new Error('CRITICAL: Atlas coach reference image (system_coach_atlas_ref) is missing. Upload it in Admin (Refs Status) before generating exercise images. NEVER generate without reference—prevents wrong person (e.g. bald) in output.');
             }
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:atlasRefResult',message:'Atlas refImage result',data:{refImageLen:refImage?.length,refImagePrefix:refImage?.slice(0,30)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-            // #endregion
             refType = 'identity';
         } else if (lowerKey.includes('nova') || lowerLabel.includes('nova')) {
             identity = 'nova';
             const asset = await AssetRepository.findByKey('system_coach_nova_ref');
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:novaRef',message:'Nova ref load',data:{key:options.key,identity,assetNull:!asset,hasBuffer:!!asset?.buffer,hasValue:!!asset?.value},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
-            // #endregion
             if (asset?.buffer) {
                 refImage = `data:image/png;base64,${asset.buffer.toString('base64')}`;
             } else if (asset?.value) {
@@ -117,9 +105,6 @@ export class AssetPromptService {
             if (!refImage && type === 'image' && groupType === 'exercise') {
                 throw new Error('CRITICAL: Nova coach reference image (system_coach_nova_ref) is missing. Upload it in Admin (Refs Status) before generating exercise images. NEVER generate without reference—prevents wrong person (e.g. bald) in output.');
             }
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:novaRefResult',message:'Nova refImage result',data:{refImageLen:refImage?.length,refImagePrefix:refImage?.slice(0,30)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-            // #endregion
             refType = 'identity';
         } else if (groupType === 'exercise') {
             const asset = await AssetRepository.findByKey('system_background_gym_ref');
@@ -206,9 +191,6 @@ export class AssetPromptService {
             }
         }
 
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assetPromptService.ts:constructPrompt:return',message:'AssetPromptService prompt built',data:{groupType,groupName,key,subtype,type,identity,containsSprain:/sprain/i.test(groupName)||/sprain/i.test(coreDescription),corePreview:coreDescription.substring(0,120),promptPreview:prompt.substring(0,220)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B2'})}).catch(()=>{});
-        // #endregion
         return { prompt, referenceImage: refImage, referenceType: refType };
     }
 
