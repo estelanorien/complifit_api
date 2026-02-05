@@ -19,6 +19,7 @@ import { adminRoutes } from './routes/admin.js';
 import { calorieBankRoutes } from './routes/calorieBank.js';
 import { trainingRoutes } from './routes/training.js';
 import { nutritionRoutes } from './routes/nutrition.js';
+import { groceryRoutes } from './routes/grocery.js';
 import { rehabRoutes } from './routes/rehab.js';
 import { coachRoutes } from './routes/coach.js';
 import { behaviorRoutes } from './routes/behavior.js';
@@ -153,6 +154,7 @@ export function buildServer() {
   app.register(plansRoutes, { prefix: '/api' });
   app.register(trainingRoutes, { prefix: '/api' });
   app.register(nutritionRoutes, { prefix: '/api' });
+  app.register(groceryRoutes, { prefix: '/api' });
   app.register(rehabRoutes, { prefix: '/api' });
   app.register(guardianRoutes, { prefix: '/api' });
   app.register(calorieBankRoutes, { prefix: '/api' });

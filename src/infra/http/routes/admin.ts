@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { adminGuard, authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
@@ -7,6 +7,49 @@ import { env } from '../../../config/env.js';
 import { uploadToYouTube } from '../../../services/youtubeService.js';
 import bcrypt from 'bcryptjs';
 import { normalizeToMovementId } from '../../../application/services/normalization.js';
+import { AuthenticatedRequest, GeminiPart, GeminiResponse, GeminiErrorDetail } from '../types.js';
+
+// Types for admin routes
+interface GroupGenerationParams {
+  groupId: string;
+  groupName: string;
+  groupType: 'exercise' | 'meal';
+  forceRegen?: boolean;
+  themeId?: string;
+  targetStatus?: string;
+}
+
+interface ExerciseData {
+  name: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface MealData {
+  name: string;
+  instructions?: string[];
+}
+
+interface BlueprintConfig {
+  appName?: string;
+  guidelines?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface BehavioralConfig {
+  critChance?: number;
+  nudgeMessages?: string[];
+  futureMessages?: string[];
+  flashQuests?: unknown[];
+  streakFreezeBaseCost?: number;
+  streakFreezeMultiplier?: number;
+  persona?: string;
+  [key: string]: unknown;
+}
+
+interface GameItem {
+  id?: string;
+  [key: string]: unknown;
+}
 
 const assetGenSchema = z.object({
   mode: z.enum(['image', 'video', 'json']).default('image'),
@@ -58,7 +101,7 @@ export async function adminRoutes(app: FastifyInstance) {
     // Let's await it for now, assuming the client has a long timeout or we accept the risk.
     // Actually, typical generation for 4 images = 40 seconds. Allowable.
 
-    const result = await BatchAssetService.generateGroupAssets({ ...(body as any), targetStatus: 'draft' });
+    const result = await BatchAssetService.generateGroupAssets({ ...body, targetStatus: 'draft' } as GroupGenerationParams);
     return reply.send(result);
   });
 
@@ -88,7 +131,7 @@ export async function adminRoutes(app: FastifyInstance) {
     let value: string | null = null;
     try {
       // Helper to prepare parts
-      const parts: any[] = [];
+      const parts: GeminiPart[] = [];
       if (imageInput) {
         // Strip prefix if present (data:image/png;base64,)
         const base64Data = imageInput.replace(/^data:image\/\w+;base64,/, "");
@@ -130,7 +173,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
           // Check for rate limit error
           if (res.status === 429 || errorData?.error?.message?.includes('quota')) {
-            const retryDelay = errorData?.error?.details?.find((d: any) => d['@type']?.includes('RetryInfo'))?.retryDelay;
+            const retryDelay = errorData?.error?.details?.find((d: GeminiErrorDetail) => d['@type']?.includes('RetryInfo'))?.retryDelay;
             const waitTime = retryDelay ? parseInt(retryDelay) : 60;
             throw new Error(`Rate limit exceeded. Please wait ${waitTime} seconds and try again.`);
           }
@@ -140,9 +183,9 @@ export async function adminRoutes(app: FastifyInstance) {
           throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
         }
 
-        const data: any = await res.json();
+        const data = await res.json() as GeminiResponse;
         const resParts = data?.candidates?.[0]?.content?.parts || [];
-        const inline = resParts.find((p: any) => p.inlineData?.data);
+        const inline = resParts.find((p: GeminiPart) => p.inlineData?.data);
         if (inline?.inlineData?.data) {
           value = `data:image/png;base64,${inline.inlineData.data}`;
         }
@@ -168,7 +211,7 @@ export async function adminRoutes(app: FastifyInstance) {
           throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
         }
 
-        const data: any = await res.json();
+        const data = await res.json() as GeminiResponse;
         const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
         // Gemini often wraps JSON in backticks
         value = text;
@@ -195,18 +238,19 @@ export async function adminRoutes(app: FastifyInstance) {
             throw new Error(`Veo not available (${res.status})`);
           }
 
-          const data: any = await res.json();
+          const data = await res.json() as GeminiResponse;
           // Veo response structure might differ, but assuming unified API for now:
-          const videoUri = data?.candidates?.[0]?.content?.parts?.[0]?.fileData?.fileUri;
+          const videoUri = (data?.candidates?.[0]?.content?.parts?.[0] as { fileData?: { fileUri?: string } })?.fileData?.fileUri;
           if (videoUri) {
             value = videoUri;
           } else {
             // If it returns text instead or wait-token
             value = "https://assets.mixkit.co/videos/preview/mixkit-man-doing-push-ups-at-gym-2623-large.mp4"; // Mock fallback
           }
-        } catch (e) {
+        } catch (e: unknown) {
           // Fallback to Mock Video for demo purposes if Veo fails (likely due to access)
-          req.log?.warn({ msg: "Veo generation failed, using mock", error: e });
+          const error = e as Error;
+          req.log?.warn({ msg: "Veo generation failed, using mock", error: error.message });
           value = `https://assets.mixkit.co/videos/preview/mixkit-man-doing-push-ups-at-gym-2623-large.mp4`;
         }
       }
@@ -223,17 +267,18 @@ export async function adminRoutes(app: FastifyInstance) {
           `INSERT INTO cached_asset_meta(key, prompt, mode, source, created_by, movement_id)
            VALUES($1,$2,$3,$4,$5,$6)
            ON CONFLICT (key) DO UPDATE SET prompt=EXCLUDED.prompt, mode=EXCLUDED.mode, source=EXCLUDED.source, created_by=EXCLUDED.created_by, movement_id=EXCLUDED.movement_id`,
-          [key, prompt, mode, 'admin_generate_asset', (req as any).user?.userId || null, movementId || null]
+          [key, prompt, mode, 'admin_generate_asset', (req as AuthenticatedRequest).user?.userId || null, movementId || null]
         );
       }
 
       return reply.send({ value });
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'admin generate asset failed', e, requestId: (req as any).requestId });
+      req.log.error({ error: 'admin generate asset failed', message: error.message, requestId: req.id });
 
       // Always show rate limit errors to the user
-      const errorMessage = e.message || 'generation failed';
+      const errorMessage = error.message || 'generation failed';
       const isRateLimitError = errorMessage.includes('Rate limit') || errorMessage.includes('quota');
 
       return reply.status(500).send({
@@ -254,9 +299,10 @@ export async function adminRoutes(app: FastifyInstance) {
       const body = uploadSchema.parse(req.body);
       const result = await uploadToYouTube(body);
       return reply.send(result);
-    } catch (e: any) {
-      req.log.error({ error: 'youtube upload failed', e });
-      return reply.status(500).send({ error: e.message });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'youtube upload failed', message: error.message });
+      return reply.status(500).send({ error: error.message });
     }
   });
 
@@ -287,7 +333,10 @@ export async function adminRoutes(app: FastifyInstance) {
       if (res.rows.length > 0) {
         return JSON.parse(res.rows[0].value);
       }
-    } catch (e) { }
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.warn({ error: error.message }, 'Failed to load system_blueprints, using defaults');
+    }
 
     // Default
     return {
@@ -305,7 +354,7 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   app.post('/admin/blueprints', { preHandler: adminGuard }, async (req, reply) => {
-    const body = req.body as any; // Allow loose typing for now
+    const body = req.body as BlueprintConfig;
     // Save to cached_assets
     try {
       await pool.query(
@@ -315,8 +364,9 @@ export async function adminRoutes(app: FastifyInstance) {
         [JSON.stringify(body)]
       );
       return { success: true };
-    } catch (e: any) {
-      req.log.error(e);
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: error.message }, 'Failed to save blueprints');
       return reply.status(500).send({ error: "Failed to save blueprints" });
     }
   });
@@ -328,7 +378,10 @@ export async function adminRoutes(app: FastifyInstance) {
       if (res.rows.length > 0) {
         return JSON.parse(res.rows[0].value);
       }
-    } catch (e) { }
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.warn({ error: error.message }, 'Failed to load behavioral_config, using defaults');
+    }
 
     // Defaults
     return {
@@ -343,7 +396,7 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   app.post('/admin/behavioral-config', { preHandler: adminGuard }, async (req, reply) => {
-    const body = req.body as any;
+    const body = req.body as BehavioralConfig;
     try {
       await pool.query(
         `INSERT INTO cached_assets(key, value, asset_type, status)
@@ -352,8 +405,9 @@ export async function adminRoutes(app: FastifyInstance) {
         [JSON.stringify(body)]
       );
       return { success: true };
-    } catch (e: any) {
-      req.log.error(e);
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: error.message }, 'Failed to save behavioral config');
       return reply.status(500).send({ error: "Failed to save config" });
     }
   });
@@ -365,13 +419,15 @@ export async function adminRoutes(app: FastifyInstance) {
     try {
       const res = await pool.query(`SELECT value FROM cached_assets WHERE asset_type = 'game_item'`);
       return res.rows.map(r => JSON.parse(r.value));
-    } catch (e) {
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.warn({ error: error.message }, 'Failed to load game items, returning empty list');
       return [];
     }
   });
 
   app.post('/admin/items', { preHandler: adminGuard }, async (req, reply) => {
-    const body = req.body as any;
+    const body = req.body as GameItem;
     // Mock save
     try {
       await pool.query(
@@ -381,7 +437,7 @@ export async function adminRoutes(app: FastifyInstance) {
         [body.id || `item_${Date.now()}`, JSON.stringify(body)]
       );
       return { success: true, id: body.id };
-    } catch (e: any) {
+    } catch (e: unknown) {
       return reply.status(500).send({ error: "Failed to create item" });
     }
   });
@@ -401,18 +457,18 @@ export async function adminRoutes(app: FastifyInstance) {
   // Get all movements (exercises and meals) from database
   app.get('/admin/movements', { preHandler: adminGuard }, async (req) => {
     try {
-      const exerciseMap = new Map<string, any>();
-      const mealMap = new Map<string, any>();
+      const exerciseMap = new Map<string, ExerciseData>();
+      const mealMap = new Map<string, MealData>();
 
       // 1. Get unique exercise names from training_exercises table with METADATA
       try {
-        const exerciseRows = await pool.query(
+        const exerciseRows = await pool.query<{ name: string; metadata?: Record<string, unknown> }>(
           `SELECT DISTINCT ON (name) name, metadata
            FROM training_exercises
            WHERE name IS NOT NULL AND name != ''
            ORDER BY name, created_at DESC`
         );
-        exerciseRows.rows.forEach((row: any) => {
+        exerciseRows.rows.forEach((row) => {
           if (row.name) {
             exerciseMap.set(row.name, {
               name: row.name,
@@ -420,19 +476,20 @@ export async function adminRoutes(app: FastifyInstance) {
             });
           }
         });
-      } catch (e: any) {
-        req.log?.warn({ error: 'Failed to fetch from training_exercises', message: e.message });
+      } catch (e: unknown) {
+        const error = e as Error;
+        req.log?.warn({ error: 'Failed to fetch from training_exercises', message: error.message });
       }
 
       // 2. Get unique meal names from meals table with INSTRUCTIONS
       try {
-        const mealRows = await pool.query(
+        const mealRows = await pool.query<{ name: string; instructions?: string[] }>(
           `SELECT DISTINCT ON (name) name, instructions
            FROM meals
            WHERE name IS NOT NULL AND name != ''
            ORDER BY name, created_at DESC`
         );
-        mealRows.rows.forEach((row: any) => {
+        mealRows.rows.forEach((row) => {
           if (row.name) {
             mealMap.set(row.name, {
               name: row.name,
@@ -440,8 +497,9 @@ export async function adminRoutes(app: FastifyInstance) {
             });
           }
         });
-      } catch (e: any) {
-        req.log?.warn({ error: 'Failed to fetch from meals', message: e.message });
+      } catch (e: unknown) {
+        const error = e as Error;
+        req.log?.warn({ error: 'Failed to fetch from meals', message: error.message });
       }
 
       // 3. Also extract from user_profiles (current plans) as fallback
@@ -487,8 +545,9 @@ export async function adminRoutes(app: FastifyInstance) {
             }
           }
         }
-      } catch (e: any) {
-        req.log?.warn({ error: 'Failed to fetch from user_profiles', message: e.message });
+      } catch (e: unknown) {
+        const error = e as Error;
+        req.log?.warn({ error: 'Failed to fetch from user_profiles', message: error.message });
       }
 
       // Convert maps to arrays and create response
@@ -513,8 +572,9 @@ export async function adminRoutes(app: FastifyInstance) {
       }).sort((a, b) => a.name.localeCompare(b.name));
 
       return { exercises, meals };
-    } catch (e: any) {
-      req.log?.error({ error: 'admin movements fetch failed', message: e.message, stack: e.stack });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log?.error({ error: 'admin movements fetch failed', message: error.message, stack: error.stack });
       return { exercises: [], meals: [] };
     }
   });
@@ -530,8 +590,9 @@ export async function adminRoutes(app: FastifyInstance) {
         [keys]
       );
       return reply.send(res.rows.map(r => r.key));
-    } catch (e: any) {
-      req.log.error(e);
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: error.message }, 'Batch check failed');
       return reply.status(500).send({ error: "Batch check failed" });
     }
   });
@@ -554,8 +615,9 @@ export async function adminRoutes(app: FastifyInstance) {
           LIMIT 50`
       );
       return res.rows;
-    } catch (e: any) {
-      req.log.error(e);
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: error.message }, 'Failed to fetch recent assets');
       return [];
     }
   });
@@ -568,7 +630,7 @@ export async function adminRoutes(app: FastifyInstance) {
     try {
       // Construct LIKE patterns: prefix%
       const patterns = prefixes.map(p => `${p}%`);
-      console.log("[AdminScan] LIKE Patterns:", patterns);
+      req.log.debug({ patterns }, '[AdminScan] LIKE Patterns');
 
       const res = await pool.query(
         `SELECT a.key, a.asset_type, a.status,
@@ -580,10 +642,10 @@ export async function adminRoutes(app: FastifyInstance) {
         [patterns]
       );
       return reply.send(res.rows);
-    } catch (e: any) {
-      console.error("[AdminScan] Failed:", e.message);
-      req.log.error(e);
-      return reply.status(500).send({ error: `Scan failed: ${e.message}` });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: error.message }, '[AdminScan] Failed');
+      return reply.status(500).send({ error: `Scan failed: ${error.message}` });
     }
   });
 
@@ -622,13 +684,13 @@ export async function adminRoutes(app: FastifyInstance) {
 
       req.log.info({
         type: 'admin_password_reset',
-        adminId: (req as any).user.userId,
+        adminId: (req as AuthenticatedRequest).user.userId,
         targetUserId: userId,
         targetEmail: userCheck.rows[0].email
       });
 
       return reply.send({ success: true, message: 'Password reset successfully' });
-    } catch (e: any) {
+    } catch (e: unknown) {
       await client.query('ROLLBACK');
       throw e;
     } finally {
@@ -643,7 +705,7 @@ export async function adminRoutes(app: FastifyInstance) {
       email: z.string().email().optional(),
       username: z.string().optional(),
       role: z.enum(['admin', 'moderator', 'user', 'banned']).optional(),
-      profileData: z.record(z.any()).optional()
+      profileData: z.record(z.unknown()).optional()
     }).parse(req.body);
 
     const client = await pool.connect();
@@ -659,7 +721,7 @@ export async function adminRoutes(app: FastifyInstance) {
       // Update users table if email/username/role provided
       if (body.email || body.username || body.role) {
         const updates: string[] = [];
-        const values: any[] = [];
+        const values: (string | undefined)[] = [];
         let idx = 1;
 
         if (body.email) {
@@ -686,8 +748,8 @@ export async function adminRoutes(app: FastifyInstance) {
       // Update profile_data if provided
       if (body.profileData) {
         await client.query(
-          `UPDATE user_profiles 
-           SET profile_data = profile_data || $1::jsonb, updated_at = NOW() 
+          `UPDATE user_profiles
+           SET profile_data = profile_data || $1::jsonb, updated_at = NOW()
            WHERE user_id = $2`,
           [JSON.stringify(body.profileData), userId]
         );
@@ -697,15 +759,16 @@ export async function adminRoutes(app: FastifyInstance) {
 
       req.log.info({
         type: 'admin_profile_update',
-        adminId: (req as any).user.userId,
+        adminId: (req as AuthenticatedRequest).user.userId,
         targetUserId: userId,
         updates: Object.keys(body)
       });
 
       return reply.send({ success: true, message: 'Profile updated successfully' });
-    } catch (e: any) {
+    } catch (e: unknown) {
       await client.query('ROLLBACK');
-      if (e.message?.includes('duplicate key') || e.message?.includes('unique constraint')) {
+      const error = e as Error;
+      if (error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
         return reply.status(409).send({ error: 'Email or username already exists' });
       }
       throw e;
@@ -729,7 +792,7 @@ export async function adminRoutes(app: FastifyInstance) {
       FROM users u
       LEFT JOIN user_profiles p ON u.id = p.user_id
     `;
-    const values: any[] = [];
+    const values: (string | number)[] = [];
 
     if (search) {
       query += ` WHERE u.email ILIKE $1 OR u.username ILIKE $1`;

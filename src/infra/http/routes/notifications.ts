@@ -4,6 +4,8 @@ import { authGuard, adminGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
 import { env } from '../../../config/env.js';
 import webpush from 'web-push';
+import { sendFcmNotification, sendFcmNotificationBatch, isFirebaseInitialized } from '../../../services/firebaseService.js';
+import { AuthenticatedRequest } from '../types.js';
 
 // Configure web-push with VAPID keys if available
 if (env.vapid.publicKey && env.vapid.privateKey && env.vapid.email) {
@@ -46,7 +48,7 @@ export async function notificationRoutes(app: FastifyInstance) {
 
     // Subscribe to push notifications
     app.post('/notifications/subscribe', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const body = subscribeSchema.parse(req.body);
 
         try {
@@ -59,9 +61,10 @@ export async function notificationRoutes(app: FastifyInstance) {
             );
 
             return reply.send({ success: true });
-        } catch (e: any) {
-            req.log.error({ error: 'subscribe failed', e });
-            return reply.status(500).send({ error: e.message });
+        } catch (e: unknown) {
+            const error = e as Error;
+            req.log.error({ error: 'subscribe failed', message: error.message });
+            return reply.status(500).send({ error: error.message });
         }
     });
 
@@ -100,9 +103,22 @@ export async function notificationRoutes(app: FastifyInstance) {
                     [body.userId]
                 );
                 const fcmToken = tokenRes.rows[0]?.fcm_token;
-                if (fcmToken) {
-                    req.log.info({ message: 'Found FCM token for user', userId: body.userId, token: fcmToken.substring(0, 10) + '...' });
-                    // TODO: Implement actual FCM sending logic here using firebase-admin
+                if (fcmToken && isFirebaseInitialized()) {
+                    req.log.info({ message: 'Sending FCM notification to user', userId: body.userId, token: fcmToken.substring(0, 10) + '...' });
+                    const fcmResult = await sendFcmNotification(
+                        fcmToken,
+                        body.title,
+                        body.body,
+                        body.url ? { url: body.url } : undefined,
+                        {
+                            icon: body.icon,
+                            url: body.url,
+                            actions: body.actions
+                        }
+                    );
+                    if (!fcmResult.success) {
+                        req.log.warn({ message: 'FCM send failed', error: fcmResult.error, userId: body.userId });
+                    }
                 }
             } else if (body.topic) {
                 // Future: topic-based subscriptions
@@ -113,7 +129,29 @@ export async function notificationRoutes(app: FastifyInstance) {
                 subscriptions = subRes.rows;
 
                 const tokenRes = await pool.query('SELECT user_id, fcm_token FROM user_profiles WHERE fcm_token IS NOT NULL LIMIT 1000');
-                req.log.info({ message: 'Found FCM tokens for broadcast', count: tokenRes.rows.length });
+                const fcmTokens = tokenRes.rows.map(r => r.fcm_token).filter(Boolean);
+                if (fcmTokens.length > 0 && isFirebaseInitialized()) {
+                    req.log.info({ message: 'Sending FCM broadcast', count: fcmTokens.length });
+                    const fcmResult = await sendFcmNotificationBatch(
+                        fcmTokens,
+                        body.title,
+                        body.body,
+                        body.url ? { url: body.url } : undefined,
+                        {
+                            icon: body.icon,
+                            url: body.url,
+                            actions: body.actions
+                        }
+                    );
+                    req.log.info({
+                        message: 'FCM broadcast result',
+                        success: fcmResult.successCount,
+                        failed: fcmResult.failureCount,
+                        invalidTokens: fcmResult.invalidTokens.length
+                    });
+                } else {
+                    req.log.info({ message: 'Found FCM tokens for broadcast but Firebase not initialized', count: fcmTokens.length });
+                }
             }
 
             const payload = JSON.stringify({
@@ -148,16 +186,17 @@ export async function notificationRoutes(app: FastifyInstance) {
                         'UPDATE push_subscriptions SET last_used = NOW() WHERE id = $1',
                         [sub.id]
                     );
-                } catch (err: any) {
+                } catch (err: unknown) {
                     failCount++;
+                    const pushError = err as { statusCode?: number; message?: string };
                     req.log.warn({
                         error: 'Push send failed',
                         endpoint: sub.endpoint.substring(0, 50),
-                        statusCode: err.statusCode
+                        statusCode: pushError.statusCode
                     });
 
                     // If subscription is invalid (410 Gone or 404), mark for deletion
-                    if (err.statusCode === 410 || err.statusCode === 404) {
+                    if (pushError.statusCode === 410 || pushError.statusCode === 404) {
                         failedSubscriptionIds.push(sub.id);
                     }
                 }
@@ -185,15 +224,16 @@ export async function notificationRoutes(app: FastifyInstance) {
                 failed: failCount,
                 cleaned: failedSubscriptionIds.length
             });
-        } catch (e: any) {
-            req.log.error({ error: 'send notification failed', e });
-            return reply.status(500).send({ error: e.message });
+        } catch (e: unknown) {
+            const error = e as Error;
+            req.log.error({ error: 'send notification failed', message: error.message });
+            return reply.status(500).send({ error: error.message });
         }
     });
 
     // User preference for auto-notifications
     app.post('/notifications/preferences', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const body = z.object({
             spotterNearby: z.boolean().optional(),
             mealReminders: z.boolean().optional(),
@@ -212,7 +252,7 @@ export async function notificationRoutes(app: FastifyInstance) {
 
     // Get user's notification preferences
     app.get('/notifications/preferences', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
 
         const res = await pool.query(
             'SELECT notification_prefs FROM user_profiles WHERE user_id = $1',

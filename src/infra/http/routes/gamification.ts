@@ -1,8 +1,8 @@
-
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
+import { AuthenticatedRequest } from '../types.js';
 
 const actionSchema = z.object({
     action: z.enum([
@@ -37,7 +37,7 @@ const BADGES_DEFINITIONS = [
 
 export async function gamificationRoutes(app: FastifyInstance) {
     app.post('/gamification/action', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const body = actionSchema.parse(req.body);
         const { action, data } = body;
 
@@ -145,7 +145,7 @@ export async function gamificationRoutes(app: FastifyInstance) {
                 message
             };
 
-        } catch (e: any) {
+        } catch (e: unknown) {
             await client.query('ROLLBACK');
             req.log.error(e);
             return reply.status(500).send({ error: 'Gamification action failed' });

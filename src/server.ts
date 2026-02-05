@@ -4,6 +4,7 @@ import { pool } from './infra/db/pool.js';
 import { jobProcessor } from './application/services/jobProcessor.js';
 import { translationQueue } from './application/services/translationQueueService.js';
 import { videoQueue } from './application/services/videoQueueService.js';
+import { initializeFirebase } from './services/firebaseService.js';
 import v8 from 'v8';
 
 async function main() {
@@ -34,6 +35,14 @@ async function main() {
     app.log.info('[STARTUP] Waiting for Fastify plugins to load...');
     await app.ready();
     app.log.info('[STARTUP] Fastify plugins loaded successfully');
+
+    // Initialize Firebase for FCM push notifications
+    const firebaseReady = initializeFirebase();
+    if (firebaseReady) {
+      app.log.info('[STARTUP] Firebase initialized successfully');
+    } else {
+      app.log.warn('[STARTUP] Firebase not initialized - FCM notifications disabled');
+    }
 
     // Start Background Workers
     jobProcessor.start();

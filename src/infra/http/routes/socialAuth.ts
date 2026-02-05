@@ -141,6 +141,10 @@ export async function socialAuthRoutes(app: FastifyInstance) {
 
         try {
             // Verify Google ID token
+            // Note: Google's tokeninfo endpoint only supports GET with token in query param.
+            // This is Google's official API design. The token is a short-lived ID token,
+            // not a long-lived access token, so the security risk is mitigated.
+            // For higher security, consider using google-auth-library for local JWT verification.
             const googleResponse = await fetch(
                 `https://oauth2.googleapis.com/tokeninfo?id_token=${body.idToken}`
             );
@@ -199,8 +203,14 @@ export async function socialAuthRoutes(app: FastifyInstance) {
 
         try {
             // Verify Facebook access token and get user info
+            // Using Authorization header instead of query param for security (avoids token in logs)
             const fbResponse = await fetch(
-                `https://graph.facebook.com/me?access_token=${body.accessToken}&fields=id,email,name`
+                `https://graph.facebook.com/me?fields=id,email,name`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${body.accessToken}`
+                    }
+                }
             );
 
             if (!fbResponse.ok) {

@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard, adminGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
+import { AuthenticatedRequest } from '../types.js';
 
 const reportSchema = z.object({
   targetId: z.string(),
@@ -20,7 +21,7 @@ const resolveSchema = z.object({
 export async function moderationRoutes(app: FastifyInstance) {
   app.post('/moderation/report', { preHandler: authGuard }, async (req, reply) => {
     try {
-      const user = (req as any).user;
+      const user = (req as AuthenticatedRequest).user;
       const body = reportSchema.parse(req.body);
       await pool.query(
         `INSERT INTO moderation_queue(id, target_id, target_type, reason, reporter_comment, reporter_id, content, status, timestamp)
@@ -28,7 +29,7 @@ export async function moderationRoutes(app: FastifyInstance) {
         [body.targetId, body.type, body.reason || null, body.comment || null, user.userId, body.content || {}]
       );
       return reply.send({ success: true });
-    } catch (e: any) {
+    } catch (e: unknown) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log?.error(e);
       return reply.status(500).send({ error: isProduction ? 'Report submission service unavailable' : (e.message || 'Report submission failed') });
@@ -43,7 +44,7 @@ export async function moderationRoutes(app: FastifyInstance) {
          FROM moderation_queue WHERE status = 'pending' ORDER BY timestamp DESC`
       );
       return rows;
-    } catch (e: any) {
+    } catch (e: unknown) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log?.error(e);
       return reply.status(500).send({ error: isProduction ? 'Queue fetch service unavailable' : (e.message || 'Queue fetch failed') });
@@ -58,7 +59,7 @@ export async function moderationRoutes(app: FastifyInstance) {
          FROM moderation_queue WHERE status <> 'pending' ORDER BY timestamp DESC LIMIT 50`
       );
       return rows;
-    } catch (e: any) {
+    } catch (e: unknown) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log?.error(e);
       return reply.status(500).send({ error: isProduction ? 'History fetch service unavailable' : (e.message || 'History fetch failed') });
@@ -73,7 +74,7 @@ export async function moderationRoutes(app: FastifyInstance) {
         [body.action, body.aiAnalysis || null, body.itemId]
       );
       return reply.send({ success: true });
-    } catch (e: any) {
+    } catch (e: unknown) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log?.error(e);
       return reply.status(500).send({ error: isProduction ? 'Resolution service unavailable' : (e.message || 'Resolution failed') });

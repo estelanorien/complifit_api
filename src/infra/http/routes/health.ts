@@ -37,7 +37,7 @@ export async function healthRoutes(app: FastifyInstance) {
       } else if (dbHealth.latency > 1000 || dbHealth.poolStats.waitingCount > 0) {
         overallStatus = 'degraded';
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       checks.database = {
         status: 'unhealthy',
         message: e.message || 'Database connection failed',
@@ -149,7 +149,7 @@ export async function healthRoutes(app: FastifyInstance) {
           memoryUsage: Math.round(heapUsagePercent)
         });
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       return reply.status(503).send({
         status: 'not_ready',
         reason: 'db_error',

@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
+import { AuthenticatedRequest } from '../types.js';
 
 export async function timelineRoutes(app: FastifyInstance) {
   const listModsSchema = z.object({
@@ -32,9 +33,9 @@ export async function timelineRoutes(app: FastifyInstance) {
   });
 
   app.get('/timeline/mods', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const query = listModsSchema.parse(req.query ?? {});
-    const values: any[] = [user.userId];
+    const values: (string | number)[] = [user.userId];
     let where = 'user_id = $1';
     let index = 2;
 
@@ -75,7 +76,7 @@ export async function timelineRoutes(app: FastifyInstance) {
   };
 
   app.post('/timeline/mods', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = modSchema.parse(req.body);
 
     // Only use timelineItemId if it's a valid UUID, otherwise set to null
@@ -116,7 +117,7 @@ export async function timelineRoutes(app: FastifyInstance) {
   });
 
   app.delete('/timeline/mods/:id', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const params = z.object({ id: z.string().uuid() }).parse(req.params);
     const { rowCount } = await pool.query(
       `DELETE FROM timeline_modifications WHERE id = $1 AND user_id = $2`,
@@ -129,9 +130,9 @@ export async function timelineRoutes(app: FastifyInstance) {
   });
 
   app.get('/timeline/wake', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const query = wakeQuerySchema.parse(req.query ?? {});
-    const values: any[] = [user.userId];
+    const values: (string | number)[] = [user.userId];
     let where = 'user_id = $1';
     let index = 2;
 
@@ -164,7 +165,7 @@ export async function timelineRoutes(app: FastifyInstance) {
   });
 
   app.post('/timeline/wake', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = wakeUpsertSchema.parse(req.body);
 
     const { rows } = await pool.query(
@@ -240,7 +241,7 @@ export async function timelineRoutes(app: FastifyInstance) {
   };
 
   app.post('/timeline/wake/confirm', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = smartWakeSchema.parse(req.body);
 
     const plannedWakeMins = timeToMinutes(body.plannedWakeTime);

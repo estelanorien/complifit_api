@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { jobProcessor } from '../../../application/services/jobProcessor.js';
+import { AuthenticatedRequest } from '../types.js';
 
 const submitJobSchema = z.object({
     type: z.enum(['IMAGE', 'MEAL_PLAN', 'MEAL_DETAILS', 'EXERCISE_GENERATION', 'MEAL_GENERATION', 'BATCH_ASSET_GENERATION']),
@@ -19,7 +20,7 @@ export async function jobRoutes(app: FastifyInstance) {
      * Returns: { jobId, status, isNew }
      */
     app.post('/jobs/submit', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const { type, payload, priority, jobKey } = submitJobSchema.parse(req.body);
 
         try {
@@ -29,7 +30,7 @@ export async function jobRoutes(app: FastifyInstance) {
                 status: 'PENDING',
                 isNew: result.isNew // false if this was a deduplicated request
             });
-        } catch (e: any) {
+        } catch (e: unknown) {
             req.log.error({ error: 'Job submission failed', e });
             return reply.status(500).send({ error: e.message || 'Job submission failed' });
         }
@@ -41,7 +42,7 @@ export async function jobRoutes(app: FastifyInstance) {
      * Returns: { id, status, result?, error? }
      */
     app.get('/jobs/:id', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const { id } = req.params as { id: string };
 
         try {
@@ -50,7 +51,7 @@ export async function jobRoutes(app: FastifyInstance) {
                 return reply.status(404).send({ error: 'Job not found' });
             }
             return reply.send(job);
-        } catch (e: any) {
+        } catch (e: unknown) {
             req.log.error({ error: 'Job status check failed', e });
             return reply.status(500).send({ error: 'Failed to check job status' });
         }

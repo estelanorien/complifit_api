@@ -209,7 +209,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 nutritionTextLength: nutText?.text?.length || 0,
                 requestId: req.requestId
             });
-        } catch (e: any) {
+        } catch (e: unknown) {
             req.log.error({
                 error: 'AI generation failed',
                 message: e.message,
@@ -222,11 +222,11 @@ export async function planActionsRoutes(app: FastifyInstance) {
 
         // Validate AI responses
         if (!trainText?.text) {
-            req.log.error({ error: 'Training plan response empty', requestId: (req as any).requestId });
+            req.log.error({ error: 'Training plan response empty', requestId: req.id });
             throw new Error('Training plan generation returned empty response. Please try again.');
         }
         if (!nutText?.text) {
-            req.log.error({ error: 'Nutrition plan response empty', requestId: (req as any).requestId });
+            req.log.error({ error: 'Nutrition plan response empty', requestId: req.id });
             throw new Error('Nutrition plan generation returned empty response. Please try again.');
         }
 
@@ -235,7 +235,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
         try {
             const cleanedTrainText = PlanService.cleanGeminiJson(trainText.text);
             trainingPlan = JSON.parse(cleanedTrainText || '{}');
-        } catch (e: any) {
+        } catch (e: unknown) {
             const rawPreview = trainText.text?.substring(0, 500) || 'No text received';
             req.log.error({
                 error: 'Training plan JSON parse failed',
@@ -250,7 +250,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
         try {
             const cleanedNutText = PlanService.cleanGeminiJson(nutText.text);
             nutritionPlan = JSON.parse(cleanedNutText || '{}');
-        } catch (e: any) {
+        } catch (e: unknown) {
             const rawPreview = nutText.text?.substring(0, 500) || 'No text received';
             req.log.error({
                 error: 'Nutrition plan JSON parse failed',
@@ -321,8 +321,8 @@ export async function planActionsRoutes(app: FastifyInstance) {
                                     if (existing) {
                                         Object.assign(meal.recipe, existing);
                                     }
-                                } catch (e: any) {
-                                    req.log.warn({ error: 'Failed to check existing recipe', mealName, requestId: (req as any).requestId });
+                                } catch (e: unknown) {
+                                    req.log.warn({ error: 'Failed to check existing recipe', mealName, requestId: req.id });
                                 }
                             }
 
@@ -414,7 +414,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                     throw new Error(`Failed to save plan: ${dbError.message || 'Database error'}`);
                 }
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
             // Re-throw if it's already a user-friendly error
             throw e;
         } finally {
@@ -437,7 +437,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
             const result = await PlanService.savePlanToDb(client, user.userId, body.training, body.nutrition, body.startDate);
             await client.query('COMMIT');
             return reply.send({ success: true, ...result });
-        } catch (e: any) {
+        } catch (e: unknown) {
             await client.query('ROLLBACK');
             throw e;
         } finally {
@@ -507,7 +507,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
 
                 return reply.send({ meal });
 
-            } catch (e: any) {
+            } catch (e: unknown) {
                 lastError = e.message;
                 req.log.warn({ msg: `Reroll attempt ${attempts} failed`, error: e.message });
                 if (attempts === MAX_RETRIES) {
