@@ -45,8 +45,22 @@ ADD COLUMN IF NOT EXISTS duration_seconds NUMERIC(6,2);
 ALTER TABLE localized_videos
 ADD COLUMN IF NOT EXISTS verification_checked_at TIMESTAMPTZ;
 
+-- Add YouTube integration columns
+ALTER TABLE localized_videos
+ADD COLUMN IF NOT EXISTS youtube_id VARCHAR(50);
+
+ALTER TABLE localized_videos
+ADD COLUMN IF NOT EXISTS youtube_url TEXT;
+
+-- Index for YouTube uploaded videos
+CREATE INDEX IF NOT EXISTS idx_localized_videos_youtube
+ON localized_videos (youtube_id)
+WHERE youtube_id IS NOT NULL;
+
 -- Comments
 COMMENT ON COLUMN video_jobs.mode IS 'phase1: single 8s clip, phase2: multi-clip 45-60s assembly';
 COMMENT ON COLUMN video_jobs.transition_type IS 'cut: hard cuts, xfade: cross-dissolve transitions';
 COMMENT ON COLUMN video_jobs.transition_duration IS 'Transition duration in seconds (only for xfade)';
 COMMENT ON COLUMN video_jobs.music_uri IS 'Optional background music URI (GCS or HTTPS)';
+COMMENT ON COLUMN localized_videos.youtube_id IS 'YouTube video ID if auto-uploaded';
+COMMENT ON COLUMN localized_videos.youtube_url IS 'Full YouTube URL for the uploaded video';
