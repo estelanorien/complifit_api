@@ -1,11 +1,13 @@
 import { AssetRepository } from '../../infra/db/repositories/AssetRepository.js';
 import { AiService } from './aiService.js';
+import { logger } from '../../infra/logger.js';
 
 export interface PromptGuidelines {
     styleExerciseImage: string;
     styleMealImage: string;
     styleExerciseVideo: string;
     styleMealVideo: string;
+    style3DAnatomyVideo?: string;
     vitalityAvatarDescription: string;
     coachMaleDescription: string;
     coachFemaleDescription: string;
@@ -20,7 +22,7 @@ export const DEFAULT_GUIDELINES: PromptGuidelines = {
     styleMealVideo: "Cinematic 4k food videography, slow motion cooking, delicious steam, chef preparation, moody lighting.",
     coachMaleDescription: "Light-skinned Caucasian athletic male with a short dark buzz cut haircut, slight facial stubble, clean and sharp features. Wearing a dark grey performance t-shirt, black athletic shorts, and athletic shoes (sports sneakers).",
     coachFemaleDescription: "Platinum blonde Caucasian female athlete. High ponytail. Emerald green sports bra, black athletic leggings, and athletic shoes (sports sneakers)."
-} as any;
+};
 
 function cleanJson(str: string): string {
     if (!str) return "";
@@ -51,7 +53,10 @@ export class AssetPromptService {
                 const blueprints = JSON.parse(asset.buffer.toString());
                 return blueprints.guidelines || DEFAULT_GUIDELINES;
             }
-        } catch (e) { }
+        } catch (e) {
+            // Log error but fall back to defaults - not critical
+            logger.debug('Failed to load custom guidelines, using defaults', { error: e, location: 'AssetPromptService.getGuidelines' });
+        }
         return DEFAULT_GUIDELINES;
     }
 

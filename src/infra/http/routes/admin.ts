@@ -1177,7 +1177,11 @@ export async function adminRoutes(app: FastifyInstance) {
       // Generate expected keys for each exercise
       for (const ex of exRows) {
         const movementId = normalizeToMovementId(ex.name);
-        const stepCount = ex.metadata?.instructions?.length || ex.metadata?.steps?.length || 8;
+        // Safely access metadata properties with type narrowing
+        const metadata = ex.metadata as Record<string, unknown> | null;
+        const instructions = Array.isArray(metadata?.instructions) ? metadata.instructions : [];
+        const steps = Array.isArray(metadata?.steps) ? metadata.steps : [];
+        const stepCount = instructions.length || steps.length || 8;
         const expectedKeys = await UnifiedAssetService.getManifest('ex', movementId, ex.name, stepCount);
         expectedKeys.forEach(k => inUseKeys.add(k));
       }
