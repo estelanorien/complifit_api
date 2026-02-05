@@ -178,8 +178,9 @@ export async function socialAuthRoutes(app: FastifyInstance) {
             });
 
             return { user, token };
-        } catch (e: any) {
-            req.log.error({ error: 'Google auth failed', message: e.message });
+        } catch (e: unknown) {
+            const error = e as Error;
+            req.log.error({ error: 'Google auth failed', message: error.message });
             return reply.status(500).send({ error: 'Google authentication failed' });
         }
     });
@@ -234,8 +235,9 @@ export async function socialAuthRoutes(app: FastifyInstance) {
             });
 
             return { user, token };
-        } catch (e: any) {
-            req.log.error({ error: 'Facebook auth failed', message: e.message });
+        } catch (e: unknown) {
+            const error = e as Error;
+            req.log.error({ error: 'Facebook auth failed', message: error.message });
             return reply.status(500).send({ error: 'Facebook authentication failed' });
         }
     });
@@ -273,10 +275,11 @@ export async function socialAuthRoutes(app: FastifyInstance) {
 
             try {
                 decoded = await verifyAppleToken(body.identityToken);
-            } catch (verifyError: any) {
+            } catch (verifyError: unknown) {
+                const err = verifyError as Error;
                 req.log.warn({
                     type: 'apple_token_verification_failed',
-                    error: verifyError.message
+                    error: err.message
                 });
                 return reply.status(401).send({
                     error: 'Invalid Apple token: Signature verification failed'
@@ -313,8 +316,9 @@ export async function socialAuthRoutes(app: FastifyInstance) {
             });
 
             return { user, token };
-        } catch (e: any) {
-            req.log.error({ error: 'Apple auth failed', message: e.message });
+        } catch (e: unknown) {
+            const error = e as Error;
+            req.log.error({ error: 'Apple auth failed', message: error.message });
             return reply.status(500).send({ error: 'Apple authentication failed' });
         }
     });
@@ -388,8 +392,9 @@ export async function socialAuthRoutes(app: FastifyInstance) {
                 // Include token in dev mode for testing (remove in production)
                 _devToken: process.env.NODE_ENV !== 'production' && !isEmailConfigured() ? resetToken : undefined
             };
-        } catch (e: any) {
-            req.log.error({ error: 'Password reset request failed', message: e.message });
+        } catch (e: unknown) {
+            const error = e as Error;
+            req.log.error({ error: 'Password reset request failed', message: error.message });
             return reply.status(500).send({ error: 'Failed to process password reset request' });
         }
     });

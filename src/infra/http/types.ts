@@ -10,6 +10,7 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 export interface JwtPayload {
   userId: string;
   email: string;
+  id?: string; // Backward compatibility with older tokens
 }
 
 /**
