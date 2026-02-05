@@ -25,9 +25,9 @@ export class AssetRepository {
         data: {
             value?: string;
             buffer?: Buffer;
-            status: 'active' | 'generating' | 'failed' | 'rejected';
+            status: 'active' | 'generating' | 'failed' | 'rejected' | 'auto' | 'draft';
             type: 'image' | 'video' | 'json';
-            metadata?: any;
+            metadata?: Record<string, unknown>;
         }
     ): Promise<void> {
         const keyStr = key.toString();
