@@ -42,7 +42,11 @@ const envSchema = z.object({
   // Video voiceover pipeline: optional background music (GCS or HTTPS URI). When set, mixed under TTS at low level.
   VIDEO_MUSIC_TRACK_URI: z.string().optional(),
   // Google Cloud TTS: use Application Default Credentials or set GOOGLE_APPLICATION_CREDENTIALS to service account JSON path
-  GOOGLE_APPLICATION_CREDENTIALS: z.string().optional()
+  GOOGLE_APPLICATION_CREDENTIALS: z.string().optional(),
+  // AI Training Platform (separate deployment for app store compliance)
+  AI_PLATFORM_URL: z.string().url().optional(),
+  AI_PLATFORM_KEY: z.string().optional(),
+  PSEUDONYM_SALT: z.string().optional()
 });
 
 const parseEnv = () => {
@@ -70,7 +74,10 @@ const parseEnv = () => {
     APPLE_KEY_ID: process.env.APPLE_KEY_ID,
     DB_SSL_REJECT_UNAUTHORIZED: process.env.DB_SSL_REJECT_UNAUTHORIZED,
     VIDEO_MUSIC_TRACK_URI: process.env.VIDEO_MUSIC_TRACK_URI || undefined,
-    GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS
+    GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+    AI_PLATFORM_URL: process.env.AI_PLATFORM_URL,
+    AI_PLATFORM_KEY: process.env.AI_PLATFORM_KEY,
+    PSEUDONYM_SALT: process.env.PSEUDONYM_SALT
     });
     return parsed;
   } catch (error: any) {
@@ -118,6 +125,12 @@ export const env = {
     }
   },
   dbSslRejectUnauthorized: envVars.DB_SSL_REJECT_UNAUTHORIZED ?? (envVars.NODE_ENV === 'production' ? true : false),
-  videoMusicTrackUri: envVars.VIDEO_MUSIC_TRACK_URI && envVars.VIDEO_MUSIC_TRACK_URI !== '' ? envVars.VIDEO_MUSIC_TRACK_URI : undefined
+  videoMusicTrackUri: envVars.VIDEO_MUSIC_TRACK_URI && envVars.VIDEO_MUSIC_TRACK_URI !== '' ? envVars.VIDEO_MUSIC_TRACK_URI : undefined,
+  // AI Training Platform (separate deployment)
+  aiPlatform: {
+    url: envVars.AI_PLATFORM_URL,
+    apiKey: envVars.AI_PLATFORM_KEY,
+    pseudonymSalt: envVars.PSEUDONYM_SALT
+  }
 };
 
