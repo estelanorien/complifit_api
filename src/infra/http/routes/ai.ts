@@ -220,8 +220,9 @@ export async function aiRoutes(app: FastifyInstance) {
 
       return reply.send({ text: firstText, parts: contentParts });
     } catch (e: unknown) {
+      const error = e as Error;
       req.log.error({ error: 'generate-content proxy failed', e, requestId: req.id });
-      return reply.status(500).send({ error: e.message || 'generate failed' });
+      return reply.status(500).send({ error: error.message || 'generate failed' });
     }
   });
 
@@ -838,10 +839,11 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       return reply.send(finalResp);
     } catch (e: unknown) {
+      const error = e as Error;
       req.log.error({ error: 'food-log proxy failed', e, requestId: req.id });
 
       // If error is about default values, return a more helpful error
-      if (e.message?.includes('default values') || e.message?.includes('recalculation needed')) {
+      if (error.message?.includes('default values') || error.message?.includes('recalculation needed')) {
         return reply.status(500).send({
           name: 'Calculation Error',
           message: 'AI did not calculate calories properly. Please try again with a clearer photo or add a description.',
@@ -925,9 +927,10 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       return reply.send({ reply: replyText });
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
-      return reply.status(500).send({ error: isProduction ? 'Coach chat service unavailable' : (e.message || 'Coach chat failed') });
+      return reply.status(500).send({ error: isProduction ? 'Coach chat service unavailable' : (error.message || 'Coach chat failed') });
     }
   });
 
@@ -990,9 +993,10 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       return reply.send(json);
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
-      return reply.status(500).send({ error: isProduction ? 'Recipe suggestion service unavailable' : (e.message || 'Recipe suggestion failed') });
+      return reply.status(500).send({ error: isProduction ? 'Recipe suggestion service unavailable' : (error.message || 'Recipe suggestion failed') });
     }
   });
 
@@ -1170,11 +1174,12 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       req.log.warn({ model, responseKeys: Object.keys(data || {}), partsCount: responseParts.length }, 'No image in Gemini response');
       return reply.send({ error: 'No image returned from AI', raw: responseParts });
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
 
       // Always show rate limit errors to the user
-      const errorMessage = e.message || 'Image generation failed';
+      const errorMessage = error.message || 'Image generation failed';
       const isRateLimitError = errorMessage.includes('Rate limit') || errorMessage.includes('quota');
 
       return reply.status(500).send({
@@ -1327,8 +1332,9 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       return reply.send(items);
     } catch (e: unknown) {
+      const error = e as Error;
       req.log.error({ error: 'menu-analysis failed', e, requestId: req.id });
-      return reply.status(500).send({ error: e.message || 'Menu analysis failed' });
+      return reply.status(500).send({ error: error.message || 'Menu analysis failed' });
     }
   });
 
@@ -1399,8 +1405,9 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       return reply.status(500).send({ error: 'No image returned from AI' });
     } catch (e: unknown) {
+      const error = e as Error;
       req.log.error({ error: 'generate step-image failed', e, requestId: req.id });
-      return reply.status(500).send({ error: e.message || 'Generate step image failed' });
+      return reply.status(500).send({ error: error.message || 'Generate step image failed' });
     }
   });
 
@@ -1470,9 +1477,10 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       return reply.status(500).send({ error: 'No image returned from AI' });
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error({ error: 'generate gamification-asset failed', e, requestId: req.id });
-      return reply.status(500).send({ error: isProduction ? 'Asset generation service unavailable' : (e.message || 'Generate gamification asset failed') });
+      return reply.status(500).send({ error: isProduction ? 'Asset generation service unavailable' : (error.message || 'Generate gamification asset failed') });
     }
   });
 
@@ -1540,9 +1548,10 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       return reply.status(500).send({ error: 'No image returned from AI' });
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error({ error: 'generate portion-visual failed', e, requestId: req.id });
-      return reply.status(500).send({ error: isProduction ? 'Portion visual generation service unavailable' : (e.message || 'Generate portion visual failed') });
+      return reply.status(500).send({ error: isProduction ? 'Portion visual generation service unavailable' : (error.message || 'Generate portion visual failed') });
     }
   });
 
@@ -1645,11 +1654,12 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       return reply.send(result);
     } catch (e: unknown) {
+      const error = e as Error;
       req.log.error({ error: 'verify-workout failed', e, requestId: req.id });
       return reply.status(500).send({
         verified: false,
         confidence: 0,
-        notes: e.message || 'Verification failed'
+        notes: error.message || 'Verification failed'
       });
     }
   });
@@ -1762,10 +1772,11 @@ Return ONLY valid JSON, no markdown.`;
         ...parsed
       });
     } catch (e: unknown) {
+      const error = e as Error;
       req.log.error({ error: 'analyze-body-composition failed', e, requestId: req.id });
       return reply.status(500).send({
         error: true,
-        message: e.message || 'Body composition analysis failed'
+        message: error.message || 'Body composition analysis failed'
       });
     }
   });

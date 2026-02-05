@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "esbuild src/server.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/server.cjs --external:pg-native --external:fsevents --external:firebase-admin",
+    "build": "esbuild src/server.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/server.cjs --external:pg-native --external:fsevents --external:firebase-admin --external:@google-cloud/text-to-speech --external:@google-cloud/storage --external:nodemailer",
     "start": "node dist/server.cjs",
     "lint": "eslint . --ext .ts"
   },

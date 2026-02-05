@@ -30,9 +30,10 @@ export async function moderationRoutes(app: FastifyInstance) {
       );
       return reply.send({ success: true });
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log?.error(e);
-      return reply.status(500).send({ error: isProduction ? 'Report submission service unavailable' : (e.message || 'Report submission failed') });
+      return reply.status(500).send({ error: isProduction ? 'Report submission service unavailable' : (error.message || 'Report submission failed') });
     }
   });
 
@@ -45,9 +46,10 @@ export async function moderationRoutes(app: FastifyInstance) {
       );
       return rows;
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log?.error(e);
-      return reply.status(500).send({ error: isProduction ? 'Queue fetch service unavailable' : (e.message || 'Queue fetch failed') });
+      return reply.status(500).send({ error: isProduction ? 'Queue fetch service unavailable' : (error.message || 'Queue fetch failed') });
     }
   });
 
@@ -60,9 +62,10 @@ export async function moderationRoutes(app: FastifyInstance) {
       );
       return rows;
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log?.error(e);
-      return reply.status(500).send({ error: isProduction ? 'History fetch service unavailable' : (e.message || 'History fetch failed') });
+      return reply.status(500).send({ error: isProduction ? 'History fetch service unavailable' : (error.message || 'History fetch failed') });
     }
   });
 
@@ -75,9 +78,10 @@ export async function moderationRoutes(app: FastifyInstance) {
       );
       return reply.send({ success: true });
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log?.error(e);
-      return reply.status(500).send({ error: isProduction ? 'Resolution service unavailable' : (e.message || 'Resolution failed') });
+      return reply.status(500).send({ error: isProduction ? 'Resolution service unavailable' : (error.message || 'Resolution failed') });
     }
   });
 }

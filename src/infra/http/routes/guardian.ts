@@ -334,8 +334,9 @@ export async function guardianRoutes(app: FastifyInstance) {
 
     } catch (e: unknown) {
       await client.query('ROLLBACK');
+      const error = e as Error;
       req.log.error({ error: "Apply remedy failed", e, requestId: req.id });
-      return reply.status(500).send({ error: e.message });
+      return reply.status(500).send({ error: error.message });
     } finally {
       client.release();
     }
@@ -840,8 +841,9 @@ export async function guardianRoutes(app: FastifyInstance) {
 
     } catch (e: unknown) {
       await client.query('ROLLBACK');
+      const error = e as Error;
       req.log.error({ error: "Apply late wake recommendation failed", e, requestId: req.id });
-      return reply.status(500).send({ error: e.message });
+      return reply.status(500).send({ error: error.message });
     } finally {
       client.release();
     }

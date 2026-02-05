@@ -34,6 +34,7 @@ import { notificationRoutes } from './routes/notifications.js';
 import { socialAuthRoutes } from './routes/socialAuth.js';
 import { customProgramRoutes } from './routes/customPrograms.js';
 import { jobRoutes } from './routes/jobs.js';
+import videoAdminRoutes from './routes/videoAdmin.js';
 import { requestLogger, responseLogger, errorLogger } from './hooks/requestLogger.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errors.js';
@@ -139,6 +140,7 @@ export function buildServer() {
   app.register(async function (app) {
     registerAdminRateLimit(app);
     app.register(adminRoutes);
+    app.register(videoAdminRoutes);
   }, { prefix: '/api' });
 
   // Other routes (use global rate limiting)

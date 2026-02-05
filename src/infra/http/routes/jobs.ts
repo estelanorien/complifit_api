@@ -31,8 +31,9 @@ export async function jobRoutes(app: FastifyInstance) {
                 isNew: result.isNew // false if this was a deduplicated request
             });
         } catch (e: unknown) {
+            const error = e as Error;
             req.log.error({ error: 'Job submission failed', e });
-            return reply.status(500).send({ error: e.message || 'Job submission failed' });
+            return reply.status(500).send({ error: error.message || 'Job submission failed' });
         }
     });
 

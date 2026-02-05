@@ -179,9 +179,10 @@ export async function restaurantRoutes(app: FastifyInstance) {
 
       return reply.send(matches);
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error({ error: 'match-meal failed', e, requestId: req.id });
-      return reply.status(500).send({ error: isProduction ? 'Meal matching service unavailable' : (e.message || 'Match meal failed') });
+      return reply.status(500).send({ error: isProduction ? 'Meal matching service unavailable' : (error.message || 'Match meal failed') });
     }
   });
   // Google Places Proxy with DB Enrichment
