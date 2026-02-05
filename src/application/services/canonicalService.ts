@@ -13,20 +13,18 @@ export interface CanonicalIdentity {
 
 export class CanonicalService {
     /**
-     * Maps a localized name to a canonical English ID.
-     * Uses LLM for the translation/mapping and caches the result.
+     * Maps a localized name to a canonical English ID without using LLM.
+     * Simple normalization-based approach for fast lookups.
      */
-    async getCanonicalId(name: string, type: 'meal' | 'exercise'): Promise<CanonicalIdentity> {
+    async getCanonicalIdNoLlm(name: string, type: 'meal' | 'exercise'): Promise<CanonicalIdentity> {
         if (!name) return { canonicalId: 'unknown', originalName: '', language: 'en' };
-
         const trimmed = name.trim();
 
-        // 1. Check if we already have a mapping for this EXACT string
-        // We look in cached_asset_meta for any group that used this original_name
+        // Check cache first
         const { rows: existing } = await pool.query(
-            `SELECT movement_id, language 
-             FROM cached_asset_meta 
-             WHERE original_name = $1 
+            `SELECT movement_id, language
+             FROM cached_asset_meta
+             WHERE original_name = $1
              LIMIT 1`,
             [trimmed]
         );
@@ -37,6 +35,45 @@ export class CanonicalService {
                 originalName: trimmed,
                 language: existing[0].language || 'en'
             };
+        }
+
+        // Simple normalization without LLM
+        const prefix = type === 'meal' ? 'meal' : 'movement';
+        return {
+            canonicalId: `${prefix}_${this.simpleNormalize(trimmed)}`,
+            originalName: trimmed,
+            language: 'unknown'
+        };
+    }
+
+    /**
+     * Maps a localized name to a canonical English ID.
+     * Uses LLM for the translation/mapping and caches the result.
+     * @param forceLlm - Skip cache and always use LLM (useful for cross-language merging)
+     */
+    async getCanonicalId(name: string, type: 'meal' | 'exercise', forceLlm = false): Promise<CanonicalIdentity> {
+        if (!name) return { canonicalId: 'unknown', originalName: '', language: 'en' };
+
+        const trimmed = name.trim();
+
+        // 1. Check if we already have a mapping for this EXACT string (skip if forceLlm)
+        // We look in cached_asset_meta for any group that used this original_name
+        if (!forceLlm) {
+            const { rows: existing } = await pool.query(
+                `SELECT movement_id, language
+                 FROM cached_asset_meta
+                 WHERE original_name = $1
+                 LIMIT 1`,
+                [trimmed]
+            );
+
+            if (existing.length > 0) {
+                return {
+                    canonicalId: existing[0].movement_id,
+                    originalName: trimmed,
+                    language: existing[0].language || 'en'
+                };
+            }
         }
 
         // 2. Use LLM to get English name and detect language

@@ -10,6 +10,7 @@ type GenerateImageParams = {
   prompt: string;
   model?: string;
   referenceImage?: string; // Base64
+  referenceType?: 'identity' | 'environment';
 };
 
 export class AiService {
@@ -146,7 +147,7 @@ ${prompt}`;
     return { base64: `data:image/png;base64,${base64}` };
   }
 
-  async generateVideo({ prompt, model = 'models/veo-001-preview' }: { prompt: string, model?: string }): Promise<string> {
+  async generateVideo({ prompt, model = 'models/veo-001-preview', referenceImage }: { prompt: string; model?: string; referenceImage?: string }): Promise<string> {
     try {
       const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
         method: 'POST',
