@@ -179,6 +179,97 @@ export async function recordFeedback(data: FeedbackData): Promise<void> {
 }
 
 /**
+ * Record implicit acceptance (user used AI output without changes)
+ */
+export async function recordAcceptance(
+    userId: string,
+    originalOutput: unknown,
+    timeToActionMs?: number
+): Promise<void> {
+    return recordFeedback({
+        userId,
+        feedbackType: 'implicit',
+        originalOutput,
+        wasAccepted: true,
+        timeToActionMs,
+    });
+}
+
+/**
+ * Record implicit modification (user changed AI output)
+ */
+export async function recordModification(
+    userId: string,
+    originalOutput: unknown,
+    modifiedOutput: unknown,
+    timeToActionMs?: number
+): Promise<void> {
+    return recordFeedback({
+        userId,
+        feedbackType: 'implicit',
+        originalOutput,
+        correctedOutput: modifiedOutput,
+        wasModified: true,
+        timeToActionMs,
+    });
+}
+
+/**
+ * Wrapper to measure and record AI call with timing
+ */
+export async function withApiCallRecording<T>(
+    userId: string,
+    callType: string,
+    apiProvider: string,
+    prompt: string,
+    fn: () => Promise<T>,
+    options?: {
+        modelVersion?: string;
+        endpoint?: string;
+        context?: Record<string, unknown>;
+    }
+): Promise<T> {
+    const startTime = Date.now();
+
+    try {
+        const result = await fn();
+        const latencyMs = Date.now() - startTime;
+
+        // Record asynchronously
+        recordApiCall({
+            userId,
+            callType,
+            apiProvider,
+            modelVersion: options?.modelVersion,
+            endpoint: options?.endpoint,
+            requestPrompt: prompt,
+            requestContext: options?.context,
+            responseRaw: result,
+            latencyMs,
+        });
+
+        return result;
+    } catch (error) {
+        const latencyMs = Date.now() - startTime;
+
+        // Still record failed calls for debugging
+        recordApiCall({
+            userId,
+            callType,
+            apiProvider,
+            modelVersion: options?.modelVersion,
+            endpoint: options?.endpoint,
+            requestPrompt: prompt,
+            requestContext: options?.context,
+            responseRaw: { error: error instanceof Error ? error.message : 'Unknown error' },
+            latencyMs,
+        });
+
+        throw error;
+    }
+}
+
+/**
  * Check if AI data collection is enabled
  */
 export function isDataCollectionEnabled(): boolean {

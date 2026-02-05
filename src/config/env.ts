@@ -45,12 +45,16 @@ const envSchema = z.object({
   // Google Application Credentials for Firebase
   GOOGLE_APPLICATION_CREDENTIALS: z.string().optional(),
   // Database SSL configuration
-  // Accepts 'true', '1', 'false', '0', or undefined
-  // Defaults to true in production, false in development
   DB_SSL_REJECT_UNAUTHORIZED: z.string().optional().transform(val => {
     if (val === undefined || val === null) return undefined;
     return val === 'true' || val === '1';
-  })
+  }),
+  // Video voiceover pipeline
+  VIDEO_MUSIC_TRACK_URI: z.string().optional(),
+  // AI Training Platform (separate deployment for app store compliance)
+  AI_PLATFORM_URL: z.string().url().optional(),
+  AI_PLATFORM_KEY: z.string().optional(),
+  PSEUDONYM_SALT: z.string().optional()
 });
 
 const parseEnv = () => {
@@ -73,19 +77,23 @@ const parseEnv = () => {
       GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
       FACEBOOK_APP_ID: process.env.FACEBOOK_APP_ID,
       FACEBOOK_APP_SECRET: process.env.FACEBOOK_APP_SECRET,
-    APPLE_CLIENT_ID: process.env.APPLE_CLIENT_ID,
-    APPLE_TEAM_ID: process.env.APPLE_TEAM_ID,
-    APPLE_KEY_ID: process.env.APPLE_KEY_ID,
-    SMTP_HOST: process.env.SMTP_HOST,
-    SMTP_PORT: process.env.SMTP_PORT,
-    SMTP_SECURE: process.env.SMTP_SECURE,
-    SMTP_USER: process.env.SMTP_USER,
-    SMTP_PASS: process.env.SMTP_PASS,
-    EMAIL_FROM: process.env.EMAIL_FROM,
-    EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME,
-    FRONTEND_URL: process.env.FRONTEND_URL,
-    GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS,
-    DB_SSL_REJECT_UNAUTHORIZED: process.env.DB_SSL_REJECT_UNAUTHORIZED
+      APPLE_CLIENT_ID: process.env.APPLE_CLIENT_ID,
+      APPLE_TEAM_ID: process.env.APPLE_TEAM_ID,
+      APPLE_KEY_ID: process.env.APPLE_KEY_ID,
+      SMTP_HOST: process.env.SMTP_HOST,
+      SMTP_PORT: process.env.SMTP_PORT,
+      SMTP_SECURE: process.env.SMTP_SECURE,
+      SMTP_USER: process.env.SMTP_USER,
+      SMTP_PASS: process.env.SMTP_PASS,
+      EMAIL_FROM: process.env.EMAIL_FROM,
+      EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME,
+      FRONTEND_URL: process.env.FRONTEND_URL,
+      GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+      DB_SSL_REJECT_UNAUTHORIZED: process.env.DB_SSL_REJECT_UNAUTHORIZED,
+      VIDEO_MUSIC_TRACK_URI: process.env.VIDEO_MUSIC_TRACK_URI || undefined,
+      AI_PLATFORM_URL: process.env.AI_PLATFORM_URL,
+      AI_PLATFORM_KEY: process.env.AI_PLATFORM_KEY,
+      PSEUDONYM_SALT: process.env.PSEUDONYM_SALT
     });
     return parsed;
   } catch (error: any) {
@@ -143,6 +151,12 @@ export const env = {
   },
   frontendUrl: envVars.FRONTEND_URL,
   googleApplicationCredentials: envVars.GOOGLE_APPLICATION_CREDENTIALS,
-  dbSslRejectUnauthorized: envVars.DB_SSL_REJECT_UNAUTHORIZED ?? (envVars.NODE_ENV === 'production' ? true : false)
+  dbSslRejectUnauthorized: envVars.DB_SSL_REJECT_UNAUTHORIZED ?? (envVars.NODE_ENV === 'production' ? true : false),
+  videoMusicTrackUri: envVars.VIDEO_MUSIC_TRACK_URI && envVars.VIDEO_MUSIC_TRACK_URI !== '' ? envVars.VIDEO_MUSIC_TRACK_URI : undefined,
+  // AI Training Platform (separate deployment)
+  aiPlatform: {
+    url: envVars.AI_PLATFORM_URL,
+    apiKey: envVars.AI_PLATFORM_KEY,
+    pseudonymSalt: envVars.PSEUDONYM_SALT
+  }
 };
-

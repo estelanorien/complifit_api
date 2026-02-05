@@ -6,8 +6,8 @@ import { pool } from '../../db/pool.js';
 import { authGuard } from '../hooks/auth.js';
 import fetch from 'node-fetch';
 import { aiConfig } from '../../../config/ai.js';
-import { AuthenticatedRequest, GeminiPart, GeminiResponse } from '../types.js';
 import { recordApiCall } from '../../../services/aiDataCollector.js';
+import { AuthenticatedRequest, GeminiPart, GeminiResponse } from '../types.js';
 
 const textSchema = z.object({
   prompt: z.string().min(1),
@@ -794,6 +794,20 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
         message: '✅ AI provided calculated values'
       });
 
+      // Record for AI training (fire-and-forget)
+      const user = (req as any).user;
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'food_analysis',
+        apiProvider: 'gemini',
+        modelVersion: 'gemini-1.5-flash',
+        endpoint: '/ai/food-log',
+        requestPrompt: prompt,
+        requestContext: { hasImage: !!imageBase64, mealContext, lang },
+        responseRaw: finalResp,
+        responseParsed: { name: finalResp.name, calories: finalResp.calories, macros: finalResp.macros }
+      });
+
       // 2) Cache store (best effort)
       try {
         if (imageKey) {
@@ -895,6 +909,19 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       }
       const data: any = await res.json();
       const replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "Thinking...";
+
+      // Record for AI training (fire-and-forget)
+      const user = (req as any).user;
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'coach_chat',
+        apiProvider: 'gemini',
+        modelVersion: 'gemini-1.5-flash',
+        endpoint: '/ai/chat/coach',
+        requestPrompt: history.map((h: any) => h.parts?.map((p: any) => p.text).join('')).join('\n'),
+        requestContext: { context, lang },
+        responseRaw: { reply: replyText }
+      });
 
       return reply.send({ reply: replyText });
     } catch (e: unknown) {
@@ -1003,11 +1030,26 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
         req.log.error({ text: text.substring(0, 500), message: 'Failed to parse exercise details response' });
         throw new Error('Failed to parse AI response');
       }
+
+      // Record for AI training (fire-and-forget)
+      const user = (req as AuthenticatedRequest).user;
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'exercise_details',
+        apiProvider: 'gemini',
+        modelVersion: 'gemini-3-flash-preview',
+        endpoint: '/ai/exercise/details',
+        requestPrompt: prompt,
+        requestContext: { exerciseName: name, lang },
+        responseRaw: parsed
+      }).catch(() => {});
+
       return reply.send(parsed);
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
-      return reply.status(500).send({ error: isProduction ? 'Exercise details service unavailable' : (e.message || 'Exercise details failed') });
+      return reply.status(500).send({ error: isProduction ? 'Exercise details service unavailable' : (error.message || 'Exercise details failed') });
     }
   });
 
@@ -1701,6 +1743,19 @@ Return ONLY valid JSON, no markdown.`;
          VALUES ($1, $2, $3, $4, NOW())`,
         [user.userId, parsed.estimatedBodyFatPercentage, parsed.bodyType, JSON.stringify(parsed)]
       ).catch(() => { /* Table may not exist, ignore */ });
+
+      // Record for AI training (fire-and-forget)
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'body_composition',
+        apiProvider: 'gemini',
+        modelVersion: 'gemini-3-flash-preview',
+        endpoint: '/ai/analyze-body-composition',
+        requestPrompt: prompt,
+        requestContext: { gender, age, height, weight },
+        responseRaw: parsed,
+        responseParsed: { bodyFat: parsed.estimatedBodyFatPercentage, bodyType: parsed.bodyType }
+      });
 
       return reply.send({
         success: true,
