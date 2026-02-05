@@ -4,6 +4,18 @@ import { authGuard, adminGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
 import { env } from '../../../config/env.js';
 import webpush from 'web-push';
+import {
+    initializeFirebase,
+    isFirebaseInitialized,
+    sendFcmNotification,
+    sendFcmNotificationBatch,
+    subscribeToTopic,
+    unsubscribeFromTopic,
+    sendToTopic
+} from '../../../services/firebaseService.js';
+
+// Initialize Firebase on module load
+initializeFirebase();
 
 // Configure web-push with VAPID keys if available
 if (env.vapid.publicKey && env.vapid.privateKey && env.vapid.email) {
@@ -95,25 +107,97 @@ export async function notificationRoutes(app: FastifyInstance) {
                 );
                 subscriptions = subRes.rows;
 
+                // Also send via FCM for mobile devices
                 const tokenRes = await pool.query(
                     'SELECT fcm_token FROM user_profiles WHERE user_id = $1',
                     [body.userId]
                 );
                 const fcmToken = tokenRes.rows[0]?.fcm_token;
-                if (fcmToken) {
-                    req.log.info({ message: 'Found FCM token for user', userId: body.userId, token: fcmToken.substring(0, 10) + '...' });
-                    // TODO: Implement actual FCM sending logic here using firebase-admin
+                if (fcmToken && isFirebaseInitialized()) {
+                    req.log.info({ message: 'Sending FCM notification to user', userId: body.userId });
+                    const fcmResult = await sendFcmNotification(
+                        fcmToken,
+                        body.title,
+                        body.body,
+                        undefined,
+                        { icon: body.icon, url: body.url, actions: body.actions }
+                    );
+                    if (fcmResult.success) {
+                        req.log.info({ message: 'FCM notification sent', messageId: fcmResult.messageId });
+                    } else {
+                        req.log.warn({ message: 'FCM notification failed', error: fcmResult.error });
+                        // If token is invalid, clear it from the database
+                        if (fcmResult.error === 'TOKEN_INVALID') {
+                            await pool.query(
+                                'UPDATE user_profiles SET fcm_token = NULL WHERE user_id = $1',
+                                [body.userId]
+                            );
+                            req.log.info({ message: 'Cleared invalid FCM token for user', userId: body.userId });
+                        }
+                    }
                 }
             } else if (body.topic) {
-                // Future: topic-based subscriptions
-                return reply.status(400).send({ error: 'Topic subscriptions not yet implemented' });
+                // Send to FCM topic
+                if (isFirebaseInitialized()) {
+                    const topicResult = await sendToTopic(
+                        body.topic,
+                        body.title,
+                        body.body,
+                        { url: body.url || '', icon: body.icon || '' }
+                    );
+                    if (topicResult.success) {
+                        return reply.send({
+                            success: true,
+                            sent: 1,
+                            failed: 0,
+                            messageId: topicResult.messageId,
+                            type: 'topic'
+                        });
+                    } else {
+                        return reply.status(500).send({ error: topicResult.error });
+                    }
+                } else {
+                    return reply.status(503).send({ error: 'Firebase not initialized. Cannot send to topic.' });
+                }
             } else {
                 // Send to all (for broadcasts)
                 const subRes = await pool.query('SELECT id, endpoint, p256dh, auth FROM push_subscriptions LIMIT 1000');
                 subscriptions = subRes.rows;
 
+                // Also broadcast via FCM
                 const tokenRes = await pool.query('SELECT user_id, fcm_token FROM user_profiles WHERE fcm_token IS NOT NULL LIMIT 1000');
                 req.log.info({ message: 'Found FCM tokens for broadcast', count: tokenRes.rows.length });
+
+                if (tokenRes.rows.length > 0 && isFirebaseInitialized()) {
+                    const fcmTokens = tokenRes.rows.map(r => r.fcm_token);
+                    const fcmResult = await sendFcmNotificationBatch(
+                        fcmTokens,
+                        body.title,
+                        body.body,
+                        undefined,
+                        { icon: body.icon, url: body.url, actions: body.actions }
+                    );
+                    req.log.info({
+                        message: 'FCM broadcast results',
+                        success: fcmResult.successCount,
+                        failed: fcmResult.failureCount,
+                        invalidTokens: fcmResult.invalidTokens.length
+                    });
+
+                    // Clear invalid tokens
+                    if (fcmResult.invalidTokens.length > 0) {
+                        const userIdsToUpdate = tokenRes.rows
+                            .filter(r => fcmResult.invalidTokens.includes(r.fcm_token))
+                            .map(r => r.user_id);
+                        if (userIdsToUpdate.length > 0) {
+                            await pool.query(
+                                'UPDATE user_profiles SET fcm_token = NULL WHERE user_id = ANY($1::uuid[])',
+                                [userIdsToUpdate]
+                            );
+                            req.log.info({ message: 'Cleared invalid FCM tokens', count: userIdsToUpdate.length });
+                        }
+                    }
+                }
             }
 
             const payload = JSON.stringify({
@@ -220,5 +304,103 @@ export async function notificationRoutes(app: FastifyInstance) {
         );
 
         return { preferences: res.rows[0]?.notification_prefs || {} };
+    });
+
+    // Subscribe to a topic (FCM)
+    app.post('/notifications/topics/subscribe', { preHandler: authGuard }, async (req, reply) => {
+        const user = (req as any).user;
+        const body = z.object({
+            topic: z.string().min(1).max(100).regex(/^[a-zA-Z0-9_-]+$/, 'Invalid topic name')
+        }).parse(req.body);
+
+        if (!isFirebaseInitialized()) {
+            return reply.status(503).send({ error: 'Firebase not initialized' });
+        }
+
+        // Get user's FCM token
+        const tokenRes = await pool.query(
+            'SELECT fcm_token FROM user_profiles WHERE user_id = $1',
+            [user.userId]
+        );
+        const fcmToken = tokenRes.rows[0]?.fcm_token;
+
+        if (!fcmToken) {
+            return reply.status(400).send({ error: 'No FCM token registered for this user' });
+        }
+
+        const result = await subscribeToTopic([fcmToken], body.topic);
+
+        if (result.successCount > 0) {
+            // Store topic subscription in database for tracking
+            await pool.query(
+                `INSERT INTO user_topic_subscriptions (user_id, topic)
+                 VALUES ($1, $2)
+                 ON CONFLICT (user_id, topic) DO NOTHING`,
+                [user.userId, body.topic]
+            );
+            return reply.send({ success: true, topic: body.topic });
+        } else {
+            return reply.status(500).send({ error: 'Failed to subscribe to topic' });
+        }
+    });
+
+    // Unsubscribe from a topic (FCM)
+    app.post('/notifications/topics/unsubscribe', { preHandler: authGuard }, async (req, reply) => {
+        const user = (req as any).user;
+        const body = z.object({
+            topic: z.string().min(1).max(100)
+        }).parse(req.body);
+
+        if (!isFirebaseInitialized()) {
+            return reply.status(503).send({ error: 'Firebase not initialized' });
+        }
+
+        // Get user's FCM token
+        const tokenRes = await pool.query(
+            'SELECT fcm_token FROM user_profiles WHERE user_id = $1',
+            [user.userId]
+        );
+        const fcmToken = tokenRes.rows[0]?.fcm_token;
+
+        if (!fcmToken) {
+            return reply.status(400).send({ error: 'No FCM token registered for this user' });
+        }
+
+        const result = await unsubscribeFromTopic([fcmToken], body.topic);
+
+        // Remove from database regardless of FCM result
+        await pool.query(
+            'DELETE FROM user_topic_subscriptions WHERE user_id = $1 AND topic = $2',
+            [user.userId, body.topic]
+        );
+
+        return reply.send({ success: true, topic: body.topic });
+    });
+
+    // Get user's topic subscriptions
+    app.get('/notifications/topics', { preHandler: authGuard }, async (req, reply) => {
+        const user = (req as any).user;
+
+        const res = await pool.query(
+            'SELECT topic, created_at FROM user_topic_subscriptions WHERE user_id = $1 ORDER BY created_at DESC',
+            [user.userId]
+        );
+
+        return { topics: res.rows.map(r => r.topic) };
+    });
+
+    // Register FCM token for mobile device
+    app.post('/notifications/fcm-token', { preHandler: authGuard }, async (req, reply) => {
+        const user = (req as any).user;
+        const body = z.object({
+            token: z.string().min(1)
+        }).parse(req.body);
+
+        await pool.query(
+            'UPDATE user_profiles SET fcm_token = $2 WHERE user_id = $1',
+            [user.userId, body.token]
+        );
+
+        return reply.send({ success: true });
     });
 }

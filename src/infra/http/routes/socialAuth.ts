@@ -5,6 +5,7 @@ import { env } from '../../../config/env.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import fetch from 'node-fetch';
+import { sendPasswordResetEmail, isEmailConfigured } from '../../../services/emailService.js';
 
 // Helper to issue JWT token
 const issueToken = (payload: { userId: string; email: string }) => {
@@ -294,21 +295,41 @@ export async function socialAuthRoutes(app: FastifyInstance) {
                 [userCheck.rows[0].id, resetToken]
             );
 
-            // TODO: Send email with reset link
-            // For now, log the token (in production, integrate with SendGrid/Mailgun/AWS SES)
-            req.log.info({
-                type: 'password_reset_requested',
-                userId: userCheck.rows[0].id,
-                email: body.email,
-                // In production, don't log the token
-                message: 'Email integration pending - configure email service'
-            });
+            // Send password reset email
+            if (isEmailConfigured()) {
+                const emailResult = await sendPasswordResetEmail(
+                    body.email,
+                    resetToken,
+                    userCheck.rows[0].username
+                );
+
+                if (emailResult.success) {
+                    req.log.info({
+                        type: 'password_reset_email_sent',
+                        userId: userCheck.rows[0].id,
+                        email: body.email
+                    });
+                } else {
+                    req.log.error({
+                        type: 'password_reset_email_failed',
+                        userId: userCheck.rows[0].id,
+                        error: emailResult.error
+                    });
+                }
+            } else {
+                req.log.warn({
+                    type: 'password_reset_requested',
+                    userId: userCheck.rows[0].id,
+                    email: body.email,
+                    message: 'Email service not configured - set SMTP_HOST, SMTP_USER, SMTP_PASS'
+                });
+            }
 
             return {
                 success: true,
                 message: 'If an account exists, a reset email has been sent.',
-                // Remove this in production - only for development
-                _devToken: process.env.NODE_ENV !== 'production' ? resetToken : undefined
+                // Include token in dev mode for testing (remove in production)
+                _devToken: process.env.NODE_ENV !== 'production' && !isEmailConfigured() ? resetToken : undefined
             };
         } catch (e: any) {
             req.log.error({ error: 'Password reset request failed', message: e.message });
