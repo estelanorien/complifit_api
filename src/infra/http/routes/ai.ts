@@ -7,6 +7,7 @@ import { authGuard } from '../hooks/auth.js';
 import fetch from 'node-fetch';
 import { aiConfig } from '../../../config/ai.js';
 import { AuthenticatedRequest, GeminiPart, GeminiResponse } from '../types.js';
+import { recordApiCall } from '../../../services/aiDataCollector.js';
 
 const textSchema = z.object({
   prompt: z.string().min(1),
@@ -49,28 +50,135 @@ const ensureFoodCacheTable = async () => {
   foodCacheReady = true;
 };
 
+/**
+ * Sanitize user input before including in AI prompts to prevent prompt injection.
+ * Removes characters that could escape prompt context or manipulate AI behavior.
+ */
+function sanitizeUserInput(text: string | undefined | null): string {
+  if (!text) return '';
+  return text
+    // Remove structural characters that could escape context
+    .replace(/[`]/g, "'")                                    // Backticks to single quotes
+    .replace(/\{\{|\}\}/g, '')                               // Template literals
+    .replace(/\[\[|\]\]/g, '')                               // Wiki-style brackets
+    // Remove role markers that could override system prompts
+    .replace(/\b(system|assistant|user|model|human|ai)\s*:/gi, '$1 -')
+    // Remove markdown code blocks that could contain instructions
+    .replace(/```[\s\S]*?```/g, '[code block removed]')
+    // Remove XML-like tags that could be interpreted as instructions
+    .replace(/<\/?(?:system|prompt|instruction|ignore|override)[^>]*>/gi, '')
+    // Limit length to prevent context overflow
+    .slice(0, 2000)
+    .trim();
+}
+
+/**
+ * Extract JSON from AI response text robustly.
+ * Handles various response formats and common issues.
+ */
+function extractJsonFromResponse(text: string): object | null {
+  if (!text) return null;
+
+  // Try direct parse first
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Continue to fallbacks
+  }
+
+  // Remove markdown code blocks
+  let cleaned = text.trim()
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  // Try parsing cleaned text
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // Continue to fallbacks
+  }
+
+  // Find JSON object or array boundaries
+  const jsonMatch = cleaned.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[1]);
+    } catch {
+      // Continue to fix common issues
+    }
+
+    // Try to fix common JSON issues
+    let fixedJson = jsonMatch[1]
+      .replace(/,\s*([}\]])/g, '$1')           // Remove trailing commas
+      .replace(/'/g, '"')                       // Single to double quotes (careful with apostrophes)
+      .replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3'); // Quote unquoted keys
+
+    try {
+      return JSON.parse(fixedJson);
+    } catch {
+      // Give up
+    }
+  }
+
+  return null;
+}
+
 export async function aiRoutes(app: FastifyInstance) {
   const ai = new AiService();
 
   // Basit rate limit, uygulama geneli rate-limit varsa kaldırılabilir
   app.post('/ai/text', { preHandler: authGuard }, async (req, reply) => {
+    const startTime = Date.now();
     const parsed = textSchema.parse(req.body);
     const result = await ai.generateText(parsed);
+
+    // Record for AI training (fire-and-forget)
+    const user = (req as AuthenticatedRequest).user;
+    recordApiCall({
+      userId: user?.userId || 'anonymous',
+      callType: 'text_generation',
+      apiProvider: 'gemini',
+      modelVersion: parsed.model || 'gemini-3-flash-preview',
+      endpoint: '/ai/text',
+      requestPrompt: sanitizeUserInput(parsed.prompt),
+      responseRaw: result,
+      latencyMs: Date.now() - startTime
+    }).catch(() => {});
+
     return reply.send(result);
   });
 
   app.post('/ai/image', { preHandler: authGuard }, async (req, reply) => {
+    const startTime = Date.now();
     const inputSchema = imageSchema.extend({
       referenceImage: z.string().optional() // Base64 image data
     });
 
     const parsed = inputSchema.parse(req.body);
     const result = await ai.generateImage(parsed);
+
+    // Record for AI training (fire-and-forget)
+    const user = (req as AuthenticatedRequest).user;
+    recordApiCall({
+      userId: user?.userId || 'anonymous',
+      callType: 'image_generation',
+      apiProvider: 'gemini',
+      modelVersion: 'gemini-2.5-flash-image',
+      endpoint: '/ai/image',
+      requestPrompt: sanitizeUserInput(parsed.prompt),
+      requestContext: { hasReferenceImage: !!parsed.referenceImage },
+      responseRaw: { hasImage: !!result },
+      latencyMs: Date.now() - startTime
+    }).catch(() => {});
+
     return reply.send(result);
   });
 
   // General Gemini proxy (server-side key)
   app.post('/ai/generate-content', { preHandler: authGuard }, async (req, reply) => {
+    const startTime = Date.now();
     const body = generateSchema.parse(req.body || {});
     const { parts, model = 'models/gemini-3-flash-preview', generationConfig, tools } = body;
 
@@ -95,6 +203,21 @@ export async function aiRoutes(app: FastifyInstance) {
       const data: any = await res.json();
       const contentParts = data?.candidates?.[0]?.content?.parts || [];
       const firstText = contentParts.find((p: any) => p?.text)?.text || '';
+
+      // Record for AI training (fire-and-forget)
+      const user = (req as AuthenticatedRequest).user;
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'content_generation',
+        apiProvider: 'gemini',
+        modelVersion: model,
+        endpoint: '/ai/generate-content',
+        requestPrompt: parts.map((p: any) => p?.text || '[non-text]').join(' ').substring(0, 500),
+        requestContext: { hasTools: !!tools, partsCount: parts.length },
+        responseRaw: { text: firstText.substring(0, 500), partsCount: contentParts.length },
+        latencyMs: Date.now() - startTime
+      }).catch(() => {});
+
       return reply.send({ text: firstText, parts: contentParts });
     } catch (e: unknown) {
       req.log.error({ error: 'generate-content proxy failed', e, requestId: req.id });
@@ -266,7 +389,7 @@ export async function aiRoutes(app: FastifyInstance) {
       const mime = imageBase64.includes('png') ? 'image/png' : 'image/jpeg';
       parts.push({ inlineData: { mimeType: mime, data: imageBase64.split(',')[1] } });
       if (text && text.trim()) {
-        parts.push({ text: `User context/description: "${text}"` });
+        parts.push({ text: `User context/description: "${sanitizeUserInput(text)}"` });
       }
       parts.push({ text: prompt });
     } else if (text) {
@@ -329,7 +452,7 @@ export async function aiRoutes(app: FastifyInstance) {
       }
       Response language: keep detected language of input text if any; otherwise English.
       `;
-      parts.push({ text: `User Log: "${text}"` });
+      parts.push({ text: `User Log: "${sanitizeUserInput(text)}"` });
       parts.push({ text: prompt });
     }
 
@@ -789,11 +912,12 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   });
 
   app.post('/ai/recipes/suggest', { preHandler: authGuard }, async (req, reply) => {
+    const startTime = Date.now();
     try {
       const { ingredients, imageBase64, lang } = recipeSchema.parse(req.body);
       const parts: any[] = [{ text: `Suggest 2 recipes based on these ingredients/fridge photo. Language: ${lang}. Return JSON array of recipes.` }];
 
-      if (ingredients) parts.push({ text: `Ingredients: ${ingredients}` });
+      if (ingredients) parts.push({ text: `Ingredients: ${sanitizeUserInput(ingredients)}` });
       if (imageBase64) {
         const cleanerBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
         parts.push({ inlineData: { mimeType: 'image/jpeg', data: cleanerBase64 } });
@@ -816,9 +940,27 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const data: any = await res.json();
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
 
-      // Clean JSON
-      let cleaned = text.trim().replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
-      const json = JSON.parse(cleaned);
+      // Use robust JSON extraction
+      const json = extractJsonFromResponse(text);
+      if (!json) {
+        req.log.error({ text: text.substring(0, 500), message: 'Failed to parse recipe suggestion response' });
+        throw new Error('Failed to parse AI response');
+      }
+
+      // Record for AI training (fire-and-forget)
+      const user = (req as AuthenticatedRequest).user;
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'recipe_suggestion',
+        apiProvider: 'gemini',
+        modelVersion: 'gemini-3-flash-preview',
+        endpoint: '/ai/recipes/suggest',
+        requestPrompt: `Ingredients: ${sanitizeUserInput(ingredients || '')}`,
+        requestContext: { hasImage: !!imageBase64, lang },
+        responseRaw: json,
+        latencyMs: Date.now() - startTime
+      }).catch(() => {});
+
       return reply.send(json);
     } catch (e: unknown) {
       const isProduction = process.env.NODE_ENV === 'production';
@@ -836,7 +978,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   app.post('/ai/exercise/details', { preHandler: authGuard }, async (req, reply) => {
     try {
       const { name, lang } = exDetailSchema.parse(req.body);
-      const prompt = `Provide details for exercise: "${name}". Language: ${lang}. Return JSON: { instructions: string[], safetyTips: string[], targetMuscles: string[] }. Output JSON only.`;
+      const prompt = `Provide details for exercise: "${sanitizeUserInput(name)}". Language: ${lang}. Return JSON: { instructions: string[], safetyTips: string[], targetMuscles: string[] }. Output JSON only.`;
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
         method: 'POST',
@@ -855,8 +997,13 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const data: any = await res.json();
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
 
-      let cleaned = text.trim().replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
-      return reply.send(JSON.parse(cleaned));
+      // Use robust JSON extraction
+      const parsed = extractJsonFromResponse(text);
+      if (!parsed) {
+        req.log.error({ text: text.substring(0, 500), message: 'Failed to parse exercise details response' });
+        throw new Error('Failed to parse AI response');
+      }
+      return reply.send(parsed);
     } catch (e: unknown) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
@@ -871,6 +1018,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   });
 
   app.post('/ai/generate/image', { preHandler: authGuard }, async (req, reply) => {
+    const startTime = Date.now();
     try {
       const { prompt, referenceImage } = imgProxySchema.parse(req.body);
 
@@ -883,8 +1031,10 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       // Build parts array
       const parts: any[] = [];
 
+      // Sanitize user input first, then clean for image generation
+      const safePrompt = sanitizeUserInput(prompt);
       // Clean the prompt to prevent text overlays (translate to English, remove step numbers)
-      const cleanedPrompt = await ai.cleanImagePrompt(prompt);
+      const cleanedPrompt = await ai.cleanImagePrompt(safePrompt);
 
       // Enhanced prompt for image generation
       let enhancedPrompt = cleanedPrompt;
@@ -950,6 +1100,21 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       if (imagePart?.inlineData?.data) {
         const mimeType = imagePart.inlineData.mimeType || 'image/png';
         req.log.info({ model, mimeType }, 'Image generated successfully');
+
+        // Record for AI training (fire-and-forget)
+        const user = (req as AuthenticatedRequest).user;
+        recordApiCall({
+          userId: user?.userId || 'anonymous',
+          callType: 'coach_image',
+          apiProvider: 'gemini',
+          modelVersion: model,
+          endpoint: '/ai/generate/image',
+          requestPrompt: safePrompt.substring(0, 500),
+          requestContext: { hasReferenceImage: !!referenceImage },
+          responseRaw: { hasImage: true, mimeType },
+          latencyMs: Date.now() - startTime
+        }).catch(() => {});
+
         return reply.send({ image: `data:${mimeType};base64,${imagePart.inlineData.data}` });
       }
 
@@ -979,6 +1144,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   // Menu photo analysis - extract multiple dishes from menu photo
   app.post('/ai/menu-analysis', { preHandler: authGuard }, async (req, reply) => {
     if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
+    const startTime = Date.now();
 
     const body = z.object({
       imageBase64: z.string(),
@@ -1090,18 +1256,32 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const data: any = await res.json();
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
 
-      let items: any[] = [];
-      try {
-        const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        items = JSON.parse(cleaned);
-      } catch (e) {
-        req.log.error({ error: 'Failed to parse menu analysis response', e, requestId: req.id });
+      // Use robust JSON extraction
+      const parsed = extractJsonFromResponse(text);
+      if (!parsed) {
+        req.log.error({ error: 'Failed to parse menu analysis response', text: text.substring(0, 500), requestId: req.id });
         return reply.status(500).send({ error: 'Failed to parse AI response' });
       }
 
-      if (!Array.isArray(items)) {
+      const items = Array.isArray(parsed) ? parsed : [parsed];
+      if (items.length === 0) {
         return reply.status(500).send({ error: 'Invalid response format - expected array' });
       }
+
+      // Record for AI training (fire-and-forget)
+      const user = (req as AuthenticatedRequest).user;
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'menu_analysis',
+        apiProvider: 'gemini',
+        modelVersion: 'gemini-3-flash-preview',
+        endpoint: '/ai/menu-analysis',
+        requestPrompt: 'MENU PHOTO ANALYSIS - EXTRACT ALL DISHES',
+        requestContext: { hasImage: true, restaurantName, allergenCount: allergens.length, lang },
+        responseRaw: items,
+        responseParsed: { itemCount: items.length },
+        latencyMs: Date.now() - startTime
+      }).catch(() => {});
 
       return reply.send(items);
     } catch (e: unknown) {
@@ -1113,6 +1293,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   // Generate step image (exercise or recipe step)
   app.post('/ai/generate/step-image', { preHandler: authGuard }, async (req, reply) => {
     if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
+    const startTime = Date.now();
 
     const body = z.object({
       type: z.enum(['exercise', 'recipe']),
@@ -1125,9 +1306,11 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
     try {
       const { type, name, instruction, index, lang } = body;
 
+      const safeName = sanitizeUserInput(name);
+      const safeInstruction = sanitizeUserInput(instruction);
       const prompt = type === 'exercise'
-        ? `Fitness photography: ${name} exercise, step ${index || 1}. ${instruction}. Proper form, athletic model, gym setting, cinematic lighting, 8k resolution, professional quality.`
-        : `Food photography: ${name} recipe, step ${index || 1}. ${instruction}. Hyperrealistic, delicious, soft lighting, 8k resolution, professional quality.`;
+        ? `Fitness photography: ${safeName} exercise, step ${index || 1}. ${safeInstruction}. Proper form, athletic model, gym setting, cinematic lighting, 8k resolution, professional quality.`
+        : `Food photography: ${safeName} recipe, step ${index || 1}. ${safeInstruction}. Hyperrealistic, delicious, soft lighting, 8k resolution, professional quality.`;
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`, {
         method: 'POST',
@@ -1155,6 +1338,20 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const inline = parts.find((p: any) => p.inlineData?.data);
 
       if (inline?.inlineData?.data) {
+        // Record for AI training (fire-and-forget)
+        const user = (req as AuthenticatedRequest).user;
+        recordApiCall({
+          userId: user?.userId || 'anonymous',
+          callType: 'step_image_generation',
+          apiProvider: 'gemini',
+          modelVersion: 'gemini-2.5-flash-image',
+          endpoint: '/ai/generate/step-image',
+          requestPrompt: prompt,
+          requestContext: { type, name: safeName, index, lang },
+          responseRaw: { hasImage: true },
+          latencyMs: Date.now() - startTime
+        }).catch(() => {});
+
         return reply.send({ image: `data:image/png;base64,${inline.inlineData.data}` });
       }
 
@@ -1168,6 +1365,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   // Generate gamification asset
   app.post('/ai/generate/gamification-asset', { preHandler: authGuard }, async (req, reply) => {
     if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
+    const startTime = Date.now();
 
     const body = z.object({
       type: z.enum(['challenge', 'badge', 'item']),
@@ -1178,11 +1376,12 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
     try {
       const { type, context, lang } = body;
 
+      const safeContext = sanitizeUserInput(context);
       const prompt = type === 'challenge'
-        ? `Gaming challenge icon: ${context}. Bold, colorful, motivational, 8k resolution, professional game asset style.`
+        ? `Gaming challenge icon: ${safeContext}. Bold, colorful, motivational, 8k resolution, professional game asset style.`
         : type === 'badge'
-          ? `Achievement badge icon: ${context}. Metallic, shiny, prestigious, 8k resolution, professional game asset style.`
-          : `Game item icon: ${context}. Detailed, appealing, 8k resolution, professional game asset style.`;
+          ? `Achievement badge icon: ${safeContext}. Metallic, shiny, prestigious, 8k resolution, professional game asset style.`
+          : `Game item icon: ${safeContext}. Detailed, appealing, 8k resolution, professional game asset style.`;
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`, {
         method: 'POST',
@@ -1210,6 +1409,20 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const inline = parts.find((p: any) => p.inlineData?.data);
 
       if (inline?.inlineData?.data) {
+        // Record for AI training (fire-and-forget)
+        const user = (req as AuthenticatedRequest).user;
+        recordApiCall({
+          userId: user?.userId || 'anonymous',
+          callType: 'gamification_asset_generation',
+          apiProvider: 'gemini',
+          modelVersion: 'gemini-2.5-flash-image',
+          endpoint: '/ai/generate/gamification-asset',
+          requestPrompt: prompt,
+          requestContext: { type, context: safeContext, lang },
+          responseRaw: { hasImage: true },
+          latencyMs: Date.now() - startTime
+        }).catch(() => {});
+
         return reply.send({ image: `data:image/png;base64,${inline.inlineData.data}` });
       }
 
@@ -1224,6 +1437,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   // Generate portion visual
   app.post('/ai/generate/portion-visual', { preHandler: authGuard }, async (req, reply) => {
     if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
+    const startTime = Date.now();
 
     const body = z.object({
       mealName: z.string(),
@@ -1236,7 +1450,8 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const { mealName, calories, type, lang } = body;
 
       const sizeDesc = type === 'large' ? 'large portion' : 'small portion';
-      const prompt = `Food photography: ${mealName}, ${sizeDesc}, ${calories} calories. Visual portion size comparison, hyperrealistic, professional quality, 8k resolution, soft lighting.`;
+      const safeMealName = sanitizeUserInput(mealName);
+      const prompt = `Food photography: ${safeMealName}, ${sizeDesc}, ${calories} calories. Visual portion size comparison, hyperrealistic, professional quality, 8k resolution, soft lighting.`;
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`, {
         method: 'POST',
@@ -1264,6 +1479,20 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const inline = parts.find((p: any) => p.inlineData?.data);
 
       if (inline?.inlineData?.data) {
+        // Record for AI training (fire-and-forget)
+        const user = (req as AuthenticatedRequest).user;
+        recordApiCall({
+          userId: user?.userId || 'anonymous',
+          callType: 'portion_visual_generation',
+          apiProvider: 'gemini',
+          modelVersion: 'gemini-2.5-flash-image',
+          endpoint: '/ai/generate/portion-visual',
+          requestPrompt: prompt,
+          requestContext: { mealName: safeMealName, calories, type, lang },
+          responseRaw: { hasImage: true },
+          latencyMs: Date.now() - startTime
+        }).catch(() => {});
+
         return reply.send({ image: `data:image/png;base64,${inline.inlineData.data}` });
       }
 
@@ -1281,6 +1510,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   });
 
   app.post('/ai/verify-workout', { preHandler: authGuard }, async (req, reply) => {
+    const startTime = Date.now();
     const { imageBase64 } = verifyWorkoutSchema.parse(req.body);
 
     try {
@@ -1347,13 +1577,31 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       const data: any = await res.json();
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-      const parsed = JSON.parse(text);
 
-      return reply.send({
-        verified: parsed.verified ?? false,
-        confidence: parsed.confidence ?? 0,
-        notes: parsed.notes ?? 'Could not analyze image'
-      });
+      // Use robust JSON extraction
+      const parsed = extractJsonFromResponse(text) as { verified?: boolean; confidence?: number; notes?: string } | null;
+
+      const result = {
+        verified: parsed?.verified ?? false,
+        confidence: parsed?.confidence ?? 0,
+        notes: parsed?.notes ?? 'Could not analyze image'
+      };
+
+      // Record for AI training (fire-and-forget)
+      const user = (req as AuthenticatedRequest).user;
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'workout_verification',
+        apiProvider: 'gemini',
+        modelVersion: 'gemini-3-flash-preview',
+        endpoint: '/ai/verify-workout',
+        requestPrompt: 'WORKOUT VERIFICATION TASK',
+        requestContext: { hasImage: true },
+        responseRaw: result,
+        latencyMs: Date.now() - startTime
+      }).catch(() => {});
+
+      return reply.send(result);
     } catch (e: unknown) {
       req.log.error({ error: 'verify-workout failed', e, requestId: req.id });
       return reply.status(500).send({
@@ -1433,13 +1681,9 @@ Return ONLY valid JSON, no markdown.`;
       const data: any = await res.json();
       const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
 
-      // Clean JSON from markdown blocks
-      const cleanJson = rawText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
-
-      let parsed;
-      try {
-        parsed = JSON.parse(cleanJson);
-      } catch {
+      // Use robust JSON extraction
+      const parsed = extractJsonFromResponse(rawText) as Record<string, any> | null;
+      if (!parsed) {
         return reply.status(400).send({
           error: true,
           message: 'Could not parse analysis results'
