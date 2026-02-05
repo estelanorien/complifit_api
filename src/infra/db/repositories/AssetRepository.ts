@@ -5,7 +5,7 @@ export interface AssetRecord {
     key: string;
     value: string;
     buffer: Buffer | null;
-    status: 'active' | 'generating' | 'failed' | 'rejected' | 'auto';
+    status: 'active' | 'generating' | 'failed' | 'rejected' | 'auto' | 'draft';
     asset_type: 'image' | 'video' | 'json';
     metadata: any;
     updated_at: Date;

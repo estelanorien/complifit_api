@@ -85,7 +85,7 @@ export class CanonicalService {
             language: 'unknown'
         });
 
-        let text: string;
+        let text: string = '';
         const maxRetries = 3;
         const retryDelayMs = 5000;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
