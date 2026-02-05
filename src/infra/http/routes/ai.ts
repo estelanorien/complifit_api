@@ -7,6 +7,7 @@ import { authGuard } from '../hooks/auth.js';
 import fetch from 'node-fetch';
 import { aiConfig } from '../../../config/ai.js';
 import { recordApiCall } from '../../../services/aiDataCollector.js';
+import { AuthenticatedRequest, GeminiPart, GeminiResponse } from '../types.js';
 
 const textSchema = z.object({
   prompt: z.string().min(1),
@@ -19,16 +20,16 @@ const imageSchema = z.object({
 });
 
 const generateSchema = z.object({
-  parts: z.array(z.any()),
+  parts: z.array(z.unknown()),
   model: z.string().optional(),
-  generationConfig: z.any().optional(),
-  tools: z.any().optional()
+  generationConfig: z.record(z.unknown()).optional(),
+  tools: z.array(z.unknown()).optional()
 });
 
 const foodLogSchema = z.object({
   text: z.string().optional(),
   imageBase64: z.string().optional(),
-  contextMeals: z.array(z.any()).optional(),
+  contextMeals: z.array(z.record(z.unknown())).optional(),
   lang: z.string().optional()
 });
 
@@ -59,7 +60,6 @@ export async function aiRoutes(app: FastifyInstance) {
     return reply.send(result);
   });
 
-
   app.post('/ai/image', { preHandler: authGuard }, async (req, reply) => {
     const inputSchema = imageSchema.extend({
       referenceImage: z.string().optional() // Base64 image data
@@ -70,69 +70,10 @@ export async function aiRoutes(app: FastifyInstance) {
     return reply.send(result);
   });
 
-  // Image quality analysis endpoint
-  app.post('/ai/analyze-image-quality', { preHandler: authGuard }, async (req, reply) => {
-    const schema = z.object({
-      imageBase64: z.string(),
-      context: z.string().optional()
-    });
-
-    const { imageBase64, context = 'coach exercise demonstration' } = schema.parse(req.body);
-
-    try {
-      const parts: any[] = [];
-      const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-      parts.push({ inlineData: { mimeType: 'image/png', data: cleanBase64 } });
-      parts.push({
-        text: `Analyze this image for quality issues. Context: ${context}.
-        
-        Rate the image on these criteria (1-10 each):
-        1. Clarity/Sharpness
-        2. Lighting
-        3. Composition
-        4. Subject visibility
-        5. Professional appearance
-        
-        Return JSON: { "overall": number, "details": { "clarity": number, "lighting": number, "composition": number, "visibility": number, "professional": number }, "issues": string[], "suggestions": string[] }` });
-
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': aiConfig.geminiApiKey
-        },
-        body: JSON.stringify({
-          contents: [{ parts }],
-          generationConfig: { responseMimeType: 'application/json' }
-        })
-      });
-
-      if (!res.ok) {
-        throw new Error(`Quality analysis failed: ${res.status}`);
-      }
-
-      const data: any = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-      const result = JSON.parse(text);
-
-      return reply.send(result);
-    } catch (e: any) {
-      req.log.error({ error: 'analyze-image-quality failed', e });
-      return reply.send({ overall: 5, details: {}, issues: ['Analysis failed'], suggestions: [] });
-    }
-  });
-
   // General Gemini proxy (server-side key)
   app.post('/ai/generate-content', { preHandler: authGuard }, async (req, reply) => {
     const body = generateSchema.parse(req.body || {});
-    let { parts, model = 'gemini-3-flash-preview', generationConfig, tools } = body;
-
-    // Ensure model has 'models/' prefix
-    if (!model.startsWith('models/')) {
-      model = `models/${model}`;
-    }
-
-    req.log.info({ model, partsCount: parts?.length, message: '[AI] generate-content called' });
+    const { parts, model = 'models/gemini-3-flash-preview', generationConfig, tools } = body;
 
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`, {
@@ -149,7 +90,6 @@ export async function aiRoutes(app: FastifyInstance) {
       });
       if (!res.ok) {
         const txt = await res.text();
-        req.log.error({ status: res.status, model, error: txt, message: '[AI] generate-content failed' });
         const isProduction = process.env.NODE_ENV === 'production';
         throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini generate error ${res.status}: ${txt}`);
       }
@@ -157,8 +97,8 @@ export async function aiRoutes(app: FastifyInstance) {
       const contentParts = data?.candidates?.[0]?.content?.parts || [];
       const firstText = contentParts.find((p: any) => p?.text)?.text || '';
       return reply.send({ text: firstText, parts: contentParts });
-    } catch (e: any) {
-      req.log.error({ error: 'generate-content proxy failed', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      req.log.error({ error: 'generate-content proxy failed', e, requestId: req.id });
       return reply.status(500).send({ error: e.message || 'generate failed' });
     }
   });
@@ -193,7 +133,7 @@ export async function aiRoutes(app: FastifyInstance) {
 
     if (imageBase64) {
       // CHECK PRO TIER
-      const user = (req as any).user;
+      const user = (req as AuthenticatedRequest).user;
       const { rows } = await pool.query('SELECT subscription_tier FROM profiles WHERE user_id = $1', [user.userId]);
       const tier = rows[0]?.subscription_tier || 'free';
 
@@ -394,7 +334,7 @@ export async function aiRoutes(app: FastifyInstance) {
       parts.push({ text: prompt });
     }
 
-    const model = 'models/gemini-1.5-flash';
+    const model = 'models/gemini-3-flash-preview';
 
     // Helper function to ensure response has all required fields
     // CRITICAL: Only use defaults if AI didn't provide values. If AI provided values, use them!
@@ -431,13 +371,13 @@ export async function aiRoutes(app: FastifyInstance) {
         // If AI didn't provide proper values, throw error instead of using defaults
         if (!hasCalories || !hasMacros) {
           req.log.error({
-            requestId: (req as any).requestId,
+            requestId: req.id,
             hasCalories,
             hasMacros,
             message: '❌ ensureDefaults: AI did not provide required values!'
           });
           req.log.error({
-            requestId: (req as any).requestId,
+            requestId: req.id,
             obj: JSON.stringify(obj, null, 2),
             message: 'AI response object'
           });
@@ -494,7 +434,7 @@ export async function aiRoutes(app: FastifyInstance) {
               cachedResp?.macros?.fat === 12;
 
             if (isCachedDefault) {
-              req.log.error({ error: '🚨 Cached response has default values - ignoring cache and recalculating', requestId: (req as any).requestId });
+              req.log.error({ error: '🚨 Cached response has default values - ignoring cache and recalculating', requestId: req.id });
               // Don't return cached - let it fall through to AI call
             } else {
               return reply.send(ensureDefaults(cachedResp));
@@ -517,7 +457,7 @@ export async function aiRoutes(app: FastifyInstance) {
               cachedResp?.macros?.fat === 12;
 
             if (isCachedDefault) {
-              req.log.error({ error: '🚨 Cached response has default values - ignoring cache and recalculating', requestId: (req as any).requestId });
+              req.log.error({ error: '🚨 Cached response has default values - ignoring cache and recalculating', requestId: req.id });
               // Don't return cached - let it fall through to AI call
             } else {
               return reply.send(ensureDefaults(cachedResp));
@@ -525,10 +465,10 @@ export async function aiRoutes(app: FastifyInstance) {
           }
         }
       } catch (e) {
-        req.log.warn({ error: e, requestId: (req as any).requestId, message: 'food-log cache lookup failed' });
+        req.log.warn({ error: e, requestId: req.id, message: 'food-log cache lookup failed' });
       }
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -627,7 +567,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       if (!res.ok) {
         const txt = await res.text();
         req.log.error({
-          requestId: (req as any).requestId,
+          requestId: req.id,
           status: res.status,
           responseText: txt,
           message: 'food-log proxy: non-200'
@@ -707,16 +647,16 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       if (isDefaultValues) {
         req.log.error({
-          requestId: (req as any).requestId,
+          requestId: req.id,
           parsed,
           message: '🚨🚨🚨 CRITICAL: AI returned default values (350/20/35/12)!'
         });
         req.log.error({
-          requestId: (req as any).requestId,
+          requestId: req.id,
           message: 'AI did NOT calculate - rejecting response!'
         });
         req.log.error({
-          requestId: (req as any).requestId,
+          requestId: req.id,
           response: JSON.stringify(parsed, null, 2),
           message: 'Full response'
         });
@@ -726,7 +666,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       // If we get here, AI provided non-default values - proceed with ensureDefaults
       const finalResp = ensureDefaults(parsed);
       req.log.info({
-        requestId: (req as any).requestId,
+        requestId: req.id,
         calories: finalResp.calories,
         macros: finalResp.macros,
         message: '✅ AI provided calculated values'
@@ -771,12 +711,12 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
           }
         }
       } catch (e) {
-        req.log.warn({ error: e, requestId: (req as any).requestId, message: 'food-log cache save failed' });
+        req.log.warn({ error: e, requestId: req.id, message: 'food-log cache save failed' });
       }
 
       return reply.send(finalResp);
-    } catch (e: any) {
-      req.log.error({ error: 'food-log proxy failed', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      req.log.error({ error: 'food-log proxy failed', e, requestId: req.id });
 
       // If error is about default values, return a more helpful error
       if (e.message?.includes('default values') || e.message?.includes('recalculation needed')) {
@@ -828,7 +768,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       }
       sys += ` Language: ${lang}. Keep responses concise.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -862,7 +802,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       });
 
       return reply.send({ reply: replyText });
-    } catch (e: any) {
+    } catch (e: unknown) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
       return reply.status(500).send({ error: isProduction ? 'Coach chat service unavailable' : (e.message || 'Coach chat failed') });
@@ -908,7 +848,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       let cleaned = text.trim().replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
       const json = JSON.parse(cleaned);
       return reply.send(json);
-    } catch (e: any) {
+    } catch (e: unknown) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
       return reply.status(500).send({ error: isProduction ? 'Recipe suggestion service unavailable' : (e.message || 'Recipe suggestion failed') });
@@ -960,10 +900,11 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       });
 
       return reply.send(parsedResult);
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
-      return reply.status(500).send({ error: isProduction ? 'Exercise details service unavailable' : (e.message || 'Exercise details failed') });
+      return reply.status(500).send({ error: isProduction ? 'Exercise details service unavailable' : (error.message || 'Exercise details failed') });
     }
   });
 
@@ -1065,7 +1006,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       // No image returned - log for debugging
       req.log.warn({ model, responseKeys: Object.keys(data || {}), partsCount: responseParts.length }, 'No image in Gemini response');
       return reply.send({ error: 'No image returned from AI', raw: responseParts });
-    } catch (e: any) {
+    } catch (e: unknown) {
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
 
@@ -1198,7 +1139,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         items = JSON.parse(cleaned);
       } catch (e) {
-        req.log.error({ error: 'Failed to parse menu analysis response', e, requestId: (req as any).requestId });
+        req.log.error({ error: 'Failed to parse menu analysis response', e, requestId: req.id });
         return reply.status(500).send({ error: 'Failed to parse AI response' });
       }
 
@@ -1207,8 +1148,8 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       }
 
       return reply.send(items);
-    } catch (e: any) {
-      req.log.error({ error: 'menu-analysis failed', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      req.log.error({ error: 'menu-analysis failed', e, requestId: req.id });
       return reply.status(500).send({ error: e.message || 'Menu analysis failed' });
     }
   });
@@ -1262,8 +1203,8 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       }
 
       return reply.status(500).send({ error: 'No image returned from AI' });
-    } catch (e: any) {
-      req.log.error({ error: 'generate step-image failed', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      req.log.error({ error: 'generate step-image failed', e, requestId: req.id });
       return reply.status(500).send({ error: e.message || 'Generate step image failed' });
     }
   });
@@ -1317,9 +1258,9 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       }
 
       return reply.status(500).send({ error: 'No image returned from AI' });
-    } catch (e: any) {
+    } catch (e: unknown) {
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'generate gamification-asset failed', e, requestId: (req as any).requestId });
+      req.log.error({ error: 'generate gamification-asset failed', e, requestId: req.id });
       return reply.status(500).send({ error: isProduction ? 'Asset generation service unavailable' : (e.message || 'Generate gamification asset failed') });
     }
   });
@@ -1371,9 +1312,9 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       }
 
       return reply.status(500).send({ error: 'No image returned from AI' });
-    } catch (e: any) {
+    } catch (e: unknown) {
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'generate portion-visual failed', e, requestId: (req as any).requestId });
+      req.log.error({ error: 'generate portion-visual failed', e, requestId: req.id });
       return reply.status(500).send({ error: isProduction ? 'Portion visual generation service unavailable' : (e.message || 'Generate portion visual failed') });
     }
   });
@@ -1457,8 +1398,8 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
         confidence: parsed.confidence ?? 0,
         notes: parsed.notes ?? 'Could not analyze image'
       });
-    } catch (e: any) {
-      req.log.error({ error: 'verify-workout failed', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      req.log.error({ error: 'verify-workout failed', e, requestId: req.id });
       return reply.status(500).send({
         verified: false,
         confidence: 0,
@@ -1554,7 +1495,7 @@ Return ONLY valid JSON, no markdown.`;
       }
 
       // Store analysis in database for tracking progress
-      const user = (req as any).user;
+      const user = (req as AuthenticatedRequest).user;
       await pool.query(
         `INSERT INTO body_composition_logs (user_id, estimated_bf, body_type, analysis, created_at)
          VALUES ($1, $2, $3, $4, NOW())`,
@@ -1578,8 +1519,8 @@ Return ONLY valid JSON, no markdown.`;
         success: true,
         ...parsed
       });
-    } catch (e: any) {
-      req.log.error({ error: 'analyze-body-composition failed', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      req.log.error({ error: 'analyze-body-composition failed', e, requestId: req.id });
       return reply.status(500).send({
         error: true,
         message: e.message || 'Body composition analysis failed'

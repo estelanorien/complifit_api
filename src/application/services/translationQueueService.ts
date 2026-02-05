@@ -2,13 +2,8 @@
 import { pool } from '../../infra/db/pool.js';
 import { logger } from '../../infra/logger.js';
 import { AiService } from './aiService.js';
-import { retryManager } from './RetryManager.js';
 
 const aiService = new AiService();
-
-// Retry configuration for translation jobs
-const TRANSLATION_MAX_RETRIES = 5;
-const RETRYABLE_ERROR_PATTERNS = ['429', '503', 'overloaded', 'quota', 'rate', 'timeout', 'UNAVAILABLE'];
 
 export class TranslationQueueService {
     private processing = false;
@@ -118,48 +113,15 @@ export class TranslationQueueService {
                 } catch (err: any) {
                     logger.error(`[TranslationQueue] Job ${job.id} FAILED`, err);
 
-                    // Check if error is retryable
-                    const isRetryable = RETRYABLE_ERROR_PATTERNS.some(pattern =>
-                        err.message?.toLowerCase().includes(pattern.toLowerCase())
+                    // Retry logic? For now just fail. V2.1 can add retries.
+                    await pool.query(
+                        `UPDATE translation_jobs SET status = 'failed', error_log = $1, updated_at = NOW() WHERE id = $2`,
+                        [err.message, job.id]
                     );
-
-                    // Get current retry count
-                    const retryResult = await pool.query(
-                        `SELECT retry_count FROM translation_jobs WHERE id = $1`,
-                        [job.id]
+                    await pool.query(
+                        `UPDATE cached_asset_meta SET translation_status = 'failed', translation_error = $1 WHERE key = $2`,
+                        [err.message, job.asset_key]
                     );
-                    const currentRetryCount = retryResult.rows[0]?.retry_count || 0;
-
-                    if (isRetryable && currentRetryCount < TRANSLATION_MAX_RETRIES) {
-                        // Increment retry count and reset to pending for retry
-                        await pool.query(
-                            `UPDATE translation_jobs SET status = 'pending', retry_count = $1, last_error = $2, updated_at = NOW() WHERE id = $3`,
-                            [currentRetryCount + 1, err.message, job.id]
-                        );
-                        logger.info(`[TranslationQueue] Job ${job.id} will retry (attempt ${currentRetryCount + 1}/${TRANSLATION_MAX_RETRIES})`);
-                    } else {
-                        // Max retries reached or non-retryable error - move to dead-letter
-                        await pool.query(
-                            `UPDATE translation_jobs SET status = 'failed', retry_count = $1, last_error = $2, updated_at = NOW() WHERE id = $3`,
-                            [currentRetryCount, err.message, job.id]
-                        );
-                        await pool.query(
-                            `UPDATE cached_asset_meta SET translation_status = 'failed', translation_error = $1 WHERE key = $2`,
-                            [err.message, job.asset_key]
-                        );
-
-                        // Move to dead-letter queue
-                        await retryManager.moveToDeadLetter(
-                            job.id,
-                            'translation',
-                            job.asset_key,
-                            { jobId: job.id, assetKey: job.asset_key, targetLanguages: job.target_languages },
-                            err.message,
-                            err.stack || null,
-                            currentRetryCount + 1
-                        );
-                        logger.error(`[TranslationQueue] Job ${job.id} moved to dead-letter queue after ${currentRetryCount + 1} attempts`);
-                    }
                 }
 
             } catch (err) {
@@ -200,25 +162,6 @@ export class TranslationQueueService {
                 });
             }
             // Add other logical fields if needed (ingredients, etc if passed in JSON asset)
-            // Extract safety_warnings, pro_tips, nutrition_science, prep_tips
-            if (data.safety_warnings && Array.isArray(data.safety_warnings)) {
-                data.safety_warnings.forEach((text: string) => {
-                    if (text) textsToTranslate.push({ original: text, context: 'Safety Warning' });
-                });
-            }
-            if (data.pro_tips && Array.isArray(data.pro_tips)) {
-                data.pro_tips.forEach((text: string) => {
-                    if (text) textsToTranslate.push({ original: text, context: 'Pro Tip' });
-                });
-            }
-            if (data.nutrition_science && typeof data.nutrition_science === 'string') {
-                textsToTranslate.push({ original: data.nutrition_science, context: 'Nutrition Science' });
-            }
-            if (data.prep_tips && Array.isArray(data.prep_tips)) {
-                data.prep_tips.forEach((text: string) => {
-                    if (text) textsToTranslate.push({ original: text, context: 'Prep Tip' });
-                });
-            }
         } else if (asset_type === 'image') {
             // Images don't have text content usually, UNLESS we translate the metadata prompt?
             // Usually we only translate "Movements" (which are groups).
@@ -260,7 +203,7 @@ export class TranslationQueueService {
 
         const { text: jsonResult } = await aiService.generateText({
             prompt,
-            model: 'models/gemini-2.5-flash' // Stable model (gemini-2.0-flash retires March 2026)
+            model: 'models/gemini-2.0-flash' // Fast model
         });
 
         let parsed;
@@ -271,7 +214,6 @@ export class TranslationQueueService {
         }
 
         // 4. Save to content_translations
-        let savedCount = 0;
         for (const lang of Object.keys(parsed)) {
             const translations = parsed[lang];
             for (const idKey of Object.keys(translations)) {
@@ -287,7 +229,6 @@ export class TranslationQueueService {
                          ON CONFLICT (original_text, language) DO UPDATE SET translated_text = EXCLUDED.translated_text`,
                         [original, lang, translated, contentHash]
                     );
-                    savedCount++;
                 }
             }
         }

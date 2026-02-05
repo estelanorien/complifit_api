@@ -1,11 +1,10 @@
-console.log("[SERVER] Starting process...");
 import { buildServer } from './infra/http/server.js';
 import { env } from './config/env.js';
 import { pool } from './infra/db/pool.js';
 import { jobProcessor } from './application/services/jobProcessor.js';
 import { translationQueue } from './application/services/translationQueueService.js';
 import { videoQueue } from './application/services/videoQueueService.js';
-import { runStartupCleanup } from './services/startupCleanup.js';
+import { initializeFirebase } from './services/firebaseService.js';
 import v8 from 'v8';
 
 async function main() {
@@ -37,6 +36,14 @@ async function main() {
     await app.ready();
     app.log.info('[STARTUP] Fastify plugins loaded successfully');
 
+    // Initialize Firebase for FCM push notifications
+    const firebaseReady = initializeFirebase();
+    if (firebaseReady) {
+      app.log.info('[STARTUP] Firebase initialized successfully');
+    } else {
+      app.log.warn('[STARTUP] Firebase not initialized - FCM notifications disabled');
+    }
+
     // Start Background Workers
     jobProcessor.start();
     translationQueue.start();
@@ -59,9 +66,6 @@ async function main() {
   try {
     await pool.query('SELECT 1');
     app.log.info('Database connection established successfully');
-
-    // Run startup cleanup to reset stuck assets and jobs
-    await runStartupCleanup();
   } catch (err) {
     app.log.error(err, 'Failed to connect to database on startup');
   }

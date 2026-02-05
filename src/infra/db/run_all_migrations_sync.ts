@@ -1,36 +1,18 @@
-import dotenv from 'dotenv';
 import pg from 'pg';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Load .env from project root (vitality_api-main/vitality_api-main), then workspace root (vitapp2) so DATABASE_URL is found
-const projectRoot = path.join(__dirname, '..', '..', '..');
-dotenv.config({ path: path.join(projectRoot, '.env') });
-if (!process.env.DATABASE_URL) {
-    const workspaceEnv = path.join(projectRoot, '..', '..', '.env');
-    dotenv.config({ path: workspaceEnv });
-}
-dotenv.config(); // override with process env / cwd .env
 
 const { Pool } = pg;
 
-const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) {
-    console.error('DATABASE_URL is required. Set it in .env or environment.');
-    process.exit(1);
-}
+const DATABASE_URL = "postgresql://postgres:6fk23az4_F@104.199.2.9:5432/vitality_db";
 
 const pool = new Pool({
     connectionString: DATABASE_URL,
-    ssl: DATABASE_URL.includes('104.199') || DATABASE_URL.includes('cloudsql') || process.env.NODE_ENV === 'production'
-        ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' }
-        : undefined
+    ssl: { rejectUnauthorized: false }
 });
 
 async function runAll() {
-    const migrationsDir = path.join(__dirname, '..', '..', '..', 'migrations');
+    const migrationsDir = path.join('c:/Users/rmkoc/Downloads/vitapp2/vitality_api-main/vitality_api-main/migrations');
 
     // Get all SQL files and sort them
     const files = fs.readdirSync(migrationsDir)

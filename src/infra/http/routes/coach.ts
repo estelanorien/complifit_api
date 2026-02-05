@@ -60,9 +60,10 @@ export async function coachRoutes(app: FastifyInstance) {
         `You are an elite Strength Coach. Language: ${lang}. Be concise, motivational, and safety-focused. Avoid "As an AI" disclaimers. Use Google Maps tool ideas conceptually if asked, but respond in text.`
       ));
       return reply.send({ reply: text || "I'm refining your plan, please ask again." });
-    } catch (e: any) {
-      req.log.error({ error: 'Training coach error', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'Training coach failed' });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'Training coach error', message: error.message, requestId: req.id });
+      return reply.status(500).send({ error: error.message || 'Training coach failed' });
     }
   });
 
@@ -83,11 +84,12 @@ export async function coachRoutes(app: FastifyInstance) {
         `You are an expert Dietitian. Language: ${lang}. Be concise, scientific, and encouraging. Avoid "As an AI" disclaimers. ${contextPrompt}`
       ));
       return reply.send({ reply: text || "I'm reviewing your meals, please retry." });
-    } catch (e: any) {
-      req.log.error({ error: 'Nutrition coach error', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'Nutrition coach error', message: error.message, requestId: req.id });
       const isProduction = process.env.NODE_ENV === 'production';
       return reply.status(500).send({
-        error: isProduction ? 'Nutrition coach service unavailable' : (e.message || 'Nutrition coach failed')
+        error: isProduction ? 'Nutrition coach service unavailable' : (error.message || 'Nutrition coach failed')
       });
     }
   });
@@ -124,11 +126,12 @@ export async function coachRoutes(app: FastifyInstance) {
         generationConfig: { responseMimeType: 'application/json' }
       });
       return reply.send({ insight: text ? JSON.parse(text) : null });
-    } catch (e: any) {
-      req.log.error({ error: 'Dietary tips error', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'Dietary tips error', message: error.message, requestId: req.id });
       const isProduction = process.env.NODE_ENV === 'production';
       return reply.status(500).send({
-        error: isProduction ? 'Dietary tips service unavailable' : (e.message || 'Dietary tips failed')
+        error: isProduction ? 'Dietary tips service unavailable' : (error.message || 'Dietary tips failed')
       });
     }
   });
@@ -157,11 +160,12 @@ export async function coachRoutes(app: FastifyInstance) {
         generationConfig: { responseMimeType: 'application/json' }
       });
       return reply.send({ items: text ? JSON.parse(text) : items });
-    } catch (e: any) {
-      req.log.error({ error: 'Shopping consolidate error', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'Shopping consolidate error', message: error.message, requestId: req.id });
       const isProduction = process.env.NODE_ENV === 'production';
       return reply.status(500).send({
-        error: isProduction ? 'Shopping list service unavailable' : (e.message || 'Shopping consolidation failed')
+        error: isProduction ? 'Shopping list service unavailable' : (error.message || 'Shopping consolidation failed')
       });
     }
   });
@@ -199,11 +203,12 @@ export async function coachRoutes(app: FastifyInstance) {
         generationConfig: { responseMimeType: 'application/json' }
       });
       return reply.send({ meal: text ? JSON.parse(text) : null });
-    } catch (e: any) {
-      req.log.error({ error: 'Culinary explorer error', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'Culinary explorer error', message: error.message, requestId: req.id });
       const isProduction = process.env.NODE_ENV === 'production';
       return reply.status(500).send({
-        error: isProduction ? 'Culinary explorer service unavailable' : (e.message || 'Explorer failed')
+        error: isProduction ? 'Culinary explorer service unavailable' : (error.message || 'Explorer failed')
       });
     }
   });
@@ -242,11 +247,12 @@ export async function coachRoutes(app: FastifyInstance) {
 
       const text = await callGemini(buildGeminiPayload(history, systemPrompt));
       return reply.send({ reply: text || "I'm here to help! What would you like to know?" });
-    } catch (e: any) {
-      req.log.error({ error: 'Agent error', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'Agent error', message: error.message, requestId: req.id });
       const isProduction = process.env.NODE_ENV === 'production';
       return reply.status(500).send({
-        error: isProduction ? 'Agent service unavailable' : (e.message || 'Agent failed')
+        error: isProduction ? 'Agent service unavailable' : (error.message || 'Agent failed')
       });
     }
   });

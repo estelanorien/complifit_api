@@ -104,16 +104,6 @@ export async function errorHandler(
   req: FastifyRequest,
   reply: FastifyReply
 ) {
-  if (reply.sent) {
-    req.log?.error({ err: error }, 'Error after response already sent');
-    return;
-  }
-  // CORS on every error response - use * so browser never blocks (credentials false)
-  reply.header('Access-Control-Allow-Origin', '*');
-  reply.header('Access-Control-Allow-Credentials', 'false');
-  reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
-
   const requestId = (req as any).requestId || 'unknown';
   const isProduction = process.env.NODE_ENV === 'production';
   const userId = (req as any).user?.userId || null;
@@ -212,31 +202,14 @@ export async function errorHandler(
     });
   }
 
-  // Auth/profile paths: never return 500 so clients get retryable 503
-  const rawUrl = (req as any).url || '';
-  const routerPath = (req as any).routerPath || (req as any).routeOptions?.url || '';
-  const url = `${rawUrl} ${routerPath}`;
-  const isAuthOrProfile = /auth|profiles/.test(url);
-  const status = isAuthOrProfile ? 503 : 500;
-  const body = {
-    error: isProduction ? (status === 503 ? 'Service temporarily unavailable. Please try again.' : 'An internal server error occurred. Please try again later.') : (error.message || 'Unknown error occurred'),
+  // Unknown errors - in production, don't expose internal error details
+  return reply.status(500).send({
+    error: isProduction ? 'An internal server error occurred. Please try again later.' : (error.message || 'Unknown error occurred'),
     requestId,
-    ...(isProduction ? {} : {
+    ...(isProduction ? {} : { 
       stack: error.stack,
-      details: error.message
+      details: error.message 
     }),
-  };
-  try {
-    return await reply.status(status).send(body);
-  } catch (sendErr: any) {
-    req.log?.error({ err: sendErr, originalError: error.message }, 'Error handler failed to send response');
-    if (!reply.sent) {
-      try {
-        return reply.status(status).send({ error: 'Request failed', requestId });
-      } catch {
-        // ignore
-      }
-    }
-  }
+  });
 }
 

@@ -127,8 +127,8 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
 
           // 1. Check Step Count (Critical)
           const steps = meal?.recipe?.instructions;
-          if (!Array.isArray(steps) || steps.length < 7) { // Strict 7 step min (Target 8-10)
-            issues.push(`Meal "${name}" has only ${steps?.length || 0} steps. MUST have 8-10 steps.`);
+          if (!Array.isArray(steps) || steps.length < 5) { // Strict 5 step min
+            issues.push(`Meal "${name}" has only ${steps?.length || 0} steps. MUST have 5-8 steps.`);
           }
 
           // 2. Check Detail Level (Quality)
@@ -208,7 +208,7 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
     STYLE GUIDE (STRICT ENFORCEMENT):
     1. TONE: Professional chef meets nutritionist. Encouraging but precise.
     2. DETAIL LEVEL: "detailed" steps must be 2-3 sentences long. Include sensory details (smell, texture) and technique tips.
-    3. STEP COUNT: Every recipe MUST have 8-10 distinct steps. Fewer than 8 steps is a FAILURE.
+    3. STEP COUNT: Every recipe MUST have 5-8 distinct steps. Fewer than 5 steps is a FAILURE.
     4. ACCURACY: Macronutrients must sum up correctly (Protein*4 + Carbs*4 + Fat*9 ~= Calories).
 
     JSON STRUCTURE & CONSTRAINTS:
@@ -234,7 +234,7 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
                     "simple": "Active voice summary (max 10 words)",
                     "detailed": "Detailed step: technique, timing, visual cues. (2-3 sentences)"
                   },
-                  // ... MUST HAVE 8-10 STEPS ...
+                  // ... MUST HAVE 5-8 STEPS ...
                 ],
                 "macros": { "protein": 30, "carbs": 50, "fat": 15 },
                 "nutritionTips": [
@@ -249,7 +249,7 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
     }
     
     CRITICAL QUALITY CHECKS:
-    - Check "instructions" array length. If < 8, ADD MORE STEPS (e.g., prep, cooking, plating, serving).
+    - Check "instructions" array length. If < 5, ADD MORE STEPS (e.g., prep, cooking, plating, serving).
     - Ensure "detailed" text explains HOW and WHY, not just WHAT.
     - NEVER use single-step instructions or placeholders.
     `);

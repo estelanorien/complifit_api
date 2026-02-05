@@ -5,6 +5,7 @@ import { pool } from '../../db/pool.js';
 import { RehabPlan, generateRehabPlan } from '../../../application/services/rehabService.js';
 import { saveTrainingProgram } from './_utils/saveTrainingPlan.js';
 import { TrainingPlanSchema } from '../schemas/plans.js';
+import { AuthenticatedRequest } from '../types.js';
 
 export async function rehabRoutes(app: FastifyInstance) {
   const generateSchema = z.object({
@@ -24,8 +25,8 @@ export async function rehabRoutes(app: FastifyInstance) {
     try {
       const plan = await generateRehabPlan(body);
       return reply.send({ plan });
-    } catch (e: any) {
-      req.log.error({ error: 'Rehab generate failed', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      req.log.error({ error: 'Rehab generate failed', e, requestId: req.id });
       return reply.status(500).send({ error: e.message || 'Rehab generate failed' });
     }
   });
@@ -36,7 +37,7 @@ export async function rehabRoutes(app: FastifyInstance) {
   });
 
   app.post('/rehab/apply', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = applySchema.parse(req.body);
     const plan = body.plan as RehabPlan;
     if (!plan || !Array.isArray(plan.schedule) || plan.schedule.length === 0) {
@@ -59,9 +60,9 @@ export async function rehabRoutes(app: FastifyInstance) {
       );
       await client.query('COMMIT');
       return reply.send({ success: true });
-    } catch (e: any) {
+    } catch (e: unknown) {
       await client.query('ROLLBACK');
-      req.log.error({ error: 'Rehab apply failed', e, requestId: (req as any).requestId });
+      req.log.error({ error: 'Rehab apply failed', e, requestId: req.id });
       return reply.status(500).send({ error: e.message || 'Rehab apply failed' });
     } finally {
       client.release();
@@ -76,7 +77,7 @@ export async function rehabRoutes(app: FastifyInstance) {
   });
 
   app.get('/rehab/pain-logs', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT id, pain_level, mobility_status, recovery_phase, notes, created_at
        FROM pain_logs
@@ -96,7 +97,7 @@ export async function rehabRoutes(app: FastifyInstance) {
   });
 
   app.post('/rehab/pain-logs', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = painLogSchema.parse(req.body);
     const { rows } = await pool.query(
       `INSERT INTO pain_logs(user_id, pain_level, mobility_status, recovery_phase, notes)

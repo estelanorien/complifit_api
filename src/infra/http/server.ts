@@ -19,6 +19,7 @@ import { adminRoutes } from './routes/admin.js';
 import { calorieBankRoutes } from './routes/calorieBank.js';
 import { trainingRoutes } from './routes/training.js';
 import { nutritionRoutes } from './routes/nutrition.js';
+import { groceryRoutes } from './routes/grocery.js';
 import { rehabRoutes } from './routes/rehab.js';
 import { coachRoutes } from './routes/coach.js';
 import { behaviorRoutes } from './routes/behavior.js';
@@ -33,7 +34,6 @@ import { notificationRoutes } from './routes/notifications.js';
 import { socialAuthRoutes } from './routes/socialAuth.js';
 import { customProgramRoutes } from './routes/customPrograms.js';
 import { jobRoutes } from './routes/jobs.js';
-import { generationRoutes } from './routes/generation.js';
 import { requestLogger, responseLogger, errorLogger } from './hooks/requestLogger.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errors.js';
@@ -72,22 +72,18 @@ export function buildServer() {
     trustProxy: true // CRITICAL: Required for Cloud Run/Load Balancers to forward real IPs
   });
 
-  // CORS configuration - ROBUST SETTINGS for production/local interop
-  // Explicitly allow localhost:5173/5174 (Vite dev) and env ALLOWED_ORIGINS when set
-  const devOrigins = ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'];
-  const allowedList = env.allowedOrigins && env.allowedOrigins.length > 0
-    ? [...new Set([...env.allowedOrigins, ...devOrigins])]
-    : null;
-  const corsOptions = {
-    origin: allowedList
-      ? (origin: string | undefined, cb: (err: Error | null, allow: boolean | string) => void) => {
-          cb(null, origin && allowedList.includes(origin) ? origin : '*');
-        }
-      : '*',
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-request-id', 'x-goog-api-key', 'x-api-key'],
-    credentials: false
-  };
+  // CORS configuration - production-safe
+  const corsOptions = env.nodeEnv === 'production' && env.allowedOrigins
+    ? {
+      origin: env.allowedOrigins,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      credentials: true
+    }
+    : {
+      origin: ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5174', 'http://localhost:3001', 'http://localhost:3005'],
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      credentials: true
+    };
 
   // Security headers
   app.register(helmet, {
@@ -108,23 +104,6 @@ export function buildServer() {
   });
 
   app.register(cors, corsOptions);
-
-  // CRITICAL: CORS on every response - use * so Cloud Run/proxies never hide it
-  app.addHook('onRequest', async (req: any, reply: any) => {
-    reply.header('Access-Control-Allow-Origin', '*');
-    reply.header('Access-Control-Allow-Credentials', 'false');
-    reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
-  });
-
-  // Last-chance CORS: ALWAYS set on every response (Cloud Run/proxies must not strip)
-  app.addHook('onSend', async (req: any, reply: any, payload: any) => {
-    reply.header('Access-Control-Allow-Origin', '*');
-    reply.header('Access-Control-Allow-Credentials', 'false');
-    reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
-    return payload;
-  });
 
   // Request ID middleware - must be registered early
   app.addHook('onRequest', requestIdMiddleware);
@@ -175,6 +154,7 @@ export function buildServer() {
   app.register(plansRoutes, { prefix: '/api' });
   app.register(trainingRoutes, { prefix: '/api' });
   app.register(nutritionRoutes, { prefix: '/api' });
+  app.register(groceryRoutes, { prefix: '/api' });
   app.register(rehabRoutes, { prefix: '/api' });
   app.register(guardianRoutes, { prefix: '/api' });
   app.register(calorieBankRoutes, { prefix: '/api' });
@@ -190,7 +170,6 @@ export function buildServer() {
   app.register(subscriptionRoutes, { prefix: '/api' });
   app.register(customProgramRoutes, { prefix: '/api' });
   app.register(jobRoutes, { prefix: '/api' });
-  app.register(generationRoutes, { prefix: '/api' });
 
   return app;
 }

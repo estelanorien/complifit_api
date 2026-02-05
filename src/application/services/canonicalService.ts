@@ -5,16 +5,6 @@ import { normalizeToMovementId } from './normalization.js';
 
 const aiService = new AiService();
 
-/** Known non-English exercise names -> canonical English name (for merging cross-language variants without LLM). */
-const EXERCISE_NAME_ALIASES: Record<string, string> = {
-    'Yoga Akışı': 'Yoga Flow',
-    'Yoga (akış)': 'Yoga Flow',
-    'Yoga (esneme)': 'Yoga Stretching',
-    'Çeviklik Merdiveni': 'Agility Ladder',
-    'Şınav': 'Push-Ups',
-    'Barfiks': 'Pull-ups',
-};
-
 export interface CanonicalIdentity {
     canonicalId: string;
     originalName: string;
@@ -23,21 +13,56 @@ export interface CanonicalIdentity {
 
 export class CanonicalService {
     /**
+     * Maps a localized name to a canonical English ID without using LLM.
+     * Simple normalization-based approach for fast lookups.
+     */
+    async getCanonicalIdNoLlm(name: string, type: 'meal' | 'exercise'): Promise<CanonicalIdentity> {
+        if (!name) return { canonicalId: 'unknown', originalName: '', language: 'en' };
+        const trimmed = name.trim();
+
+        // Check cache first
+        const { rows: existing } = await pool.query(
+            `SELECT movement_id, language
+             FROM cached_asset_meta
+             WHERE original_name = $1
+             LIMIT 1`,
+            [trimmed]
+        );
+
+        if (existing.length > 0) {
+            return {
+                canonicalId: existing[0].movement_id,
+                originalName: trimmed,
+                language: existing[0].language || 'en'
+            };
+        }
+
+        // Simple normalization without LLM
+        const prefix = type === 'meal' ? 'meal' : 'movement';
+        return {
+            canonicalId: `${prefix}_${this.simpleNormalize(trimmed)}`,
+            originalName: trimmed,
+            language: 'unknown'
+        };
+    }
+
+    /**
      * Maps a localized name to a canonical English ID.
      * Uses LLM for the translation/mapping and caches the result.
-     * Set forceLlm=true to skip cache and always use LLM (for re-merging cross-language variants).
+     * @param forceLlm - Skip cache and always use LLM (useful for cross-language merging)
      */
     async getCanonicalId(name: string, type: 'meal' | 'exercise', forceLlm = false): Promise<CanonicalIdentity> {
         if (!name) return { canonicalId: 'unknown', originalName: '', language: 'en' };
 
         const trimmed = name.trim();
 
+        // 1. Check if we already have a mapping for this EXACT string (skip if forceLlm)
+        // We look in cached_asset_meta for any group that used this original_name
         if (!forceLlm) {
-            // 1. Check if we already have a mapping for this EXACT string
             const { rows: existing } = await pool.query(
-                `SELECT movement_id, language 
-                 FROM cached_asset_meta 
-                 WHERE original_name = $1 
+                `SELECT movement_id, language
+                 FROM cached_asset_meta
+                 WHERE original_name = $1
                  LIMIT 1`,
                 [trimmed]
             );
@@ -49,15 +74,6 @@ export class CanonicalService {
                     language: existing[0].language || 'en'
                 };
             }
-        }
-
-        if (type === 'exercise' && EXERCISE_NAME_ALIASES[trimmed]) {
-            const englishName = EXERCISE_NAME_ALIASES[trimmed];
-            return {
-                canonicalId: `movement_${this.simpleNormalize(englishName)}`,
-                originalName: trimmed,
-                language: 'tr'
-            };
         }
 
         // 2. Use LLM to get English name and detect language
@@ -78,49 +94,19 @@ export class CanonicalService {
         
         Input Name: ${trimmed}`;
 
-        const prefix = type === 'meal' ? 'meal' : 'movement';
-        const fallback = (): CanonicalIdentity => ({
-            canonicalId: `${prefix}_${this.simpleNormalize(trimmed)}`,
-            originalName: trimmed,
-            language: 'unknown'
+        const { text } = await aiService.generateText({
+            prompt,
+            model: 'models/gemini-3-flash-preview'
         });
 
-        let text: string;
-        const maxRetries = 3;
-        const retryDelayMs = 5000;
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                const res = await aiService.generateText({
-                    prompt,
-                    model: 'models/gemini-3-flash-preview'
-                });
-                text = res.text;
-                break;
-            } catch (e: any) {
-                const isRetryable = e?.message?.includes('503') || e?.message?.includes('overloaded') || e?.message?.includes('UNAVAILABLE');
-                if (isRetryable && attempt < maxRetries) {
-                    console.warn(`[CanonicalService] LLM attempt ${attempt} failed, retrying in ${retryDelayMs}ms...`, e?.message);
-                    await new Promise(r => setTimeout(r, retryDelayMs));
-                    continue;
-                }
-                console.warn("[CanonicalService] LLM failed, using fallback:", e?.message);
-                if (type === 'exercise' && EXERCISE_NAME_ALIASES[trimmed]) {
-                    const englishName = EXERCISE_NAME_ALIASES[trimmed];
-                    return { canonicalId: `movement_${this.simpleNormalize(englishName)}`, originalName: trimmed, language: 'tr' };
-                }
-                return fallback();
-            }
-        }
-
         try {
-            const jsonStr = (text as string)
-                .replace(/^[\s\S]*?```(?:json)?\s*/i, '')
-                .replace(/\s*```[\s\S]*$/i, '')
-                .trim();
-            const result = JSON.parse(jsonStr);
+            const result = JSON.parse(text);
             const englishName = result.englishName || trimmed;
             const lang = result.languageCode || 'unknown';
 
+            // Normalize the English name to create the Canonical ID
+            // prefix_normalized_name
+            const prefix = type === 'meal' ? 'meal' : 'movement';
             const normalized = this.simpleNormalize(englishName);
             const canonicalId = `${prefix}_${normalized}`;
 
@@ -131,46 +117,14 @@ export class CanonicalService {
             };
         } catch (e) {
             console.error("[CanonicalService] Parse Error:", e);
-            if (type === 'exercise' && EXERCISE_NAME_ALIASES[trimmed]) {
-                const englishName = EXERCISE_NAME_ALIASES[trimmed];
-                return { canonicalId: `movement_${this.simpleNormalize(englishName)}`, originalName: trimmed, language: 'tr' };
-            }
-            return fallback();
-        }
-    }
-
-    /**
-     * Get canonical identity without calling LLM. Uses DB cache only, then
-     * fallback to prefix + simpleNormalize(name). Use when STANDARDIZE_NO_LLM=1.
-     */
-    async getCanonicalIdNoLlm(name: string, type: 'meal' | 'exercise'): Promise<CanonicalIdentity> {
-        if (!name) return { canonicalId: 'unknown', originalName: '', language: 'en' };
-        const trimmed = name.trim();
-        const { rows: existing } = await pool.query(
-            `SELECT movement_id, language FROM cached_asset_meta WHERE original_name = $1 LIMIT 1`,
-            [trimmed]
-        );
-        if (existing.length > 0) {
+            // Fallback: simple normalization of the input name
+            const prefix = type === 'meal' ? 'meal' : 'movement';
             return {
-                canonicalId: existing[0].movement_id,
+                canonicalId: `${prefix}_${this.simpleNormalize(trimmed)}`,
                 originalName: trimmed,
-                language: existing[0].language || 'en'
+                language: 'unknown'
             };
         }
-        if (type === 'exercise' && EXERCISE_NAME_ALIASES[trimmed]) {
-            const englishName = EXERCISE_NAME_ALIASES[trimmed];
-            return {
-                canonicalId: `movement_${this.simpleNormalize(englishName)}`,
-                originalName: trimmed,
-                language: 'tr'
-            };
-        }
-        const prefix = type === 'meal' ? 'meal' : 'movement';
-        return {
-            canonicalId: `${prefix}_${this.simpleNormalize(trimmed)}`,
-            originalName: trimmed,
-            language: 'unknown'
-        };
     }
 
     private simpleNormalize(str: string): string {

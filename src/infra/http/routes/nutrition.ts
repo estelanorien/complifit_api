@@ -3,13 +3,15 @@ import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
 import { MealPlan, generateNutritionPlan } from '../../../application/services/nutritionService.js';
+import { AuthenticatedRequest } from '../types.js';
+import { PoolClient } from 'pg';
 
-const toJsonOrNull = (value: any) => {
+const toJsonOrNull = (value: unknown) => {
   if (value === undefined || value === null) return null;
   return JSON.stringify(value);
 };
 
-const saveMealPlanToDb = async (client: any, userId: string, mealPlan: MealPlan, startDate?: string) => {
+const saveMealPlanToDb = async (client: PoolClient, userId: string, mealPlan: MealPlan, startDate?: string) => {
   const mealPlanId = (await client.query('SELECT gen_random_uuid() AS id')).rows[0].id;
   await client.query(
     `INSERT INTO meal_plans(id, user_id, name, start_date, variety_mode, is_recovery, created_at)
@@ -86,7 +88,7 @@ export async function nutritionRoutes(app: FastifyInstance) {
   });
 
   app.post('/nutrition/generate', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = generateSchema.parse(req.body);
     try {
       const nutritionPlan = await generateNutritionPlan({
@@ -111,16 +113,18 @@ export async function nutritionRoutes(app: FastifyInstance) {
         const mealPlanId = await saveMealPlanToDb(client, user.userId, nutritionPlan, body.startDate);
         await client.query('COMMIT');
         return reply.send({ nutrition: nutritionPlan, mealPlanId });
-      } catch (e: any) {
+      } catch (e: unknown) {
         await client.query('ROLLBACK');
-        req.log.error({ error: 'nutrition generate save failed', e, requestId: (req as any).requestId });
-        return reply.status(500).send({ error: e.message || 'Nutrition save failed' });
+        const error = e as Error;
+        req.log.error({ error: 'nutrition generate save failed', message: error.message, requestId: req.id });
+        return reply.status(500).send({ error: error.message || 'Nutrition save failed' });
       } finally {
         client.release();
       }
-    } catch (e: any) {
-      req.log.error({ error: 'Nutrition generate failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'Nutrition generate failed' });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'Nutrition generate failed', message: error.message, requestId: req.id });
+      return reply.status(500).send({ error: error.message || 'Nutrition generate failed' });
     }
   });
 
@@ -132,7 +136,7 @@ export async function nutritionRoutes(app: FastifyInstance) {
   });
 
   app.get('/nutrition/archives', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT id, name, date_created, plan, progress_day_index, summary
        FROM meal_archives
@@ -152,7 +156,7 @@ export async function nutritionRoutes(app: FastifyInstance) {
   });
 
   app.post('/nutrition/archives', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = archiveSchema.parse(req.body);
     const archiveId = (await pool.query('SELECT gen_random_uuid() AS id')).rows[0].id;
     await pool.query(
@@ -176,7 +180,7 @@ export async function nutritionRoutes(app: FastifyInstance) {
   });
 
   app.post('/nutrition/archives/load', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = loadArchiveSchema.parse(req.body);
     const { rows } = await pool.query(
       `SELECT plan FROM meal_archives WHERE id = $1 AND user_id = $2`,
@@ -190,17 +194,18 @@ export async function nutritionRoutes(app: FastifyInstance) {
       await saveMealPlanToDb(client, user.userId, plan, body.startDate);
       await client.query('COMMIT');
       return reply.send({ success: true });
-    } catch (e: any) {
+    } catch (e: unknown) {
       await client.query('ROLLBACK');
-      req.log.error({ error: 'nutrition archive load failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'Archive load failed' });
+      const error = e as Error;
+      req.log.error({ error: 'nutrition archive load failed', message: error.message, requestId: req.id });
+      return reply.status(500).send({ error: error.message || 'Archive load failed' });
     } finally {
       client.release();
     }
   });
 
   app.patch('/nutrition/archives/:id', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const id = z.string().uuid().parse((req.params as any).id);
     const body = z.object({ name: z.string() }).parse(req.body);
     const res = await pool.query(
@@ -212,7 +217,7 @@ export async function nutritionRoutes(app: FastifyInstance) {
   });
 
   app.delete('/nutrition/archives/:id', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const id = z.string().uuid().parse((req.params as any).id);
     const res = await pool.query(
       `DELETE FROM meal_archives WHERE id = $1 AND user_id = $2`,
@@ -220,6 +225,127 @@ export async function nutritionRoutes(app: FastifyInstance) {
     );
     if (res.rowCount === 0) return reply.status(404).send({ error: 'Archive not found' });
     return reply.send({ success: true });
+  });
+
+  // ============ NUTRITION LOOKUP (CalorieNinjas) ============
+
+  const lookupSchema = z.object({
+    query: z.string().min(2).max(500),
+    source: z.enum(['calorieninjas', 'cache', 'auto']).default('auto')
+  });
+
+  interface NutritionItem {
+    name: string;
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    fiber?: number;
+    sugar?: number;
+    servingSize?: number;
+    source: string;
+    confidence: number;
+  }
+
+  /**
+   * POST /nutrition/lookup
+   * Look up nutrition data for a food item using CalorieNinjas API
+   * Results are cached in food_analysis_cache table
+   */
+  app.post('/nutrition/lookup', { preHandler: authGuard }, async (req, reply) => {
+    const body = lookupSchema.parse(req.body);
+    const queryLower = body.query.toLowerCase().trim();
+    const cacheKey = queryLower.replace(/\s+/g, '_');
+
+    // 1. Check cache first
+    if (body.source === 'cache' || body.source === 'auto') {
+      const { rows: cached } = await pool.query(
+        `SELECT analysis FROM food_analysis_cache
+         WHERE image_hash = $1
+         AND created_at > NOW() - INTERVAL '7 days'`,
+        [`nutrition_${cacheKey}`]
+      );
+
+      if (cached.length > 0 && cached[0].analysis) {
+        return reply.send({
+          items: cached[0].analysis as NutritionItem[],
+          source: 'cache',
+          cached: true
+        });
+      }
+    }
+
+    // 2. Call CalorieNinjas API
+    const apiKey = process.env.CALORIENINJAS_API_KEY;
+    if (!apiKey && body.source !== 'cache') {
+      // No API key - return empty with warning
+      req.log.warn({ msg: 'CalorieNinjas API key not configured' });
+      return reply.send({
+        items: [],
+        source: 'none',
+        cached: false,
+        warning: 'Nutrition API not configured'
+      });
+    }
+
+    try {
+      const response = await fetch(
+        `https://api.calorieninjas.com/v1/nutrition?query=${encodeURIComponent(body.query)}`,
+        {
+          headers: {
+            'X-Api-Key': apiKey!,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        if (response.status === 429) {
+          return reply.status(429).send({ error: 'Rate limit exceeded' });
+        }
+        throw new Error(`CalorieNinjas API error: ${response.status}`);
+      }
+
+      const data = await response.json() as { items: any[] };
+
+      const items: NutritionItem[] = (data.items || []).map((item: any) => ({
+        name: item.name,
+        calories: Math.round(item.calories || 0),
+        protein: Math.round((item.protein_g || 0) * 10) / 10,
+        carbs: Math.round((item.carbohydrates_total_g || 0) * 10) / 10,
+        fat: Math.round((item.fat_total_g || 0) * 10) / 10,
+        fiber: item.fiber_g,
+        sugar: item.sugar_g,
+        servingSize: item.serving_size_g,
+        source: 'calorieninjas',
+        confidence: 0.9
+      }));
+
+      // 3. Cache the result
+      if (items.length > 0) {
+        await pool.query(
+          `INSERT INTO food_analysis_cache(id, image_hash, analysis, created_at, accessed_at)
+           VALUES(gen_random_uuid(), $1, $2, NOW(), NOW())
+           ON CONFLICT (image_hash) DO UPDATE SET
+             analysis = $2,
+             accessed_at = NOW()`,
+          [`nutrition_${cacheKey}`, JSON.stringify(items)]
+        );
+      }
+
+      return reply.send({
+        items,
+        source: 'calorieninjas',
+        cached: false
+      });
+
+    } catch (error: any) {
+      req.log.error({ msg: 'Nutrition lookup failed', error: error.message });
+      return reply.status(500).send({
+        error: 'Nutrition lookup failed',
+        details: error.message
+      });
+    }
   });
 }
 

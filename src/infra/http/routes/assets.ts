@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
@@ -8,6 +8,40 @@ import { UnifiedKey } from '../../../domain/UnifiedKey.js';
 import { AssetPromptService } from '../../../application/services/assetPromptService.js';
 import { MovementRepository } from '../../db/repositories/MovementRepository.js';
 import { UnifiedAssetService } from '../../../application/services/UnifiedAssetService.js';
+import { AssetStatus, AssetType } from '../types.js';
+
+// Types for this route
+interface AssetRow {
+  key: string;
+  value?: string | null;
+  asset_type?: string;
+  status?: string;
+  created_at?: Date;
+  buffer?: Buffer | null;
+  text_context?: string | null;
+  text_context_simple?: string | null;
+  prompt?: string | null;
+  mode?: string | null;
+  source?: string | null;
+  created_by?: string | null;
+  meta_created_at?: Date | null;
+  movement_id?: string | null;
+  translation_status?: string | null;
+  translation_error?: string | null;
+  video_status?: string | null;
+  video_error?: string | null;
+  step_index?: number | null;
+  persona?: string | null;
+}
+
+interface AssetMetadata {
+  text_context?: string | null;
+  text_context_simple?: string | null;
+}
+
+interface DbError extends Error {
+  code?: string;
+}
 
 const assetSchema = z.object({
   key: z.string(),
@@ -27,14 +61,14 @@ const assetSchema = z.object({
 // No runtime table creation needed
 
 export async function assetsRoutes(app: FastifyInstance) {
-  app.get('/assets', { preHandler: authGuard }, async (req: any, reply: any) => {
+  app.get('/assets', { preHandler: authGuard }, async () => {
     const { rows } = await pool.query(`SELECT key, status, asset_type FROM cached_assets`);
     return rows;
   });
 
 
-  app.get('/assets/:key', { preHandler: authGuard }, async (req: any, reply: any) => {
-    const { key } = req.params as any;
+  app.get<{ Params: { key: string } }>('/assets/:key', { preHandler: authGuard }, async (req, reply) => {
+    const { key } = req.params;
     try {
       const decodedKey = decodeURIComponent(key);
 
@@ -66,7 +100,7 @@ export async function assetsRoutes(app: FastifyInstance) {
         }
 
         // Return immediately if active/generating
-        if (status === 'active' || status === ('auto' as any) || status === 'generating') {
+        if (status === 'active' || status === 'auto' || status === 'generating') {
           return {
             value,
             assetType: asset_type,
@@ -120,13 +154,14 @@ export async function assetsRoutes(app: FastifyInstance) {
       }
 
       return reply.status(404).send({ error: 'Asset not found' });
-    } catch (error: any) {
+    } catch (e: unknown) {
+      const error = e as Error;
       req.log.error({ error: 'GET /assets/:key failed', key, message: error.message });
       return reply.status(500).send({ error: error.message || 'Internal server error' });
     }
   });
 
-  app.post('/assets', { preHandler: authGuard }, async (req: any, reply: any) => {
+  app.post('/assets', { preHandler: authGuard }, async (req, reply) => {
     try {
       const body = assetSchema.parse(req.body);
 
@@ -140,15 +175,16 @@ export async function assetsRoutes(app: FastifyInstance) {
       try {
         await AssetRepository.save(body.key, {
           value: body.value,
-          status: body.status as any,
-          type: body.type as any
+          status: body.status as AssetStatus,
+          type: body.type as AssetType
         });
-      } catch (dbError: any) {
+      } catch (e: unknown) {
+        const dbError = e as DbError;
         req.log.error({
           error: 'Failed to insert/update cached_assets via Repository',
           key: body.key,
           dbError: dbError.message,
-          requestId: (req as any).requestId
+          requestId: req.id
         });
 
         // Provide user-friendly error messages
@@ -171,13 +207,14 @@ export async function assetsRoutes(app: FastifyInstance) {
              ON CONFLICT (key) DO UPDATE SET prompt=EXCLUDED.prompt, mode=EXCLUDED.mode, source=EXCLUDED.source, created_by=EXCLUDED.created_by, movement_id=EXCLUDED.movement_id`,
             [body.key, prompt || null, mode || null, source || null, createdBy || null, movementId || null]
           );
-        } catch (metaError: any) {
+        } catch (e: unknown) {
+          const metaError = e as DbError;
           req.log.error({
             error: 'Failed to insert/update cached_asset_meta',
             key: body.key,
             metaError: metaError.message,
             code: metaError.code,
-            requestId: (req as any).requestId
+            requestId: req.id
           });
           // Don't fail the whole request if metadata insert fails
           // Asset was saved successfully
@@ -185,12 +222,13 @@ export async function assetsRoutes(app: FastifyInstance) {
       }
 
       return reply.send({ success: true });
-    } catch (error: any) {
+    } catch (e: unknown) {
+      const error = e as Error;
       req.log.error({
         error: 'POST /assets failed',
         message: error.message,
         stack: error.stack,
-        requestId: (req as any).requestId
+        requestId: req.id
       });
 
       // Handle Zod validation errors
@@ -208,7 +246,8 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   app.post('/assets/check', { preHandler: authGuard }, async (req) => {
-    const { keys } = req.body as any;
+    const body = req.body as { keys?: string[] };
+    const keys = body?.keys;
     if (!Array.isArray(keys) || keys.length === 0) return [];
     const { rows } = await pool.query(
       `SELECT key, status FROM cached_assets WHERE key = ANY($1) AND status IN ('active','auto','draft')`,
@@ -217,28 +256,28 @@ export async function assetsRoutes(app: FastifyInstance) {
     return rows;
   });
 
-  app.post('/assets/batch', { preHandler: authGuard }, async (req: any, reply: any) => {
-    const safeSendEmpty = () => { if (!reply.sent) try { reply.send({}); } catch (_) { /* ignore */ } };
+  app.post('/assets/batch', { preHandler: authGuard }, async (req, reply) => {
+    const safeSendEmpty = () => { if (!reply.sent) try { reply.send({}); } catch { /* ignore */ } };
     try {
-      const rawBody = req.body;
-      const keys: string[] = (rawBody && typeof rawBody === 'object' && Array.isArray((rawBody as any).keys))
-        ? (rawBody as any).keys
+      const rawBody = req.body as { keys?: string[] } | string[];
+      const keys: string[] = (rawBody && typeof rawBody === 'object' && 'keys' in rawBody && Array.isArray(rawBody.keys))
+        ? rawBody.keys
         : Array.isArray(rawBody)
-          ? (rawBody as string[])
+          ? rawBody
           : [];
       // Deduplicate and limit keys to prevent huge responses (each image ~2MB)
-      const uniqueKeys = [...new Set(keys.filter((k: any) => typeof k === 'string'))];
+      const uniqueKeys = [...new Set(keys.filter((k): k is string => typeof k === 'string'))];
       const cappedKeys = uniqueKeys.slice(0, 15); // Max 15 images (~30MB max response)
       if (cappedKeys.length === 0) {
         return safeSendEmpty();
       }
 
       const client = await pool.connect();
-      let rows: any[] = [];
+      let rows: AssetRow[] = [];
       try {
         await client.query(`SET statement_timeout = '60000'`);
         // Primary query: no meta join so we always return results when keys exist (no schema dependency)
-        const res = await client.query(
+        const res = await client.query<AssetRow>(
           `SELECT a.key, a.value, a.asset_type, a.status, b.data as buffer
            FROM cached_assets a
            LEFT JOIN asset_blob_storage b ON a.key = b.key
@@ -249,25 +288,25 @@ export async function assetsRoutes(app: FastifyInstance) {
         rows = res.rows || [];
         if (rows.length > 0) {
           try {
-            const metaRes = await client.query(
+            const metaRes = await client.query<{ key: string; text_context?: string; text_context_simple?: string }>(
               `SELECT key, text_context, text_context_simple FROM cached_asset_meta WHERE key = ANY($1)`,
-              [rows.map((r: any) => r.key)]
+              [rows.map(r => r.key)]
             );
-            const metaByKey = new Map((metaRes.rows || []).map((m: any) => [m.key, m]));
-            rows = rows.map((r: any) => {
+            const metaByKey = new Map((metaRes.rows || []).map(m => [m.key, m]));
+            rows = rows.map(r => {
               const meta = metaByKey.get(r.key);
               return { ...r, text_context: meta?.text_context ?? null, text_context_simple: meta?.text_context_simple ?? null };
             });
-          } catch (_) { /* optional */ }
+          } catch { /* optional */ }
         }
-      } catch (queryErr: any) {
-        req.log?.warn({ err: queryErr }, '[assets/batch] Query failed');
+      } catch (e: unknown) {
+        req.log?.warn({ err: e }, '[assets/batch] Query failed');
         rows = [];
       } finally {
         client.release();
       }
 
-      const result: Record<string, any> = {};
+      const result: Record<string, { value: string; assetType: string; status: string | undefined; textContext: string; textContextSimple: string }> = {};
       for (const r of rows) {
         try {
           if (!r || r.key == null) continue;
@@ -287,20 +326,21 @@ export async function assetsRoutes(app: FastifyInstance) {
             textContext: r.text_context || '',
             textContextSimple: r.text_context_simple || ''
           };
-        } catch (rowErr: any) {
-          req.log?.warn({ key: r?.key, err: rowErr }, '[assets/batch] Skip row');
+        } catch (e: unknown) {
+          req.log?.warn({ key: r?.key, err: e }, '[assets/batch] Skip row');
         }
       }
       if (!reply.sent) reply.send(result);
-    } catch (e: any) {
+    } catch (e: unknown) {
       req.log?.warn({ err: e }, '[assets/batch] Error, returning empty');
       safeSendEmpty();
     }
   });
 
   app.post('/assets/scan', { preHandler: authGuard }, async (req) => {
-    const { prefix } = req.body as any;
-    const { rows } = await pool.query(
+    const body = req.body as { prefix?: string };
+    const prefix = body?.prefix || '';
+    const { rows } = await pool.query<{ key: string }>(
       `SELECT key FROM cached_assets WHERE key ILIKE $1 LIMIT 100`,
       [`${prefix}%`]
     );
@@ -349,9 +389,11 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   app.post('/assets/with-fallback', { preHandler: authGuard }, async (req, reply) => {
-    const { baseKey, specificThemeId } = req.body as any;
+    const body = req.body as { baseKey?: string; specificThemeId?: string };
+    const baseKey = body?.baseKey || '';
+    const specificThemeId = body?.specificThemeId;
     const keysToTry = specificThemeId ? [`${baseKey}_theme_${specificThemeId}`, baseKey] : [baseKey];
-    const { rows } = await pool.query(
+    const { rows } = await pool.query<{ key: string; value: string; asset_type: string }>(
       `SELECT key, value, asset_type FROM cached_assets WHERE key = ANY($1) AND status IN ('active','auto') ORDER BY status DESC LIMIT 1`,
       [keysToTry]
     );
@@ -366,8 +408,8 @@ export async function assetsRoutes(app: FastifyInstance) {
     return reply.send(value);
   });
 
-  app.get('/assets/meta/:key', { preHandler: authGuard }, async (req, reply) => {
-    const { key } = req.params as any;
+  app.get<{ Params: { key: string } }>('/assets/meta/:key', { preHandler: authGuard }, async (req, reply) => {
+    const { key } = req.params;
     const { rows } = await pool.query(
       `SELECT prompt, mode, source, created_by, created_at, movement_id FROM cached_asset_meta WHERE key = $1`,
       [key]
@@ -377,7 +419,7 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   // Explicit OPTIONS for by-movement so preflight always gets CORS (no auth on OPTIONS)
-  app.options('/assets/by-movement', async (req: any, reply: any) => {
+  app.options('/assets/by-movement', async (req, reply) => {
     reply.header('Access-Control-Allow-Origin', '*');
     reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
@@ -385,11 +427,8 @@ export async function assetsRoutes(app: FastifyInstance) {
     return reply.status(204).send();
   });
 
-  app.post('/assets/by-movement', { preHandler: authGuard }, async (req: any, reply: any) => {
+  app.post('/assets/by-movement', { preHandler: authGuard }, async (req, reply) => {
     req.log.info('[by-movement] handler entered');
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/cba905b3-6b91-4254-9025-e579b3638d0e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'assets.ts:376',message:'by-movement entry',data:{body:req.body},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
-    // #endregion
     // CORS on every response path (success, error, and outer catch)
     const corsHeaders = () => {
       reply.header('Access-Control-Allow-Origin', '*');
@@ -402,7 +441,8 @@ export async function assetsRoutes(app: FastifyInstance) {
     let body: { movementId: string; limit?: number };
     try {
       body = z.object({ movementId: z.string().min(1), limit: z.number().min(1).max(50).optional() }).parse(req.body || {});
-    } catch (parseErr: any) {
+    } catch (e: unknown) {
+      const parseErr = e as Error;
       req.log?.warn({ err: parseErr }, '[by-movement] Validation failed');
       if (!reply.sent) {
         corsHeaders();
@@ -421,7 +461,7 @@ export async function assetsRoutes(app: FastifyInstance) {
 
       // Use a dedicated client with longer timeout to avoid "Query read timeout" when syncing many images
       const client = await pool.connect();
-      let rows: any[];
+      let rows: AssetRow[];
       const queryParams = [originalMovementId, `ex:${originalMovementId}:%`, `meal:${originalMovementId}:%`, `ex_${originalMovementId}%`, `meal_${originalMovementId}%`, `${originalMovementId}%`, limit];
       const fullQuery = `SELECT a.key,
                    CASE
@@ -473,8 +513,12 @@ export async function assetsRoutes(app: FastifyInstance) {
             ORDER BY a.created_at DESC
             LIMIT $6`;
       const minimalParams = [`ex:${originalMovementId}:%`, `meal:${originalMovementId}:%`, `ex_${originalMovementId}%`, `meal_${originalMovementId}%`, `${originalMovementId}%`, limit];
-      const normalizeRow = (r: any) => ({
-        ...r,
+      const normalizeRow = (r: Partial<AssetRow>): AssetRow => ({
+        key: r.key || '',
+        value: r.value ?? null,
+        asset_type: r.asset_type,
+        status: r.status,
+        created_at: r.created_at,
         prompt: r.prompt ?? null,
         mode: r.mode ?? null,
         source: r.source ?? null,
@@ -494,25 +538,28 @@ export async function assetsRoutes(app: FastifyInstance) {
         await client.query(`SET statement_timeout = '120000'`);
         // Try fullQuery first (has all meta columns including text_context)
         try {
-          const fullRes = await client.query(fullQuery, queryParams);
-          rows = (fullRes.rows || []).map((r: any) => normalizeRow(r));
+          const fullRes = await client.query<AssetRow>(fullQuery, queryParams);
+          rows = (fullRes.rows || []).map(r => normalizeRow(r));
           req.log.info(`[by-movement] fullQuery succeeded: ${rows.length} rows`);
-        } catch (fullErr: any) {
+        } catch (e: unknown) {
+          const fullErr = e as Error;
           req.log.warn({ err: fullErr.message }, '[by-movement] fullQuery failed, trying fallback');
           // Try fallbackQuery (fewer meta columns, no text_context/step_index/persona)
           try {
-            const fbRes = await client.query(fallbackQuery, queryParams);
-            rows = (fbRes.rows || []).map((r: any) => normalizeRow(r));
+            const fbRes = await client.query<AssetRow>(fallbackQuery, queryParams);
+            rows = (fbRes.rows || []).map(r => normalizeRow(r));
             req.log.info(`[by-movement] fallbackQuery succeeded: ${rows.length} rows`);
-          } catch (fbErr: any) {
+          } catch (e2: unknown) {
+            const fbErr = e2 as Error;
             req.log.warn({ err: fbErr.message }, '[by-movement] fallbackQuery failed, using minimal');
             // Final fallback: minimalQuery (no meta join at all)
-            const minRes = await client.query(minimalQuery, minimalParams);
-            rows = (minRes.rows || []).map((r: any) => normalizeRow(r));
+            const minRes = await client.query<AssetRow>(minimalQuery, minimalParams);
+            rows = (minRes.rows || []).map(r => normalizeRow(r));
             req.log.info(`[by-movement] minimalQuery: ${rows.length} rows`);
           }
         }
-      } catch (outerErr: any) {
+      } catch (e: unknown) {
+        const outerErr = e as DbError;
         req.log.error({ err: outerErr, message: outerErr?.message, code: outerErr?.code }, '[by-movement] All queries failed');
         // Return error info instead of empty array so we can debug
         client.release();
@@ -526,10 +573,10 @@ export async function assetsRoutes(app: FastifyInstance) {
       }
 
       req.log.info(`[by-movement] Found ${rows.length} rows for ${originalMovementId}`);
-      const processedRows: any[] = [];
+      const processedRows: AssetRow[] = [];
       for (const row of rows) {
         try {
-          const out = { ...row };
+          const out: AssetRow = { ...row };
           // IMPORTANT: Don't include full image data in by-movement response to avoid huge payloads
           // Images are fetched separately via /assets/batch with specific keys
           if (out.asset_type === 'image') {
@@ -543,30 +590,31 @@ export async function assetsRoutes(app: FastifyInstance) {
           if (out.text_context === undefined) out.text_context = null;
           if (out.text_context_simple === undefined) out.text_context_simple = null;
           processedRows.push(out);
-        } catch (rowErr: any) {
-          req.log?.warn({ key: row?.key, err: rowErr }, '[by-movement] Skip row');
+        } catch (e: unknown) {
+          req.log?.warn({ key: row?.key, err: e }, '[by-movement] Skip row');
         }
       }
       if (!reply.sent) {
         try {
           return reply.send(processedRows);
-        } catch (sendErr: any) {
-          req.log?.warn({ err: sendErr }, '[by-movement] Send failed, returning empty');
+        } catch (e: unknown) {
+          req.log?.warn({ err: e }, '[by-movement] Send failed, returning empty');
           if (!reply.sent) return reply.send([]);
         }
       }
-    } catch (e: any) {
-      req.log.error({ err: e, stack: e?.stack }, '[by-movement] Error');
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ err: e, stack: error?.stack }, '[by-movement] Error');
       if (!reply.sent) {
         try {
           corsHeaders();
           reply.header('Content-Type', 'application/json');
           // Return error details for debugging
           return reply.status(500).send({
-            error: e?.message || 'Unknown error',
-            stack: process.env.NODE_ENV !== 'production' ? e?.stack : undefined
+            error: error?.message || 'Unknown error',
+            stack: process.env.NODE_ENV !== 'production' ? error?.stack : undefined
           });
-        } catch (_) { /* ignore */ }
+        } catch { /* ignore */ }
       }
     }
   });

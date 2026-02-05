@@ -1,13 +1,13 @@
-
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { pool } from '../../db/pool.js';
 import { authGuard } from '../hooks/auth.js';
+import { AuthenticatedRequest } from '../types.js';
 
 export async function subscriptionRoutes(app: FastifyInstance) {
     // 1. Upgrade to Pro (Mock)
     app.post('/subscription/upgrade', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
 
         await pool.query(
             `UPDATE profiles 
@@ -23,7 +23,7 @@ export async function subscriptionRoutes(app: FastifyInstance) {
 
     // 2. Downgrade/Cancel (Mock)
     app.post('/subscription/cancel', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
 
         await pool.query(
             `UPDATE profiles 

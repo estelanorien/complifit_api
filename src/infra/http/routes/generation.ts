@@ -17,6 +17,7 @@ import { userTriggeredGenerationService } from '../../../application/services/Us
 import { unifiedGenerationPipeline } from '../../../application/services/UnifiedGenerationPipeline.js';
 import { retryManager } from '../../../application/services/RetryManager.js';
 import { identityVerificationService } from '../../../application/services/IdentityVerificationService.js';
+import { AuthenticatedRequest } from '../types.js';
 
 // ============================================================================
 // Schemas
@@ -70,7 +71,7 @@ export async function generationRoutes(app: FastifyInstance) {
      * Returns primary image quickly, queues full pipeline in background
      */
     app.post('/generation/user-triggered', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const { entityType, entityName, entityId, preferredCoach } = userTriggerSchema.parse(req.body);
 
         try {
@@ -91,7 +92,7 @@ export async function generationRoutes(app: FastifyInstance) {
                 pipelineJobId: result.pipelineJobId,
                 error: result.error
             });
-        } catch (e: any) {
+        } catch (e: unknown) {
             req.log.error({ error: 'User-triggered generation failed', e });
             return reply.status(500).send({ error: e.message || 'Generation failed' });
         }
@@ -102,7 +103,7 @@ export async function generationRoutes(app: FastifyInstance) {
      * POST /generation/pregenerate
      */
     app.post('/generation/pregenerate', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const { items, preferredCoach } = pregenerateSchema.parse(req.body);
 
         try {
@@ -117,7 +118,7 @@ export async function generationRoutes(app: FastifyInstance) {
                 queued: result.queued,
                 alreadyExists: result.alreadyExists
             });
-        } catch (e: any) {
+        } catch (e: unknown) {
             req.log.error({ error: 'Pregeneration failed', e });
             return reply.status(500).send({ error: e.message || 'Pregeneration failed' });
         }
@@ -133,7 +134,7 @@ export async function generationRoutes(app: FastifyInstance) {
      * Admin only - runs complete pipeline synchronously
      */
     app.post('/generation/pipeline', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
 
         // Check admin role (simplified - you may have a proper admin check)
         const { rows } = await pool.query('SELECT role FROM users WHERE id = $1', [user.userId]);
@@ -156,7 +157,7 @@ export async function generationRoutes(app: FastifyInstance) {
             });
 
             return reply.send(result);
-        } catch (e: any) {
+        } catch (e: unknown) {
             req.log.error({ error: 'Pipeline execution failed', e });
             return reply.status(500).send({ error: e.message || 'Pipeline failed' });
         }
@@ -184,7 +185,7 @@ export async function generationRoutes(app: FastifyInstance) {
             }
 
             return reply.send(rows[0]);
-        } catch (e: any) {
+        } catch (e: unknown) {
             req.log.error({ error: 'Failed to get pipeline status', e });
             return reply.status(500).send({ error: 'Failed to get pipeline status' });
         }
@@ -202,7 +203,7 @@ export async function generationRoutes(app: FastifyInstance) {
                 SELECT * FROM pipeline_status
                 WHERE completed_at IS NULL
             `;
-            const params: any[] = [];
+            const params: string[] = [];
 
             if (entityType) {
                 query += ` AND entity_type = $1`;
@@ -213,7 +214,7 @@ export async function generationRoutes(app: FastifyInstance) {
 
             const { rows } = await pool.query(query, params);
             return reply.send({ pipelines: rows, count: rows.length });
-        } catch (e: any) {
+        } catch (e: unknown) {
             req.log.error({ error: 'Failed to list pipelines', e });
             return reply.status(500).send({ error: 'Failed to list pipelines' });
         }
@@ -228,7 +229,7 @@ export async function generationRoutes(app: FastifyInstance) {
      * GET /generation/dead-letter
      */
     app.get('/generation/dead-letter', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
 
         // Check admin role
         const { rows: userRows } = await pool.query('SELECT role FROM users WHERE id = $1', [user.userId]);
@@ -254,7 +255,7 @@ export async function generationRoutes(app: FastifyInstance) {
             const stats = await retryManager.getDeadLetterStats();
 
             return reply.send({ entries, stats });
-        } catch (e: any) {
+        } catch (e: unknown) {
             req.log.error({ error: 'Failed to get dead-letter entries', e });
             return reply.status(500).send({ error: 'Failed to get dead-letter queue' });
         }
@@ -265,7 +266,7 @@ export async function generationRoutes(app: FastifyInstance) {
      * POST /generation/dead-letter/:id/retry
      */
     app.post('/generation/dead-letter/:id/retry', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const { id } = req.params as { id: string };
 
         // Check admin role
@@ -287,7 +288,7 @@ export async function generationRoutes(app: FastifyInstance) {
                 message: 'Entry prepared for retry',
                 entry
             });
-        } catch (e: any) {
+        } catch (e: unknown) {
             req.log.error({ error: 'Failed to retry dead-letter entry', e });
             return reply.status(500).send({ error: 'Failed to retry entry' });
         }
@@ -298,7 +299,7 @@ export async function generationRoutes(app: FastifyInstance) {
      * POST /generation/dead-letter/:id/resolve
      */
     app.post('/generation/dead-letter/:id/resolve', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const { id } = req.params as { id: string };
         const { notes } = req.body as { notes?: string };
 
@@ -311,7 +312,7 @@ export async function generationRoutes(app: FastifyInstance) {
         try {
             await retryManager.resolveDeadLetterEntry(id, user.userId, notes);
             return reply.send({ success: true, message: 'Entry resolved' });
-        } catch (e: any) {
+        } catch (e: unknown) {
             req.log.error({ error: 'Failed to resolve dead-letter entry', e });
             return reply.status(500).send({ error: 'Failed to resolve entry' });
         }
@@ -326,7 +327,7 @@ export async function generationRoutes(app: FastifyInstance) {
      * GET /generation/identity-stats
      */
     app.get('/generation/identity-stats', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const { days = 7 } = req.query as { days?: number };
 
         // Check admin role
@@ -338,7 +339,7 @@ export async function generationRoutes(app: FastifyInstance) {
         try {
             const stats = await identityVerificationService.getStats(Math.min(days, 90));
             return reply.send(stats);
-        } catch (e: any) {
+        } catch (e: unknown) {
             req.log.error({ error: 'Failed to get identity stats', e });
             return reply.status(500).send({ error: 'Failed to get identity statistics' });
         }

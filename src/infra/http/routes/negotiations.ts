@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
+import { AuthenticatedRequest } from '../types.js';
 
 export async function negotiationRoutes(app: FastifyInstance) {
   const listSchema = z.object({
@@ -27,9 +28,9 @@ export async function negotiationRoutes(app: FastifyInstance) {
   });
 
   app.get('/negotiations', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const query = listSchema.parse(req.query ?? {});
-    const values: any[] = [user.userId];
+    const values: (string | number)[] = [user.userId];
     let where = 'user_id = $1';
     let index = 2;
 
@@ -63,7 +64,7 @@ export async function negotiationRoutes(app: FastifyInstance) {
   });
 
   app.post('/negotiations', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = createSchema.parse(req.body);
 
     const { rows } = await pool.query(
@@ -95,7 +96,7 @@ export async function negotiationRoutes(app: FastifyInstance) {
   });
 
   app.post('/negotiations/:id/actions', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const params = z.object({ id: z.string().uuid() }).parse(req.params);
     const body = actionSchema.parse(req.body);
 
@@ -132,7 +133,7 @@ export async function negotiationRoutes(app: FastifyInstance) {
   });
 
   app.patch('/negotiations/:id', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const params = z.object({ id: z.string().uuid() }).parse(req.params);
     const body = updateSchema.parse(req.body);
 

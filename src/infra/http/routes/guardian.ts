@@ -4,6 +4,7 @@ import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
 import fetch from 'node-fetch';
 import { env } from '../../../config/env.js';
+import { AuthenticatedRequest, GeminiResponse } from '../types.js';
 
 const cleanGeminiJson = (text: string): string => {
   if (!text) return text;
@@ -51,7 +52,7 @@ const findMealIdOrName = (profileData: any, dateStr: string, targetName: string)
 export async function guardianRoutes(app: FastifyInstance) {
   // Analyze deletion impact via Gemini
   app.post('/guardian/analyze-deletion', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
 
     const body = z.object({
@@ -156,11 +157,11 @@ export async function guardianRoutes(app: FastifyInstance) {
       await pool.query(
         `INSERT INTO guardian_actions(user_id, action_type, item_type, item_title, payload) VALUES($1,$2,$3,$4,$5)`,
         [user.userId, 'analysis', type, title, JSON.stringify({ calories, result })]
-      ).catch(e => req.log.error({ error: e, requestId: (req as any).requestId }, 'Failed to log guardian action'));
+      ).catch(e => req.log.error({ error: e, requestId: req.id }, 'Failed to log guardian action'));
 
       return reply.send(result);
-    } catch (e: any) {
-      req.log.error({ error: "Guardian analysis failed", e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      req.log.error({ error: "Guardian analysis failed", e, requestId: req.id });
 
       // Improved fallback: return delete_extra type which triggers simple deletion modal
       // This ensures users always see the Guardian Modal, even when AI analysis fails
@@ -183,7 +184,7 @@ export async function guardianRoutes(app: FastifyInstance) {
 
   // Apply deletion remedy
   app.post('/guardian/apply-remedy', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = z.object({
       remedy: z.any(),
       item: z.any(),
@@ -331,9 +332,9 @@ export async function guardianRoutes(app: FastifyInstance) {
       await client.query('COMMIT');
       return reply.send({ success: true, skippedItems: newSkipped, modifications: newMods });
 
-    } catch (e: any) {
+    } catch (e: unknown) {
       await client.query('ROLLBACK');
-      req.log.error({ error: "Apply remedy failed", e, requestId: (req as any).requestId });
+      req.log.error({ error: "Apply remedy failed", e, requestId: req.id });
       return reply.status(500).send({ error: e.message });
     } finally {
       client.release();
@@ -342,7 +343,7 @@ export async function guardianRoutes(app: FastifyInstance) {
 
   // Analyze surplus
   app.post('/guardian/analyze-surplus', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'API_KEY missing' });
 
     const body = z.object({
@@ -384,7 +385,7 @@ export async function guardianRoutes(app: FastifyInstance) {
 
   // Analyze extra training
   app.post('/guardian/analyze-extra-training', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
     const body = z.object({
       exerciseName: z.string(),
@@ -407,14 +408,14 @@ export async function guardianRoutes(app: FastifyInstance) {
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
       const parsed = JSON.parse(cleanGeminiJson(text) || '{}');
       return reply.send({ warning: parsed.warning || '', suggestions: parsed.suggestions?.slice(0, 3) || [] });
-    } catch (e: any) {
+    } catch (e: unknown) {
       return reply.send({ warning: "Consider recovery.", suggestions: [] });
     }
   });
 
   // Analyze meal replacement
   app.post('/guardian/analyze-meal-replacement', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
     // Use the same model for simplicity
     const body = z.object({
@@ -437,20 +438,20 @@ export async function guardianRoutes(app: FastifyInstance) {
       const data: any = await res.json();
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
       return reply.send(JSON.parse(cleanGeminiJson(text)));
-    } catch (e: any) {
+    } catch (e: unknown) {
       return reply.send({ shouldReplace: false });
     }
   });
 
   app.get('/guardian/actions', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(`SELECT id, action_type, item_type, item_title, payload, created_at FROM guardian_actions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`, [user.userId]);
     return rows.map((r: any) => ({ id: r.id, actionType: r.action_type, itemType: r.item_type, itemTitle: r.item_title, payload: r.payload, createdAt: r.created_at }));
   });
 
   // Analyze late wake-up (15:00+) and provide remedies for missed meals/workouts
   app.post('/guardian/analyze-late-wake', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
 
     const body = z.object({
@@ -585,11 +586,11 @@ export async function guardianRoutes(app: FastifyInstance) {
       await pool.query(
         `INSERT INTO guardian_actions(user_id, action_type, item_type, item_title, payload) VALUES($1,$2,$3,$4,$5)`,
         [user.userId, 'analysis', 'late_wake', `Wake at ${wakeTime}`, JSON.stringify({ missedItems, result })]
-      ).catch(e => req.log.error({ error: e, requestId: (req as any).requestId }, 'Failed to log late wake guardian action'));
+      ).catch(e => req.log.error({ error: e, requestId: req.id }, 'Failed to log late wake guardian action'));
 
       return reply.send(result);
-    } catch (e: any) {
-      req.log.error({ error: "Guardian late wake analysis failed", e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      req.log.error({ error: "Guardian late wake analysis failed", e, requestId: req.id });
 
       // Fallback response
       return reply.send({
@@ -636,7 +637,7 @@ export async function guardianRoutes(app: FastifyInstance) {
 
   // Apply late wake recommendation
   app.post('/guardian/apply-late-wake-recommendation', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
 
     const body = z.object({
       recommendation: z.object({
@@ -837,9 +838,9 @@ export async function guardianRoutes(app: FastifyInstance) {
         message: 'Recommendation applied successfully'
       });
 
-    } catch (e: any) {
+    } catch (e: unknown) {
       await client.query('ROLLBACK');
-      req.log.error({ error: "Apply late wake recommendation failed", e, requestId: (req as any).requestId });
+      req.log.error({ error: "Apply late wake recommendation failed", e, requestId: req.id });
       return reply.status(500).send({ error: e.message });
     } finally {
       client.release();

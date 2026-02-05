@@ -173,14 +173,14 @@ export async function restaurantRoutes(app: FastifyInstance) {
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         matches = JSON.parse(cleaned);
       } catch (e) {
-        req.log.error({ error: 'Failed to parse match response', e, requestId: (req as any).requestId });
+        req.log.error({ error: 'Failed to parse match response', e, requestId: req.id });
         return reply.status(500).send({ error: 'Failed to parse AI response' });
       }
 
       return reply.send(matches);
-    } catch (e: any) {
+    } catch (e: unknown) {
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'match-meal failed', e, requestId: (req as any).requestId });
+      req.log.error({ error: 'match-meal failed', e, requestId: req.id });
       return reply.status(500).send({ error: isProduction ? 'Meal matching service unavailable' : (e.message || 'Match meal failed') });
     }
   });
@@ -299,7 +299,7 @@ export async function restaurantRoutes(app: FastifyInstance) {
           // or Promise.allSettled.
           await Promise.allSettled(enrichmentQueries);
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         req.log.error({ error: 'Google Search failed', e });
       }
     }

@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
+import { AuthenticatedRequest } from '../types.js';
 
 const systemMsgSchema = z.object({
   title: z.string().default('Notification'),
@@ -14,7 +15,7 @@ const systemMsgSchema = z.object({
 export async function messagesRoutes(app: FastifyInstance) {
   // System messages for current user
   app.get('/messages/system', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT id, title, content, type, priority, read, timestamp, payload
        FROM system_messages
@@ -37,7 +38,7 @@ export async function messagesRoutes(app: FastifyInstance) {
 
   // Create system message (optionally user-scoped)
   app.post('/messages/system', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = systemMsgSchema.parse(req.body);
     const idRes = await pool.query('SELECT gen_random_uuid() as id');
     const id = idRes.rows[0].id;

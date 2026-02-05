@@ -47,16 +47,18 @@ export async function trainingRoutes(app: FastifyInstance) {
         const trainingId = await saveTrainingProgram(client, user.userId, trainingPlan, body.startDate);
         await client.query('COMMIT');
         return reply.send({ training: trainingPlan, trainingId });
-      } catch (e: any) {
+      } catch (e: unknown) {
         await client.query('ROLLBACK');
-        req.log.error({ error: 'training generate save failed', e, requestId: (req as any).requestId });
-        return reply.status(500).send({ error: e.message || 'Training save failed' });
+        const error = e as Error;
+        req.log.error({ error: 'training generate save failed', message: error.message, requestId: req.id });
+        return reply.status(500).send({ error: error.message || 'Training save failed' });
       } finally {
         client.release();
       }
-    } catch (e: any) {
-      req.log.error({ error: 'Training generate failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'Training generate failed' });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'Training generate failed', message: error.message, requestId: req.id });
+      return reply.status(500).send({ error: error.message || 'Training generate failed' });
     }
   });
 
@@ -185,10 +187,11 @@ export async function trainingRoutes(app: FastifyInstance) {
       await saveTrainingProgram(client, user.userId, plan, body.startDate, { isRecovery: !!plan?.isRecovery });
       await client.query('COMMIT');
       return reply.send({ success: true });
-    } catch (e: any) {
+    } catch (e: unknown) {
       await client.query('ROLLBACK');
-      req.log.error({ error: 'training archive load failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'Archive load failed' });
+      const error = e as Error;
+      req.log.error({ error: 'training archive load failed', message: error.message, requestId: req.id });
+      return reply.status(500).send({ error: error.message || 'Archive load failed' });
     } finally {
       client.release();
     }

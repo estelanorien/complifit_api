@@ -305,7 +305,7 @@ export class UserTriggeredGenerationService {
     /**
      * Convert asset to data URL
      */
-    private assetToDataUrl(asset: { buffer?: Buffer; value?: string }): string | null {
+    private assetToDataUrl(asset: { buffer?: Buffer | null; value?: string | null }): string | null {
         if (asset.buffer && asset.buffer.length > 0) {
             return `data:image/png;base64,${asset.buffer.toString('base64')}`;
         }
