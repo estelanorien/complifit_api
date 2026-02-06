@@ -31,7 +31,7 @@ interface GroupGenerationParams {
   groupType: 'exercise' | 'meal';
   forceRegen?: boolean;
   themeId?: string;
-  targetStatus?: string;
+  targetStatus?: 'active' | 'auto' | 'draft';
 }
 
 interface ExerciseData {

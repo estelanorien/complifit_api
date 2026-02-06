@@ -232,7 +232,7 @@ export class VideoOrchestrator {
           privacyStatus: options.youtubePrivacy || 'unlisted'
         });
 
-        youtubeId = ytResult.videoId;
+        youtubeId = ytResult.videoId ?? undefined;
         youtubeUrl = ytResult.url;
         console.log(`[VideoOrchestrator] YouTube upload complete: ${youtubeUrl}`);
       } catch (ytError) {
