@@ -199,7 +199,7 @@ export async function trainingRoutes(app: FastifyInstance) {
 
   app.delete('/training/archives/:id', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
-    const id = z.string().uuid().parse((req.params as any).id);
+    const id = z.string().uuid().parse((req.params as { id: string }).id);
     const res = await pool.query(`DELETE FROM training_archives WHERE id = $1 AND user_id = $2`, [id, user.userId]);
     if (res.rowCount === 0) return reply.status(404).send({ error: 'Archive not found' });
     return reply.send({ success: true });
@@ -207,7 +207,7 @@ export async function trainingRoutes(app: FastifyInstance) {
 
   app.patch('/training/archives/:id', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
-    const id = z.string().uuid().parse((req.params as any).id);
+    const id = z.string().uuid().parse((req.params as { id: string }).id);
     const body = z.object({ name: z.string() }).parse(req.body);
     const res = await pool.query(
       `UPDATE training_archives SET name = $1 WHERE id = $2 AND user_id = $3`,
@@ -258,7 +258,7 @@ export async function trainingRoutes(app: FastifyInstance) {
 
   app.delete('/archives/training/:id', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
-    const id = z.string().uuid().parse((req.params as any).id);
+    const id = z.string().uuid().parse((req.params as { id: string }).id);
     const res = await pool.query(`DELETE FROM training_archives WHERE id = $1 AND user_id = $2`, [id, user.userId]);
     if (res.rowCount === 0) return reply.status(404).send({ error: 'Archive not found' });
     return reply.send({ success: true });
@@ -266,7 +266,7 @@ export async function trainingRoutes(app: FastifyInstance) {
 
   app.patch('/archives/training/:id', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
-    const id = z.string().uuid().parse((req.params as any).id);
+    const id = z.string().uuid().parse((req.params as { id: string }).id);
     const body = z.object({ name: z.string() }).parse(req.body);
     const res = await pool.query(
       `UPDATE training_archives SET name = $1 WHERE id = $2 AND user_id = $3`,
@@ -278,7 +278,7 @@ export async function trainingRoutes(app: FastifyInstance) {
 
   app.get('/archives/training/:id', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
-    const id = z.string().uuid().parse((req.params as any).id);
+    const id = z.string().uuid().parse((req.params as { id: string }).id);
     const { rows } = await pool.query(
       `SELECT id, name, date_created, program, progress_day_index, summary
        FROM training_archives

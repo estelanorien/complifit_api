@@ -65,7 +65,7 @@ export function buildServer() {
         }),
       },
     },
-    bodyLimit: 10 * 1024 * 1024,
+    bodyLimit: 2 * 1024 * 1024, // 2MB - reduced from 10MB to prevent DoS
     requestTimeout: 300000, // 5 minutes timeout
     requestIdHeader: 'x-request-id', // Use custom header for request ID
     requestIdLogLabel: 'requestId',

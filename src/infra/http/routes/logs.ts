@@ -17,7 +17,7 @@ const foodSchema = z.object({
   timestamp: z.coerce.date().optional(),
   linkedPlanItemId: z.string().optional().nullable(),
   imageUrl: z.string().optional().nullable(),
-  metadata: z.record(z.any()).optional()
+  metadata: z.record(z.string(), z.unknown()).optional()
 });
 
 const exerciseSchema = z.object({
@@ -25,10 +25,10 @@ const exerciseSchema = z.object({
   name: z.string(),
   date: z.string(),
   time: z.string().optional(),
-  sets: z.array(z.record(z.any())).optional(),
+  sets: z.array(z.record(z.string(), z.unknown())).optional(),
   location: z.string().optional(),
   estimatedCalories: z.coerce.number().optional(),
-  verification: z.record(z.any()).optional(),
+  verification: z.record(z.string(), z.unknown()).optional(),
   isNegotiated: z.boolean().optional()
 });
 
@@ -45,9 +45,9 @@ const extraExerciseSchema = z.object({
   name: z.string(),
   date: z.string(),
   time: z.string().optional(),
-  sets: z.array(z.record(z.any())).optional(),
+  sets: z.array(z.record(z.string(), z.unknown())).optional(),
   location: z.string().optional(),
-  verification: z.record(z.any()).optional(),
+  verification: z.record(z.string(), z.unknown()).optional(),
   estimatedCalories: z.coerce.number().optional()
 });
 
@@ -406,7 +406,7 @@ export async function logsRoutes(app: FastifyInstance) {
       streakCount: z.number().default(0),
       xpEarned: z.number().default(0),
       coinsEarned: z.number().default(0),
-      summaryData: z.any().optional()
+      summaryData: z.unknown().optional()
     });
 
     try {

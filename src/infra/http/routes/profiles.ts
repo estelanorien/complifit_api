@@ -62,7 +62,6 @@ export async function profileRoutes(app: FastifyInstance) {
 
     try {
       if (!user?.userId && !user?.id) {
-        reply.header('Access-Control-Allow-Origin', '*');
         return reply.status(200).send(safeProfile());
       }
       const userId = user?.userId ?? user?.id;
@@ -95,7 +94,7 @@ export async function profileRoutes(app: FastifyInstance) {
           rows = result.rows?.length ? [{ ...result.rows[0], profile_data: null, health_metrics: null }] : [];
         } else {
           req.log?.warn({ err: e }, '[profiles/me] DB error, returning minimal profile');
-          reply.header('Access-Control-Allow-Origin', '*');
+    
           return reply.status(200).send(safeProfile());
         }
       }
@@ -119,11 +118,11 @@ export async function profileRoutes(app: FastifyInstance) {
       profileData.role = row?.role || 'user';
 
       const metrics = row?.health_metrics && typeof row.health_metrics === 'object' ? row.health_metrics : {};
-      reply.header('Access-Control-Allow-Origin', '*');
+
       return reply.status(200).send({ profile: profileData, metrics });
     } catch (e: unknown) {
       req.log?.warn({ err: e }, '[profiles/me] error - never 500, returning minimal profile');
-      reply.header('Access-Control-Allow-Origin', '*');
+
       try {
         return reply.status(200).send(safeProfile());
       } catch {

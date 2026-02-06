@@ -103,7 +103,7 @@ export async function customProgramRoutes(app: FastifyInstance) {
     app.post('/custom-programs/validate', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
         const user = (req as AuthenticatedRequest).user;
         const body = z.object({
-            program: z.any(),
+            program: z.unknown(),
             type: z.enum(['training', 'nutrition'])
         }).parse(req.body);
 
@@ -126,7 +126,7 @@ export async function customProgramRoutes(app: FastifyInstance) {
     app.post('/custom-programs/coach-feedback', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
         const user = (req as AuthenticatedRequest).user;
         const body = z.object({
-            program: z.any(),
+            program: z.unknown(),
             type: z.enum(['training', 'nutrition'])
         }).parse(req.body);
 

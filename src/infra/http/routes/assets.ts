@@ -418,25 +418,10 @@ export async function assetsRoutes(app: FastifyInstance) {
     return rows[0];
   });
 
-  // Explicit OPTIONS for by-movement so preflight always gets CORS (no auth on OPTIONS)
-  app.options('/assets/by-movement', async (req, reply) => {
-    reply.header('Access-Control-Allow-Origin', '*');
-    reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
-    reply.header('Access-Control-Max-Age', '86400');
-    return reply.status(204).send();
-  });
+  // CORS is handled by @fastify/cors plugin - no manual headers needed
 
   app.post('/assets/by-movement', { preHandler: authGuard }, async (req, reply) => {
     req.log.info('[by-movement] handler entered');
-    // CORS on every response path (success, error, and outer catch)
-    const corsHeaders = () => {
-      reply.header('Access-Control-Allow-Origin', '*');
-      reply.header('Access-Control-Allow-Credentials', 'false');
-      reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-request-id, x-goog-api-key, x-api-key');
-    };
-    corsHeaders();
 
     let body: { movementId: string; limit?: number };
     try {
@@ -445,7 +430,7 @@ export async function assetsRoutes(app: FastifyInstance) {
       const parseErr = e as Error;
       req.log?.warn({ err: parseErr }, '[by-movement] Validation failed');
       if (!reply.sent) {
-        corsHeaders();
+        // CORS handled by plugin
         reply.header('Content-Type', 'application/json');
         return reply.status(400).send({ error: parseErr?.message || 'Invalid request: movementId required' });
       }
@@ -607,7 +592,7 @@ export async function assetsRoutes(app: FastifyInstance) {
       req.log.error({ err: e, stack: error?.stack }, '[by-movement] Error');
       if (!reply.sent) {
         try {
-          corsHeaders();
+          // CORS handled by plugin
           reply.header('Content-Type', 'application/json');
           // Return error details for debugging
           return reply.status(500).send({

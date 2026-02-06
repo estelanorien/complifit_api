@@ -796,7 +796,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       });
 
       // Record for AI training (fire-and-forget)
-      const user = (req as any).user;
+      const user = (req as AuthenticatedRequest).user;
       recordApiCall({
         userId: user?.userId || 'anonymous',
         callType: 'food_analysis',
@@ -875,7 +875,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
   // 5. Chat (Coach)
   const chatSchema = z.object({
-    history: z.array(z.any()),
+    history: z.array(z.unknown()),
     context: z.enum(['nutrition', 'training']),
     lang: z.string().default('en'),
     systemPrompt: z.string().optional()
@@ -913,7 +913,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "Thinking...";
 
       // Record for AI training (fire-and-forget)
-      const user = (req as any).user;
+      const user = (req as AuthenticatedRequest).user;
       recordApiCall({
         userId: user?.userId || 'anonymous',
         callType: 'coach_chat',

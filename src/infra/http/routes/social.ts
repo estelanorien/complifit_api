@@ -8,7 +8,7 @@ const postSchema = z.object({
   caption: z.string(),
   type: z.enum(['text', 'image', 'video', 'flex_workout']).default('text'),
   mediaUrl: z.string().optional(),
-  flexData: z.record(z.any()).optional(),
+  flexData: z.record(z.string(), z.unknown()).optional(),
   visibility: z.enum(['public', 'friends']).optional()
 });
 
@@ -230,7 +230,7 @@ export async function socialRoutes(app: FastifyInstance) {
 
   // Search Users
   app.get('/social/users/search', { preHandler: authGuard }, async (req) => {
-    const { q } = req.query as any;
+    const { q } = req.query as { q?: string };
     if (!q || q.length < 3) return [];
 
     const { rows } = await pool.query(

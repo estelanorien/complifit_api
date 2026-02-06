@@ -14,8 +14,8 @@ export async function timelineRoutes(app: FastifyInstance) {
     timelineItemId: z.string().optional(),
     day: z.string(),
     action: z.string(),
-    previousData: z.any().optional(),
-    newData: z.any().optional(),
+    previousData: z.unknown().optional(),
+    newData: z.unknown().optional(),
     reason: z.string().optional()
   });
 

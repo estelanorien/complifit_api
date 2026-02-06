@@ -9,6 +9,21 @@ import bcrypt from 'bcryptjs';
 import { normalizeToMovementId } from '../../../application/services/normalization.js';
 import { AuthenticatedRequest, GeminiPart, GeminiResponse, GeminiErrorDetail } from '../types.js';
 
+// Audit logging for admin operations
+function auditLog(req: FastifyRequest, action: string, details: Record<string, unknown> = {}) {
+  const user = (req as AuthenticatedRequest).user;
+  req.log.info({
+    audit: true,
+    userId: user?.userId,
+    userEmail: user?.email,
+    action,
+    details,
+    ip: req.ip,
+    timestamp: new Date().toISOString(),
+    requestId: req.id,
+  });
+}
+
 // Types for admin routes
 interface GroupGenerationParams {
   groupId: string;

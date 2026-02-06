@@ -24,8 +24,8 @@ export async function planArchiveRoutes(app: FastifyInstance) {
         const user = (req as AuthenticatedRequest).user;
         const body = z.object({
             name: z.string(),
-            training: z.any(),
-            nutrition: z.any(),
+            training: z.unknown(),
+            nutrition: z.unknown(),
             progressDayIndex: z.number().optional().default(0),
             summary: z.string().optional()
         }).parse(req.body);

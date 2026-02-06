@@ -9,7 +9,7 @@ const restaurantSchema = z.object({
   id: z.string().uuid().optional(),
   placeId: z.string().optional(),
   name: z.string(),
-  location: z.record(z.any()),
+  location: z.record(z.string(), z.unknown()),
   tier: z.enum(['partner', 'verified_crowd', 'public']),
   cuisine: z.array(z.string()).default([])
 });
@@ -20,7 +20,7 @@ const menuItemSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
   price: z.number().optional(),
-  estimatedMacros: z.record(z.any()),
+  estimatedMacros: z.record(z.string(), z.unknown()),
   allergens: z.array(z.string()).default([])
 });
 
@@ -65,12 +65,12 @@ export async function restaurantRoutes(app: FastifyInstance) {
       targetMeal: z.object({
         name: z.string(),
         calories: z.number(),
-        macros: z.record(z.any()).optional()
+        macros: z.record(z.string(), z.unknown()).optional()
       }),
       restaurants: z.array(z.object({
         id: z.string(),
         name: z.string(),
-        location: z.record(z.any()),
+        location: z.record(z.string(), z.unknown()),
         tier: z.string(),
         cuisine: z.array(z.string()).optional()
       })),

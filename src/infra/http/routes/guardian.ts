@@ -59,7 +59,7 @@ export async function guardianRoutes(app: FastifyInstance) {
       type: z.enum(['training', 'meal']),
       title: z.string(),
       calories: z.number(),
-      profile: z.any(),
+      profile: z.any(), // TODO: define UserProfile schema
       remainingItems: z.number(),
       lang: z.string().default('en'),
       recentLogs: z.array(z.string()).default([]),
@@ -186,10 +186,10 @@ export async function guardianRoutes(app: FastifyInstance) {
   app.post('/guardian/apply-remedy', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
     const body = z.object({
-      remedy: z.any(),
-      item: z.any(),
+      remedy: z.any(), // TODO: define RemedyAction schema
+      item: z.any(), // TODO: define PlanItem schema
       date: z.string(),
-      remainingMeals: z.array(z.any()).default([])
+      remainingMeals: z.array(z.unknown()).default([])
     }).parse(req.body);
 
     const { remedy, item, date, remainingMeals } = body;
@@ -349,7 +349,7 @@ export async function guardianRoutes(app: FastifyInstance) {
 
     const body = z.object({
       surplus: z.number(),
-      profile: z.any(),
+      profile: z.any(), // TODO: define UserProfile schema
       nextMealName: z.string().optional(),
       nextMealCalories: z.number().optional(),
       lang: z.string().default('en')
@@ -392,9 +392,9 @@ export async function guardianRoutes(app: FastifyInstance) {
       exerciseName: z.string(),
       durationMinutes: z.number().optional(),
       muscleGroups: z.array(z.string()).optional(),
-      profile: z.any(),
+      profile: z.any(), // TODO: define UserProfile schema
       lang: z.string().default('en'),
-      todaysPlan: z.array(z.any()).optional()
+      todaysPlan: z.array(z.unknown()).optional()
     }).parse(req.body);
     const { exerciseName, durationMinutes, muscleGroups = [], profile, lang, todaysPlan = [] } = body;
     const prompt = `GUARDIAN AI - EXTRA TRAINING REVIEW. New: ${exerciseName}. Muscles: ${muscleGroups.join(',')}. Plan: ${todaysPlan.map((p: any) => p?.title).join(',')}. Profile: ${profile.primaryGoal}. Detect overload. Return JSON { warning, suggestions }.`;
@@ -420,9 +420,9 @@ export async function guardianRoutes(app: FastifyInstance) {
     if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
     // Use the same model for simplicity
     const body = z.object({
-      loggedFood: z.any(),
-      profile: z.any(),
-      nearbyMeals: z.array(z.any()).default([]),
+      loggedFood: z.any(), // TODO: define FoodLog schema
+      profile: z.any(), // TODO: define UserProfile schema
+      nearbyMeals: z.array(z.any()).default([]), // TODO: define NearbyMeal schema
       lang: z.string().default('en')
     }).parse(req.body);
     const { loggedFood, nearbyMeals } = body;
@@ -463,7 +463,7 @@ export async function guardianRoutes(app: FastifyInstance) {
         calories: z.number().optional(),
         scheduledTime: z.string()
       })),
-      profile: z.any(),
+      profile: z.any(), // TODO: define UserProfile schema
       availableSlots: z.array(z.object({
         start: z.string(),
         end: z.string()
@@ -644,7 +644,7 @@ export async function guardianRoutes(app: FastifyInstance) {
       recommendation: z.object({
         id: z.string(),
         type: z.enum(['consolidate_meals', 'reschedule_workout', 'recovery_day', 'quick_meal', 'skip_item']),
-        data: z.any()
+        data: z.any() // TODO: define recommendation data per type
       }),
       date: z.string(),
       wakeTime: z.string()

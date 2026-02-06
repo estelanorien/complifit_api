@@ -5,7 +5,7 @@ export const pool = new Pool({
   connectionString: env.databaseUrl,
 
   // Connection pool limits - optimized for Cloud Run
-  max: 10, // ✅ Düşürdüm: 2GB memory için 10 yeterli (20 çok fazla)
+  max: 20, // Increased for production load with 2GB memory
   min: 1, // ✅ Düşürdüm: Minimum 1 connection yeterli
 
   // Idle connection management
@@ -23,7 +23,7 @@ export const pool = new Pool({
   // SSL configuration
   // In production, SSL should be enabled with proper certificate validation
   // Set DB_SSL_REJECT_UNAUTHORIZED=false only if using self-signed certs or Cloud SQL proxy
-  ssl: env.nodeEnv === 'production' || env.databaseUrl.includes('104.199') || env.databaseUrl.includes('cloudsql')
+  ssl: env.nodeEnv === 'production' || process.env.DB_SSL === 'true'
     ? { rejectUnauthorized: env.dbSslRejectUnauthorized }
     : undefined,
 

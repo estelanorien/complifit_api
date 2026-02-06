@@ -9,7 +9,7 @@ const reportSchema = z.object({
   type: z.enum(['post', 'message', 'user']),
   reason: z.string().optional(),
   comment: z.string().optional(),
-  content: z.any().optional()
+  content: z.unknown().optional()
 });
 
 const resolveSchema = z.object({
