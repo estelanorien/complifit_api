@@ -43,7 +43,7 @@ const saveMealPlanToDb = async (client: PoolClient, userId: string, mealPlan: Me
               meal.recipe?.time || null,
               toJsonOrNull(meal.recipe?.ingredients || null),
               toJsonOrNull(meal.recipe?.instructions || null),
-              toJsonOrNull((meal.recipe as any)?.nutritionTips || null),
+              toJsonOrNull((meal.recipe as Record<string, unknown>)?.nutritionTips || null),
               toJsonOrNull(meal)
             ]
           );
@@ -75,14 +75,14 @@ const saveMealPlanToDb = async (client: PoolClient, userId: string, mealPlan: Me
 
 export async function nutritionRoutes(app: FastifyInstance) {
   const generateSchema = z.object({
-    profile: z.any(),
+    profile: z.record(z.string(), z.unknown()),
     days: z.number().min(3).max(30).default(7),
     excludes: z.array(z.string()).default([]),
-    staples: z.array(z.any()).default([]),
+    staples: z.array(z.unknown()).default([]),
     lang: z.string().default('en'),
     prioritizeSuperfoods: z.boolean().optional(),
     varietyMode: z.string().optional(),
-    previousPlan: z.any().optional(),
+    previousPlan: z.unknown().optional(),
     varietyInput: z.string().optional(),
     startDate: z.string().optional()
   });
@@ -130,7 +130,7 @@ export async function nutritionRoutes(app: FastifyInstance) {
 
   const archiveSchema = z.object({
     name: z.string(),
-    plan: z.any(),
+    plan: z.unknown(),
     progressDayIndex: z.number().optional(),
     summary: z.string().optional()
   });
@@ -206,7 +206,7 @@ export async function nutritionRoutes(app: FastifyInstance) {
 
   app.patch('/nutrition/archives/:id', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
-    const id = z.string().uuid().parse((req.params as any).id);
+    const id = z.string().uuid().parse((req.params as { id: string }).id);
     const body = z.object({ name: z.string() }).parse(req.body);
     const res = await pool.query(
       `UPDATE meal_archives SET name = $1 WHERE id = $2 AND user_id = $3`,
@@ -218,7 +218,7 @@ export async function nutritionRoutes(app: FastifyInstance) {
 
   app.delete('/nutrition/archives/:id', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
-    const id = z.string().uuid().parse((req.params as any).id);
+    const id = z.string().uuid().parse((req.params as { id: string }).id);
     const res = await pool.query(
       `DELETE FROM meal_archives WHERE id = $1 AND user_id = $2`,
       [id, user.userId]

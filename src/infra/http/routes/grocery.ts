@@ -48,7 +48,7 @@ export async function groceryRoutes(app: FastifyInstance) {
 
     const createBagSchema = z.object({
         name: z.string().min(1).max(255),
-        items: z.array(z.any()).default([]),
+        items: z.array(z.unknown()).default([]),
         mealPlanId: z.string().uuid().optional(),
         daysCovered: z.number().min(1).max(30).default(7),
         estimatedTotal: z.number().optional(),
@@ -59,7 +59,7 @@ export async function groceryRoutes(app: FastifyInstance) {
 
     const updateBagSchema = z.object({
         name: z.string().min(1).max(255).optional(),
-        items: z.array(z.any()).optional(),
+        items: z.array(z.unknown()).optional(),
         estimatedTotal: z.number().optional(),
         store: z.string().optional(),
         status: z.enum(['draft', 'ready', 'ordered', 'completed']).optional()
@@ -113,7 +113,7 @@ export async function groceryRoutes(app: FastifyInstance) {
      */
     app.get('/grocery/bags/:id', { preHandler: authGuard }, async (req, reply) => {
         const user = (req as AuthenticatedRequest).user;
-        const id = z.string().uuid().parse((req.params as any).id);
+        const id = z.string().uuid().parse((req.params as { id: string }).id);
 
         const { rows } = await pool.query(
             `SELECT id, name, items, meal_plan_id, days_covered, estimated_total,
@@ -181,12 +181,12 @@ export async function groceryRoutes(app: FastifyInstance) {
      */
     app.patch('/grocery/bags/:id', { preHandler: authGuard }, async (req, reply) => {
         const user = (req as AuthenticatedRequest).user;
-        const id = z.string().uuid().parse((req.params as any).id);
+        const id = z.string().uuid().parse((req.params as { id: string }).id);
         const body = updateBagSchema.parse(req.body);
 
         // Build dynamic update query
         const updates: string[] = [];
-        const values: any[] = [];
+        const values: (string | number | null)[] = [];
         let paramIndex = 1;
 
         if (body.name !== undefined) {
@@ -236,7 +236,7 @@ export async function groceryRoutes(app: FastifyInstance) {
      */
     app.delete('/grocery/bags/:id', { preHandler: authGuard }, async (req, reply) => {
         const user = (req as AuthenticatedRequest).user;
-        const id = z.string().uuid().parse((req.params as any).id);
+        const id = z.string().uuid().parse((req.params as { id: string }).id);
 
         const result = await pool.query(
             `DELETE FROM shopping_bags WHERE id = $1 AND user_id = $2`,
@@ -345,7 +345,7 @@ export async function groceryRoutes(app: FastifyInstance) {
      * Get category layout for a specific store
      */
     app.get('/grocery/categories/:store', async (req, reply) => {
-        const store = (req.params as any).store?.toLowerCase();
+        const store = (req.params as { store: string }).store?.toLowerCase();
 
         const storeLayouts: Record<string, string[]> = {
             migros: ['produce', 'protein', 'dairy', 'bakery', 'pantry', 'frozen', 'beverages', 'snacks', 'household'],

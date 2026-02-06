@@ -210,14 +210,15 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 requestId: req.requestId
             });
         } catch (e: unknown) {
+            const error = e as Error;
             req.log.error({
                 error: 'AI generation failed',
-                message: e.message,
-                stack: e.stack,
-                name: e.name,
+                message: error.message,
+                stack: error.stack,
+                name: error.name,
                 requestId: req.requestId
             });
-            throw new Error(`AI generation failed: ${e.message}. Please check GEMINI_API_KEY configuration.`);
+            throw new Error(`AI generation failed: ${error.message}. Please check GEMINI_API_KEY configuration.`);
         }
 
         // Validate AI responses
@@ -236,30 +237,32 @@ export async function planActionsRoutes(app: FastifyInstance) {
             const cleanedTrainText = PlanService.cleanGeminiJson(trainText.text);
             trainingPlan = JSON.parse(cleanedTrainText || '{}');
         } catch (e: unknown) {
+            const error = e as Error;
             const rawPreview = trainText.text?.substring(0, 500) || 'No text received';
             req.log.error({
                 error: 'Training plan JSON parse failed',
-                parseError: e.message,
+                parseError: error.message,
                 rawTextPreview: rawPreview,
                 rawTextLength: trainText.text?.length || 0,
                 requestId: req.requestId
             });
-            throw new Error(`Failed to parse training plan: ${e.message}. Raw response preview: ${rawPreview.substring(0, 200)}`);
+            throw new Error(`Failed to parse training plan: ${error.message}. Raw response preview: ${rawPreview.substring(0, 200)}`);
         }
 
         try {
             const cleanedNutText = PlanService.cleanGeminiJson(nutText.text);
             nutritionPlan = JSON.parse(cleanedNutText || '{}');
         } catch (e: unknown) {
+            const error = e as Error;
             const rawPreview = nutText.text?.substring(0, 500) || 'No text received';
             req.log.error({
                 error: 'Nutrition plan JSON parse failed',
-                parseError: e.message,
+                parseError: error.message,
                 rawTextPreview: rawPreview,
                 rawTextLength: nutText.text?.length || 0,
                 requestId: req.requestId
             });
-            throw new Error(`Failed to parse nutrition plan: ${e.message}. Raw response preview: ${rawPreview.substring(0, 200)}`);
+            throw new Error(`Failed to parse nutrition plan: ${error.message}. Raw response preview: ${rawPreview.substring(0, 200)}`);
         }
 
         // --- Validation & Normalization ---
@@ -322,6 +325,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                                         Object.assign(meal.recipe, existing);
                                     }
                                 } catch (e: unknown) {
+                                    const error = e as Error;
                                     req.log.warn({ error: 'Failed to check existing recipe', mealName, requestId: req.id });
                                 }
                             }
@@ -508,8 +512,9 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 return reply.send({ meal });
 
             } catch (e: unknown) {
-                lastError = e.message;
-                req.log.warn({ msg: `Reroll attempt ${attempts} failed`, error: e.message });
+                const error = e as Error;
+                lastError = error.message;
+                req.log.warn({ msg: `Reroll attempt ${attempts} failed`, error: error.message });
                 if (attempts === MAX_RETRIES) {
                     req.log.error({ msg: "Reroll failed after retries", error: lastError });
                     throw new Error(`Failed to generate valid meal after ${MAX_RETRIES} attempts: ${lastError}`);

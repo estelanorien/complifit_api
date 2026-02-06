@@ -6,7 +6,7 @@ import { AuthenticatedRequest } from '../types.js';
 
 const submitJobSchema = z.object({
     type: z.enum(['IMAGE', 'MEAL_PLAN', 'MEAL_DETAILS', 'EXERCISE_GENERATION', 'MEAL_GENERATION', 'BATCH_ASSET_GENERATION']),
-    payload: z.record(z.any()),
+    payload: z.record(z.string(), z.unknown()),
     priority: z.number().min(1).max(3).optional().default(1), // 3=HIGH, 2=MEDIUM, 1=LOW
     jobKey: z.string().optional() // Canonical key for deduplication
 });
@@ -31,8 +31,9 @@ export async function jobRoutes(app: FastifyInstance) {
                 isNew: result.isNew // false if this was a deduplicated request
             });
         } catch (e: unknown) {
+            const error = e as Error;
             req.log.error({ error: 'Job submission failed', e });
-            return reply.status(500).send({ error: e.message || 'Job submission failed' });
+            return reply.status(500).send({ error: error.message || 'Job submission failed' });
         }
     });
 

@@ -53,21 +53,22 @@ async function main() {
     process.exit(1);
   }
 
-  // Start server to satisfy Cloud Run startup probe
+  // Verify database connection BEFORE starting server
+  try {
+    await pool.query('SELECT 1');
+    app.log.info('[STARTUP] Database connection verified successfully');
+  } catch (err) {
+    app.log.error(err, '[STARTUP] Failed to connect to database - server will start but DB calls will fail');
+    // Don't exit - allow startup probe to pass, DB may recover
+  }
+
+  // Start server
   try {
     await app.listen({ port: env.port, host: '0.0.0.0' });
     app.log.info(`[STARTUP] API running on port ${env.port}`);
   } catch (err) {
     app.log.error(err, '[STARTUP] Failed to start server');
     process.exit(1);
-  }
-
-  // Then check DB connection
-  try {
-    await pool.query('SELECT 1');
-    app.log.info('Database connection established successfully');
-  } catch (err) {
-    app.log.error(err, 'Failed to connect to database on startup');
   }
 
   // Memory monitoring and auto-cleanup
@@ -90,16 +91,19 @@ async function main() {
       uptime: `${Math.round(process.uptime())}s`
     });
 
-    // Temporarily disabled self-shutdown to allow deployment to pass startup probes
-    /*
+    // Memory safety: graceful shutdown when approaching OOM
     if (heapPercent > 95) {
       app.log.error({
         message: `CRITICAL: Memory usage above 95% of limit (${heapUsedMB}MB / ${heapLimitMB}MB), initiating graceful shutdown`,
         heapPercent
       });
       void closeGracefully('HIGH_MEMORY');
+    } else if (heapPercent > 85) {
+      app.log.warn({
+        message: `WARNING: Memory usage above 85% of limit (${heapUsedMB}MB / ${heapLimitMB}MB)`,
+        heapPercent
+      });
     }
-    */
   }, 60000); // Check every minute instead of 30s
 
   // Periodic light GC if available

@@ -95,7 +95,8 @@ export class AssetPromptService {
                 refImage = asset.value.startsWith('data:image') ? asset.value : `data:image/png;base64,${asset.value}`;
             }
             if (!refImage && type === 'image' && groupType === 'exercise') {
-                throw new Error('CRITICAL: Atlas coach reference image (system_coach_atlas_ref) is missing. Upload it in Admin (Refs Status) before generating exercise images. NEVER generate without reference—prevents wrong person (e.g. bald) in output.');
+                // Warn but don't throw - allow text-only generation as fallback
+                logger.warn(`Atlas coach reference image (system_coach_atlas_ref) is missing for ${key}/${groupName}. Proceeding with text-only generation. For best results, upload reference in Admin (Refs Status).`);
             }
             refType = 'identity';
         } else if (lowerKey.includes('nova') || lowerLabel.includes('nova')) {
@@ -108,7 +109,8 @@ export class AssetPromptService {
                 refImage = asset.value.startsWith('data:image') ? asset.value : `data:image/png;base64,${asset.value}`;
             }
             if (!refImage && type === 'image' && groupType === 'exercise') {
-                throw new Error('CRITICAL: Nova coach reference image (system_coach_nova_ref) is missing. Upload it in Admin (Refs Status) before generating exercise images. NEVER generate without reference—prevents wrong person (e.g. bald) in output.');
+                // Warn but don't throw - allow text-only generation as fallback
+                logger.warn(`Nova coach reference image (system_coach_nova_ref) is missing for ${key}/${groupName}. Proceeding with text-only generation. For best results, upload reference in Admin (Refs Status).`);
             }
             refType = 'identity';
         } else if (groupType === 'exercise') {

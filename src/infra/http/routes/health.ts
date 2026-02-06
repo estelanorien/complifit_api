@@ -38,9 +38,10 @@ export async function healthRoutes(app: FastifyInstance) {
         overallStatus = 'degraded';
       }
     } catch (e: unknown) {
+      const error = e as Error;
       checks.database = {
         status: 'unhealthy',
-        message: e.message || 'Database connection failed',
+        message: error.message || 'Database connection failed',
         pool: {
           totalCount: pool.totalCount,
           idleCount: pool.idleCount,
@@ -150,10 +151,11 @@ export async function healthRoutes(app: FastifyInstance) {
         });
       }
     } catch (e: unknown) {
+      const error = e as Error;
       return reply.status(503).send({
         status: 'not_ready',
         reason: 'db_error',
-        error: e.message
+        error: error.message
       });
     }
   });

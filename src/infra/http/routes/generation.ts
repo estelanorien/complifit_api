@@ -93,8 +93,9 @@ export async function generationRoutes(app: FastifyInstance) {
                 error: result.error
             });
         } catch (e: unknown) {
+            const error = e as Error;
             req.log.error({ error: 'User-triggered generation failed', e });
-            return reply.status(500).send({ error: e.message || 'Generation failed' });
+            return reply.status(500).send({ error: error.message || 'Generation failed' });
         }
     });
 
@@ -119,8 +120,9 @@ export async function generationRoutes(app: FastifyInstance) {
                 alreadyExists: result.alreadyExists
             });
         } catch (e: unknown) {
+            const error = e as Error;
             req.log.error({ error: 'Pregeneration failed', e });
-            return reply.status(500).send({ error: e.message || 'Pregeneration failed' });
+            return reply.status(500).send({ error: error.message || 'Pregeneration failed' });
         }
     });
 
@@ -158,8 +160,9 @@ export async function generationRoutes(app: FastifyInstance) {
 
             return reply.send(result);
         } catch (e: unknown) {
+            const error = e as Error;
             req.log.error({ error: 'Pipeline execution failed', e });
-            return reply.status(500).send({ error: e.message || 'Pipeline failed' });
+            return reply.status(500).send({ error: error.message || 'Pipeline failed' });
         }
     });
 

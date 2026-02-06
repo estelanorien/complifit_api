@@ -6,7 +6,7 @@ import { AuthenticatedRequest } from '../types.js';
 
 export async function behaviorRoutes(app: FastifyInstance) {
   const configSchema = z.object({
-    config: z.record(z.any()),
+    config: z.record(z.string(), z.unknown()),
     label: z.string().optional(),
     activate: z.boolean().optional()
   });
@@ -15,8 +15,8 @@ export async function behaviorRoutes(app: FastifyInstance) {
     configId: z.string().uuid().optional(),
     source: z.string(),
     eventType: z.string(),
-    payload: z.any().optional(),
-    outcome: z.any().optional()
+    payload: z.unknown().optional(),
+    outcome: z.unknown().optional()
   });
 
   const listEventsSchema = z.object({
@@ -149,7 +149,7 @@ export async function behaviorRoutes(app: FastifyInstance) {
     stakeAmount: z.number().min(0),
     targetValue: z.number().min(1),
     startDate: z.string().datetime().optional(), // ISO string
-    metadata: z.any().optional()
+    metadata: z.record(z.string(), z.unknown()).optional()
   });
 
   const resolvePledgeSchema = z.object({
@@ -204,7 +204,7 @@ export async function behaviorRoutes(app: FastifyInstance) {
 
   app.post('/behavior/pledges/:id/resolve', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
-    const { id } = req.params as any;
+    const { id } = req.params as { id: string };
     const body = resolvePledgeSchema.parse(req.body);
 
     const { rows } = await pool.query(

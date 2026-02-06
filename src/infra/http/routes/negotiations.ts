@@ -19,7 +19,7 @@ export async function negotiationRoutes(app: FastifyInstance) {
 
   const actionSchema = z.object({
     actionType: z.string(),
-    payload: z.any().optional()
+    payload: z.unknown().optional()
   });
 
   const updateSchema = z.object({

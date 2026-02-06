@@ -17,7 +17,7 @@ const foodSchema = z.object({
   timestamp: z.coerce.date().optional(),
   linkedPlanItemId: z.string().optional().nullable(),
   imageUrl: z.string().optional().nullable(),
-  metadata: z.record(z.any()).optional()
+  metadata: z.record(z.string(), z.unknown()).optional()
 });
 
 const exerciseSchema = z.object({
@@ -25,10 +25,10 @@ const exerciseSchema = z.object({
   name: z.string(),
   date: z.string(),
   time: z.string().optional(),
-  sets: z.array(z.record(z.any())).optional(),
+  sets: z.array(z.record(z.string(), z.unknown())).optional(),
   location: z.string().optional(),
   estimatedCalories: z.coerce.number().optional(),
-  verification: z.record(z.any()).optional(),
+  verification: z.record(z.string(), z.unknown()).optional(),
   isNegotiated: z.boolean().optional()
 });
 
@@ -45,9 +45,9 @@ const extraExerciseSchema = z.object({
   name: z.string(),
   date: z.string(),
   time: z.string().optional(),
-  sets: z.array(z.record(z.any())).optional(),
+  sets: z.array(z.record(z.string(), z.unknown())).optional(),
   location: z.string().optional(),
-  verification: z.record(z.any()).optional(),
+  verification: z.record(z.string(), z.unknown()).optional(),
   estimatedCalories: z.coerce.number().optional()
 });
 
@@ -406,7 +406,7 @@ export async function logsRoutes(app: FastifyInstance) {
       streakCount: z.number().default(0),
       xpEarned: z.number().default(0),
       coinsEarned: z.number().default(0),
-      summaryData: z.any().optional()
+      summaryData: z.unknown().optional()
     });
 
     try {
@@ -432,9 +432,10 @@ export async function logsRoutes(app: FastifyInstance) {
 
       return reply.send({ success: true });
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error({ error: 'Day conclusion save failed', e, requestId: req.id });
-      return reply.status(500).send({ error: isProduction ? 'Failed to save day conclusion' : (e.message || 'Day conclusion save failed') });
+      return reply.status(500).send({ error: isProduction ? 'Failed to save day conclusion' : (error.message || 'Day conclusion save failed') });
     }
   });
 
@@ -466,9 +467,10 @@ export async function logsRoutes(app: FastifyInstance) {
         createdAt: rows[0].created_at
       });
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error({ error: 'Day conclusion fetch failed', e, requestId: req.id });
-      return reply.status(500).send({ error: isProduction ? 'Failed to fetch day conclusion' : (e.message || 'Day conclusion fetch failed') });
+      return reply.status(500).send({ error: isProduction ? 'Failed to fetch day conclusion' : (error.message || 'Day conclusion fetch failed') });
     }
   });
 
@@ -502,9 +504,10 @@ export async function logsRoutes(app: FastifyInstance) {
 
       return reply.send({ streakCount: parseInt(rows[0]?.count || '0') });
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error({ error: 'Streak count fetch failed', e, requestId: req.id });
-      return reply.status(500).send({ error: isProduction ? 'Failed to fetch streak count' : (e.message || 'Streak count fetch failed') });
+      return reply.status(500).send({ error: isProduction ? 'Failed to fetch streak count' : (error.message || 'Streak count fetch failed') });
     }
   });
 

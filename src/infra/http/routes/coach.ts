@@ -46,9 +46,9 @@ export async function coachRoutes(app: FastifyInstance) {
   };
 
   const chatSchema = z.object({
-    history: z.array(z.any()),
+    history: z.array(z.unknown()),
     lang: z.string().default('en'),
-    contextData: z.any().optional()
+    contextData: z.unknown().optional()
   });
 
   app.post('/coach/training', { preHandler: authGuard }, async (req, reply) => {
@@ -96,7 +96,7 @@ export async function coachRoutes(app: FastifyInstance) {
 
   const tipsSchema = z.object({
     recentFoods: z.array(z.string()),
-    profile: z.any(),
+    profile: z.any(), // TODO: define UserProfile schema
     lang: z.string().default('en')
   });
 
@@ -171,7 +171,7 @@ export async function coachRoutes(app: FastifyInstance) {
   });
 
   const explorerSchema = z.object({
-    profile: z.any(),
+    profile: z.any(), // TODO: define UserProfile schema
     lang: z.string().default('en')
   });
 
@@ -218,8 +218,8 @@ export async function coachRoutes(app: FastifyInstance) {
     if (!ensureKey(reply)) return;
 
     const body = z.object({
-      history: z.array(z.any()),
-      profile: z.any(),
+      history: z.array(z.unknown()),
+      profile: z.any(), // TODO: define UserProfile schema
       lang: z.string().default('en')
     }).parse(req.body);
 

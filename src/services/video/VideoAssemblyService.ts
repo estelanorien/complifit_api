@@ -20,6 +20,8 @@ export interface EditSegmentWithUri {
 
 export interface AssembleOptions {
   musicUri?: string;
+  transitionType?: 'cut' | 'xfade';
+  transitionDuration?: number; // seconds, default 0.3
 }
 
 function runFfmpeg(args: string[], cwd: string): Promise<void> {
@@ -82,6 +84,7 @@ export async function assembleVideoOnly(
 
 /**
  * Assemble final video: concat segments (per edit list) + TTS (+ optional music). Output 1080p.
+ * Supports optional xfade transitions between clips.
  */
 export async function assemble(
   editList: EditSegmentWithUri[],
@@ -91,6 +94,9 @@ export async function assemble(
 ): Promise<void> {
   const tmpDir = path.join(os.tmpdir(), `assemble-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   fs.mkdirSync(tmpDir, { recursive: true });
+
+  const useXfade = options.transitionType === 'xfade' && editList.length > 1;
+  const xfadeDuration = options.transitionDuration || 0.3;
 
   try {
     const segPaths: string[] = [];
@@ -108,15 +114,21 @@ export async function assemble(
       try { fs.unlinkSync(local); } catch (_) {}
     }
 
-    const listPath = path.join(tmpDir, 'list.txt');
-    fs.writeFileSync(listPath, segPaths.map(p => `file '${path.basename(p)}'`).join('\n'), 'utf8');
-
     const concatPath = path.join(tmpDir, 'concat.mp4');
-    await runFfmpeg([
-      '-f', 'concat', '-safe', '0', '-i', listPath,
-      '-c', 'copy',
-      concatPath
-    ], tmpDir);
+
+    if (useXfade && segPaths.length > 1) {
+      // Build xfade filter chain for smooth transitions
+      await assembleWithXfade(segPaths, concatPath, editList, xfadeDuration, tmpDir);
+    } else {
+      // Simple concatenation (hard cuts)
+      const listPath = path.join(tmpDir, 'list.txt');
+      fs.writeFileSync(listPath, segPaths.map(p => `file '${path.basename(p)}'`).join('\n'), 'utf8');
+      await runFfmpeg([
+        '-f', 'concat', '-safe', '0', '-i', listPath,
+        '-c', 'copy',
+        concatPath
+      ], tmpDir);
+    }
 
     const ttsPath = path.join(tmpDir, 'tts.mp3');
     fs.writeFileSync(ttsPath, ttsAudioBuffer);
@@ -144,4 +156,61 @@ export async function assemble(
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
   }
+}
+
+/**
+ * Assemble clips with xfade (cross-dissolve) transitions between them.
+ * Creates smooth, professional transitions instead of hard cuts.
+ */
+async function assembleWithXfade(
+  segPaths: string[],
+  outputPath: string,
+  editList: EditSegmentWithUri[],
+  xfadeDuration: number,
+  tmpDir: string
+): Promise<void> {
+  if (segPaths.length <= 1) {
+    // Single clip, just copy
+    fs.copyFileSync(segPaths[0], outputPath);
+    return;
+  }
+
+  // Build ffmpeg inputs
+  const inputs: string[] = [];
+  for (const seg of segPaths) {
+    inputs.push('-i', seg);
+  }
+
+  // Build xfade filter chain
+  // For n clips, we need n-1 xfade filters chained together
+  let filterComplex = '';
+  let currentOffset = 0;
+
+  for (let i = 0; i < segPaths.length - 1; i++) {
+    const clipDuration = editList[i].durationSeconds;
+    const input1 = i === 0 ? `[${i}:v]` : `[v${i}]`;
+    const input2 = `[${i + 1}:v]`;
+    const output = i === segPaths.length - 2 ? '[vout]' : `[v${i + 1}]`;
+
+    // Calculate offset: when to start the transition
+    // offset = cumulative duration - xfade overlap
+    const offset = currentOffset + clipDuration - xfadeDuration;
+
+    filterComplex += `${input1}${input2}xfade=transition=fade:duration=${xfadeDuration}:offset=${offset.toFixed(2)}${output}`;
+    if (i < segPaths.length - 2) {
+      filterComplex += ';';
+    }
+
+    // Update cumulative offset (subtract overlap for each transition)
+    currentOffset = offset;
+  }
+
+  await runFfmpeg([
+    ...inputs,
+    '-filter_complex', filterComplex,
+    '-map', '[vout]',
+    '-c:v', 'libx264',
+    '-preset', 'fast',
+    outputPath
+  ], tmpDir);
 }

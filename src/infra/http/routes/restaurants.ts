@@ -9,7 +9,7 @@ const restaurantSchema = z.object({
   id: z.string().uuid().optional(),
   placeId: z.string().optional(),
   name: z.string(),
-  location: z.record(z.any()),
+  location: z.record(z.string(), z.unknown()),
   tier: z.enum(['partner', 'verified_crowd', 'public']),
   cuisine: z.array(z.string()).default([])
 });
@@ -20,7 +20,7 @@ const menuItemSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
   price: z.number().optional(),
-  estimatedMacros: z.record(z.any()),
+  estimatedMacros: z.record(z.string(), z.unknown()),
   allergens: z.array(z.string()).default([])
 });
 
@@ -65,12 +65,12 @@ export async function restaurantRoutes(app: FastifyInstance) {
       targetMeal: z.object({
         name: z.string(),
         calories: z.number(),
-        macros: z.record(z.any()).optional()
+        macros: z.record(z.string(), z.unknown()).optional()
       }),
       restaurants: z.array(z.object({
         id: z.string(),
         name: z.string(),
-        location: z.record(z.any()),
+        location: z.record(z.string(), z.unknown()),
         tier: z.string(),
         cuisine: z.array(z.string()).optional()
       })),
@@ -179,9 +179,10 @@ export async function restaurantRoutes(app: FastifyInstance) {
 
       return reply.send(matches);
     } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error({ error: 'match-meal failed', e, requestId: req.id });
-      return reply.status(500).send({ error: isProduction ? 'Meal matching service unavailable' : (e.message || 'Match meal failed') });
+      return reply.status(500).send({ error: isProduction ? 'Meal matching service unavailable' : (error.message || 'Match meal failed') });
     }
   });
   // Google Places Proxy with DB Enrichment

@@ -9,7 +9,7 @@ const systemMsgSchema = z.object({
   content: z.string(),
   type: z.enum(['system', 'coach_update', 'community_alert']).default('system'),
   priority: z.enum(['high', 'low']).optional(),
-  payload: z.any().optional()
+  payload: z.unknown().optional()
 });
 
 export async function messagesRoutes(app: FastifyInstance) {
