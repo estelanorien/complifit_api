@@ -23,9 +23,10 @@ export interface SynthesizeResult {
 const CACHE_MAX_ENTRIES = 500;
 const cache = new Map<string, SynthesizeResult>();
 
-function cacheKey(text: string, languageCode: string): string {
+function cacheKey(text: string, languageCode: string, options?: SynthesizeOptions): string {
   const hash = createHash('sha256').update(text).digest('hex').slice(0, 16);
-  return `${languageCode}:${hash}`;
+  const suffix = options?.enableTimePointing ? ':tp' : '';
+  return `${languageCode}:${hash}${suffix}`;
 }
 
 // TimepointType.SSML_MARK = 1 (for enableTimePointing; timepoints only returned for SSML <mark>)
@@ -40,7 +41,7 @@ export async function synthesize(
   languageCode: string,
   options: SynthesizeOptions = {}
 ): Promise<SynthesizeResult> {
-  const key = cacheKey(text, languageCode);
+  const key = cacheKey(text, languageCode, options);
   const cached = cache.get(key);
   if (cached) return cached;
 

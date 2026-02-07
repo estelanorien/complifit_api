@@ -147,36 +147,81 @@ ${prompt}`;
     return { base64: `data:image/png;base64,${base64}` };
   }
 
-  async generateVideo({ prompt, model = 'models/veo-001-preview', referenceImage }: { prompt: string; model?: string; referenceImage?: string }): Promise<string> {
-    try {
-      const res = await fetch(`${this.baseUrl}/${model}:generateContent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': this.apiKey
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
-      });
+  async generateVideo({ prompt, model = 'veo-3.1-generate-preview', referenceImage }: { prompt: string; model?: string; referenceImage?: string }): Promise<string> {
+    const maxRetries = 3;
+    let lastError: Error | null = null;
 
-      if (!res.ok) {
-        throw new Error(`Veo error: ${res.status} ${await res.text()}`);
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // 1. Build request body for Veo predictVideo endpoint
+        const requestBody: any = {
+          prompt: { text: prompt }
+        };
+
+        if (referenceImage) {
+          const base64Data = referenceImage.replace(/^data:image\/\w+;base64,/, '');
+          requestBody.image = {
+            image_bytes: base64Data
+          };
+        }
+
+        // 2. POST to predictVideo to start the long-running operation
+        const predictUrl = `${this.baseUrl}/models/${model}:predictVideo?key=${this.apiKey}`;
+        const res = await fetch(predictUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Veo API error: ${res.status} ${errText}`);
+        }
+
+        const operationData = await res.json() as any;
+
+        if (!operationData.name) {
+          throw new Error('Veo API did not return an operation name');
+        }
+
+        // 3. Poll the long-running operation until completion
+        const pollUrl = `${this.baseUrl}/${operationData.name}?key=${this.apiKey}`;
+        const pollIntervalMs = 10_000; // 10 seconds
+        const maxPollAttempts = 60;    // 60 * 10s = 10 minutes
+
+        for (let poll = 0; poll < maxPollAttempts; poll++) {
+          await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+
+          const pollRes = await fetch(pollUrl);
+          const pollData = await pollRes.json() as any;
+
+          if (pollData.done) {
+            if (pollData.error) {
+              throw new Error(`Video generation failed: ${pollData.error.message}`);
+            }
+
+            const videoUri = pollData.response?.generatedVideos?.[0]?.video?.uri;
+            if (!videoUri) {
+              throw new Error('No video URI found in completed operation');
+            }
+
+            return videoUri;
+          }
+        }
+
+        throw new Error('Video generation timed out after 10 minutes');
+
+      } catch (e: any) {
+        lastError = e;
+        if (attempt < maxRetries) {
+          // Exponential backoff: 5s, 10s, 20s
+          const backoffMs = 5000 * Math.pow(2, attempt - 1);
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+        }
       }
-
-      const data = await res.json() as any;
-      const videoUri = data?.candidates?.[0]?.content?.parts?.[0]?.fileData?.fileUri;
-
-      if (videoUri) return videoUri;
-
-      // Fallback if no URI returned
-      throw new Error("No video URI returned");
-
-    } catch (e: any) {
-      console.warn(`[AiService] Video generation failed (Veo access likely restricted). Using fallback.`, e.message);
-      // Fallback to High Quality Stock Mock for Demo
-      return "https://assets.mixkit.co/videos/preview/mixkit-man-doing-push-ups-at-gym-2623-large.mp4";
     }
+
+    throw lastError ?? new Error('Video generation failed after all retries');
   }
 }
 

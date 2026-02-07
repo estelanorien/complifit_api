@@ -1,5 +1,6 @@
 import admin from 'firebase-admin';
 import { env } from '../config/env.js';
+import { logger } from '../infra/logger.js';
 
 let firebaseApp: admin.app.App | null = null;
 
@@ -19,14 +20,14 @@ export function initializeFirebase(): boolean {
             firebaseApp = admin.initializeApp({
                 credential: admin.credential.applicationDefault()
             });
-            console.log('[Firebase] Initialized with application default credentials');
+            logger.info('[Firebase] Initialized with application default credentials');
             return true;
         } else {
-            console.warn('[Firebase] GOOGLE_APPLICATION_CREDENTIALS not set. FCM will not work.');
+            logger.warn('[Firebase] GOOGLE_APPLICATION_CREDENTIALS not set. FCM will not work.');
             return false;
         }
     } catch (error) {
-        console.error('[Firebase] Failed to initialize:', error);
+        logger.error('[Firebase] Failed to initialize:', error);
         return false;
     }
 }
@@ -169,7 +170,7 @@ export async function sendFcmNotificationBatch(
             invalidTokens
         };
     } catch (error: any) {
-        console.error('[Firebase] Batch send failed:', error);
+        logger.error('[Firebase] Batch send failed:', error);
         return { successCount: 0, failureCount: tokens.length, invalidTokens: [] };
     }
 }
@@ -192,7 +193,7 @@ export async function subscribeToTopic(
             failureCount: response.failureCount
         };
     } catch (error: any) {
-        console.error('[Firebase] Topic subscribe failed:', error);
+        logger.error('[Firebase] Topic subscribe failed:', error);
         return { successCount: 0, failureCount: tokens.length };
     }
 }
@@ -215,7 +216,7 @@ export async function unsubscribeFromTopic(
             failureCount: response.failureCount
         };
     } catch (error: any) {
-        console.error('[Firebase] Topic unsubscribe failed:', error);
+        logger.error('[Firebase] Topic unsubscribe failed:', error);
         return { successCount: 0, failureCount: tokens.length };
     }
 }

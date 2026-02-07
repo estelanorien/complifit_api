@@ -2,6 +2,7 @@
 import { pool } from '../infra/db/pool.js';
 import { generateAsset } from './AssetGenerationService.js';
 import { env } from '../config/env.js';
+import { logger } from '../infra/logger.js';
 
 const TARGET_LANGUAGES = ['es', 'fr', 'de', 'it', 'pt', 'ru', 'tr', 'zh', 'ja', 'ko', 'ar', 'hi'];
 
@@ -12,7 +13,7 @@ export class TranslationService {
      */
     static async publishAndTranslate(groupId: string, groupName: string, groupType: 'exercise' | 'meal') {
         const movementId = this.normalizeToId(groupName);
-        console.log(`[Translation] Publishing and Translating ${groupName} (${groupId})`);
+        logger.info(`[Translation] Publishing and Translating ${groupName} (${groupId})`);
 
         // 1. Promote Status: auto -> active
         // Function to update status for a key pattern
@@ -60,10 +61,10 @@ export class TranslationService {
                     await this.translateContent(item.text, item.category);
                 }
 
-                console.log(`[Translation] Completed for ${groupName}`);
+                logger.info(`[Translation] Completed for ${groupName}`);
 
             } catch (e) {
-                console.error(`[Translation] Failed to parse meta for ${groupName}`, e);
+                logger.error(`[Translation] Failed to parse meta for ${groupName}`, e);
             }
         }
     }
@@ -81,11 +82,11 @@ export class TranslationService {
             [originalText]
         );
         if ((cacheCheck.rowCount || 0) > 0) {
-            console.log(`[Translation] Cache hit for: "${originalText.substring(0, 20)}..."`);
+            logger.info(`[Translation] Cache hit for: "${originalText.substring(0, 20)}..."`);
             return;
         }
 
-        console.log(`[Translation] Generating translations for: "${originalText.substring(0, 20)}..."`);
+        logger.info(`[Translation] Generating translations for: "${originalText.substring(0, 20)}..."`);
 
         const prompt = `
             Translate the following text into these languages: ${TARGET_LANGUAGES.join(', ')}.
@@ -120,7 +121,7 @@ export class TranslationService {
             }
 
         } catch (e) {
-            console.error(`[Translation] Error translating "${originalText.substring(0, 20)}..."`, e);
+            logger.error(`[Translation] Error translating "${originalText.substring(0, 20)}..."`, e);
         }
     }
 

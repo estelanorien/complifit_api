@@ -22,6 +22,7 @@ export interface VerificationChecks {
 
 export interface VerificationResult {
   passed: boolean;
+  passedWithWarnings: boolean;
   duration: number;
   width: number;
   height: number;
@@ -64,11 +65,21 @@ export class VideoVerifier {
       hasAudio: probe.hasAudio
     };
 
-    const passed = Object.values(checks).every(v => v);
-    const notes = this.buildNotes(checks, probe, uniqueShots.size, jumpCutPositions);
+    // Hard-fail checks: no audio or no shot variety are non-negotiable
+    const hardFails = !checks.hasAudio || !checks.shotVariety;
+    // Soft checks: duration slightly off (within 10%) or resolution slightly off (within 2%)
+    const durationTolerant = probe.duration >= this.MIN_DURATION * 0.9 && probe.duration <= this.MAX_DURATION * 1.1;
+    const resolutionTolerant = Math.abs(probe.width - this.TARGET_WIDTH) <= this.TARGET_WIDTH * 0.02
+      && Math.abs(probe.height - this.TARGET_HEIGHT) <= this.TARGET_HEIGHT * 0.02;
+
+    const allPassed = Object.values(checks).every(v => v);
+    const passedWithWarnings = !hardFails && !allPassed && durationTolerant && resolutionTolerant && checks.noJumpCuts;
+    const passed = allPassed || passedWithWarnings;
+    const notes = this.buildNotes(checks, probe, uniqueShots.size, jumpCutPositions, passedWithWarnings);
 
     return {
       passed,
+      passedWithWarnings,
       duration: probe.duration,
       width: probe.width,
       height: probe.height,
@@ -102,7 +113,8 @@ export class VideoVerifier {
     checks: VerificationChecks,
     probe: ProbeResult,
     uniqueShotCount: number,
-    jumpCutPositions: number[]
+    jumpCutPositions: number[],
+    passedWithWarnings = false
   ): string {
     const issues: string[] = [];
     const passes: string[] = [];
@@ -144,6 +156,8 @@ export class VideoVerifier {
 
     if (issues.length === 0) {
       return `PASSED: ${passes.join('; ')}`;
+    } else if (passedWithWarnings) {
+      return `PASSED_WITH_WARNINGS: ${issues.join('; ')}. Passes: ${passes.join('; ')}`;
     } else {
       return `FAILED: ${issues.join('; ')}. Passes: ${passes.join('; ')}`;
     }

@@ -2,6 +2,7 @@
 import { pool } from '../infra/db/pool.js';
 import { generateAsset } from './AssetGenerationService.js';
 import { env } from '../config/env.js';
+import { logger } from '../infra/logger.js';
 
 interface GroupAssetGenOptions {
     groupId: string;
@@ -50,7 +51,7 @@ export class BatchAssetService {
      * This moves the heavy lifting to the server to prevent browser crashes.
      */
     static async generateGroupAssets(options: GroupAssetGenOptions) {
-        console.log(`[Batch] Starting Group Generation for ${options.groupName} (${options.groupId})`);
+        logger.info(`[Batch] Starting Group Generation for ${options.groupName} (${options.groupId})`);
         const { groupName, groupType, forceRegen, targetStatus = 'auto' } = options;
         const movementId = this.normalizeToId(groupName);
 
@@ -127,7 +128,7 @@ export class BatchAssetService {
                 });
                 results.generated++;
             } catch (e) {
-                console.error(`[Batch] Failed to generate ${asset.key}:`, e);
+                logger.error(`[Batch] Failed to generate ${asset.key}`, e);
                 results.errors++;
                 // PERSISTENCE: Mark as failed instead of deleting
                 await this.cacheAsset(asset.key, '', 'image', 'failed');
@@ -204,7 +205,7 @@ export class BatchAssetService {
                 });
                 results.generated++;
             } catch (e) {
-                console.error(`[Batch] Failed to generate ${asset.key}:`, e);
+                logger.error(`[Batch] Failed to generate ${asset.key}`, e);
                 results.errors++;
                 await this.cacheAsset(asset.key, '', 'image', 'failed');
             }
@@ -221,7 +222,7 @@ export class BatchAssetService {
      * and queues them for generation. For now, it runs synchronously for simplicity.
      */
     static async runNightlyBatch() {
-        console.log("Starting Nightly Batch Asset Generation...");
+        logger.info("Starting Nightly Batch Asset Generation...");
 
         const report = {
             generated: 0,
@@ -245,7 +246,7 @@ export class BatchAssetService {
             await this.syncMealVideos(row.id, row.name, this.normalizeToId(row.name));
         }
 
-        console.log("Nightly Batch Complete (Sync Only)", report);
+        logger.info("Nightly Batch Complete (Sync Only)", report);
         return report;
     }
 
@@ -324,7 +325,7 @@ export class BatchAssetService {
                 const clean = cleanJson(jsonStr);
                 return JSON.parse(clean);
             }
-        } catch (e) { console.error("Instruction Gen Failed", e); }
+        } catch (e) { logger.error("Instruction Gen Failed", e); }
         return { textContext: groupName, textContextSimple: groupName, steps: [] };
     }
 

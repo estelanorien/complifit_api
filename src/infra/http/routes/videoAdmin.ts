@@ -14,6 +14,7 @@ import { pool } from '../../db/pool.js';
 import { authGuard } from '../hooks/auth.js';
 import { videoOrchestrator } from '../../../application/services/VideoOrchestrator.js';
 import { AuthenticatedRequest } from '../types.js';
+import { logger } from '../../logger.js';
 
 export default async function videoAdminRoutes(app: FastifyInstance) {
   // =====================================================
@@ -357,10 +358,154 @@ export default async function videoAdminRoutes(app: FastifyInstance) {
       `)
     ]);
 
+    // YouTube upload stats
+    const youtubeStats = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE youtube_id IS NOT NULL) as youtube_uploaded,
+        COUNT(*) FILTER (WHERE youtube_id IS NULL AND gcs_path IS NOT NULL AND status = 'UPLOADED') as youtube_pending,
+        COUNT(*) FILTER (WHERE status = 'FAILED') as failed
+      FROM localized_videos
+    `);
+
     return reply.send({
       jobs: videoStats.rows[0],
       clips: clipStats.rows[0],
-      review: reviewStats.rows[0]
+      review: reviewStats.rows[0],
+      youtube: youtubeStats.rows[0]
     });
+  });
+
+  // =====================================================
+  // YouTube Management Endpoints
+  // =====================================================
+
+  /**
+   * Retry YouTube upload for a specific video
+   */
+  app.post('/admin/videos/:id/retry-youtube', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
+    if (!user?.userId) {
+      return reply.status(403).send({ error: 'Authentication required' });
+    }
+
+    const { id } = req.params as { id: string };
+    const video = await pool.query(`SELECT id, gcs_path, youtube_id FROM localized_videos WHERE id = $1`, [id]);
+    if (video.rows.length === 0) return reply.status(404).send({ error: 'Video not found' });
+    if (!video.rows[0].gcs_path) return reply.status(400).send({ error: 'No GCS path available for retry' });
+
+    // Run async
+    videoOrchestrator.retryYouTubeUpload(id).then(result => {
+      logger.info('YouTube retry succeeded', { videoId: id, result });
+    }).catch(err => {
+      logger.error('YouTube retry failed', err as Error, { videoId: id });
+    });
+
+    return reply.send({ success: true, message: 'YouTube upload retry started' });
+  });
+
+  /**
+   * Bulk retry all failed YouTube uploads
+   */
+  app.post('/admin/videos/retry-all-youtube', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
+    if (!user?.userId) {
+      return reply.status(403).send({ error: 'Authentication required' });
+    }
+
+    const result = await pool.query(`
+      SELECT id FROM localized_videos
+      WHERE status = 'UPLOADED' AND youtube_id IS NULL AND gcs_path IS NOT NULL
+    `);
+    const ids = result.rows.map((r: { id: string }) => r.id);
+
+    for (const id of ids) {
+      videoOrchestrator.retryYouTubeUpload(id).catch(err => {
+        logger.error('Bulk YouTube retry failed', err as Error, { videoId: id });
+      });
+    }
+
+    return reply.send({ success: true, queuedCount: ids.length });
+  });
+
+  /**
+   * Delete a YouTube video
+   */
+  app.delete('/admin/videos/:id/youtube', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
+    if (!user?.userId) {
+      return reply.status(403).send({ error: 'Authentication required' });
+    }
+
+    const { id } = req.params as { id: string };
+    const video = await pool.query(`SELECT youtube_id FROM localized_videos WHERE id = $1`, [id]);
+    if (video.rows.length === 0) return reply.status(404).send({ error: 'Video not found' });
+    if (!video.rows[0].youtube_id) return reply.status(400).send({ error: 'No YouTube video linked' });
+
+    try {
+      const { youtubeService } = await import('../../../services/youtubeService.js');
+      if (youtubeService?.deleteVideo) {
+        await youtubeService.deleteVideo(video.rows[0].youtube_id);
+      }
+    } catch (err) {
+      logger.error('YouTube delete failed', err as Error, { videoId: id });
+      return reply.status(500).send({ error: 'Failed to delete YouTube video' });
+    }
+
+    await pool.query(
+      `UPDATE localized_videos SET youtube_id = NULL, youtube_url = NULL WHERE id = $1`, [id]
+    );
+
+    return reply.send({ success: true, message: 'YouTube video deleted' });
+  });
+
+  /**
+   * List all videos with YouTube upload status
+   */
+  app.get('/admin/videos/youtube-status', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
+    if (!user?.userId) {
+      return reply.status(403).send({ error: 'Authentication required' });
+    }
+
+    const result = await pool.query(`
+      SELECT id, parent_id, language_code, gcs_path, youtube_id, youtube_url, status,
+             verification_status, created_at
+      FROM localized_videos
+      ORDER BY created_at DESC
+      LIMIT 100
+    `);
+
+    return reply.send({
+      videos: result.rows,
+      summary: {
+        total: result.rows.length,
+        uploaded: result.rows.filter((r: { youtube_id: string | null }) => r.youtube_id).length,
+        pending: result.rows.filter((r: { youtube_id: string | null; gcs_path: string | null }) => !r.youtube_id && r.gcs_path).length
+      }
+    });
+  });
+
+  /**
+   * Check YouTube OAuth token health
+   */
+  app.get('/admin/youtube/health', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
+    if (!user?.userId) {
+      return reply.status(403).send({ error: 'Authentication required' });
+    }
+
+    try {
+      const { youtubeService } = await import('../../../services/youtubeService.js');
+      if (youtubeService?.validateCredentials) {
+        const result = await youtubeService.validateCredentials();
+        return reply.send({
+          connected: result.valid,
+          error: result.error || undefined
+        });
+      }
+      return reply.send({ connected: false, error: 'YouTube service not available (legacy mode)' });
+    } catch (err) {
+      return reply.send({ connected: false, error: (err as Error).message });
+    }
   });
 }

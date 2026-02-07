@@ -19,6 +19,8 @@ import { Storage } from '@google-cloud/storage';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { logger } from '../../infra/logger.js';
+import { env } from '../../config/env.js';
 
 const storage = new Storage();
 const GCS_BUCKET = process.env.GCS_VIDEO_BUCKET || 'vitality-videos';
@@ -69,7 +71,7 @@ export class VideoOrchestrator {
     const errors: string[] = [];
     const localizedVideos: LocalizedVideoResult[] = [];
 
-    console.log(`[VideoOrchestrator] Starting Phase 2 for ${request.assetKey} (${request.coachId})`);
+    logger.info('[VideoOrchestrator] Starting Phase 2', { assetKey: request.assetKey, coachId: request.coachId });
 
     try {
       // 1. Load asset meta
@@ -79,7 +81,7 @@ export class VideoOrchestrator {
       }
 
       // 2. Ensure 4 source clips exist (ESTABLISHING, CLOSE_UP, OVERHEAD, ACTION)
-      console.log(`[VideoOrchestrator] Ensuring scene pack...`);
+      logger.info('[VideoOrchestrator] Ensuring scene pack');
       const clips = await ensureScenePack({
         assetKey: request.assetKey,
         coachId: request.coachId,
@@ -94,7 +96,7 @@ export class VideoOrchestrator {
         throw new Error(`Insufficient clips generated: ${clips.length} (need at least 3)`);
       }
 
-      console.log(`[VideoOrchestrator] Scene pack ready: ${clips.length} clips`);
+      logger.info('[VideoOrchestrator] Scene pack ready', { clipCount: clips.length });
 
       // 3. For each language, create localized video
       for (const lang of request.languages) {
@@ -110,7 +112,7 @@ export class VideoOrchestrator {
           localizedVideos.push(result);
         } catch (langError) {
           const error = langError as Error;
-          console.error(`[VideoOrchestrator] Failed for language ${lang}:`, error.message);
+          logger.error('[VideoOrchestrator] Failed for language', error, { language: lang });
           errors.push(`${lang}: ${error.message}`);
         }
       }
@@ -125,7 +127,7 @@ export class VideoOrchestrator {
 
     } catch (e) {
       const error = e as Error;
-      console.error(`[VideoOrchestrator] Pipeline failed:`, error.message);
+      logger.error('[VideoOrchestrator] Pipeline failed', error);
       return {
         success: false,
         assetKey: request.assetKey,
@@ -147,17 +149,17 @@ export class VideoOrchestrator {
     clips: ClipResult[],
     options?: Phase2VideoRequest['options']
   ): Promise<LocalizedVideoResult> {
-    console.log(`[VideoOrchestrator] Creating video for ${assetKey}/${coachId}/${lang}`);
+    logger.info('[VideoOrchestrator] Creating video', { assetKey, coachId, language: lang });
 
     // 1. Build script from meta instructions
     const script = this.buildScript(meta, lang);
 
     // 2. Generate TTS with timepoints
-    console.log(`[VideoOrchestrator] Generating TTS...`);
+    logger.info('[VideoOrchestrator] Generating TTS');
     const tts = await synthesize(script, lang, { enableTimePointing: true });
     const audioDuration = this.estimateAudioDuration(tts.audioBuffer);
 
-    console.log(`[VideoOrchestrator] TTS generated: ${audioDuration.toFixed(1)}s, ${tts.timepoints?.length || 0} timepoints`);
+    logger.info('[VideoOrchestrator] TTS generated', { audioDuration: audioDuration.toFixed(1), timepointCount: tts.timepoints?.length || 0 });
 
     // 3. Build edit list using timepoints (cinematic rules, no jump cuts)
     // Convert ClipResult to the format expected by buildEditList
@@ -172,7 +174,7 @@ export class VideoOrchestrator {
       audioDuration
     );
 
-    console.log(`[VideoOrchestrator] Edit list: ${editList.length} segments`);
+    logger.info('[VideoOrchestrator] Edit list built', { segmentCount: editList.length });
 
     // 4. Map edit list to URIs
     const editListWithUris: EditSegmentWithUri[] = editList.map(segment => {
@@ -193,20 +195,20 @@ export class VideoOrchestrator {
     // 5. Assemble final video
     const outputPath = path.join('/tmp', `${assetKey.replace(/:/g, '_')}_${coachId}_${lang}_${Date.now()}.mp4`);
 
-    console.log(`[VideoOrchestrator] Assembling video...`);
+    logger.info('[VideoOrchestrator] Assembling video');
     await assemble(
       editListWithUris,
       tts.audioBuffer,
       outputPath,
       {
-        musicUri: options?.musicUri,
+        musicUri: options?.musicUri || env.videoMusicTrackUri,
         transitionType: options?.transitionType || 'cut',
         transitionDuration: options?.transitionDuration || 0.3
       }
     );
 
     // 6. Verify quality
-    console.log(`[VideoOrchestrator] Verifying video...`);
+    logger.info('[VideoOrchestrator] Verifying video');
     const verification = await this.verifier.verify(outputPath, editList);
 
     // 7. Upload to GCS
@@ -217,7 +219,7 @@ export class VideoOrchestrator {
     let youtubeUrl: string | undefined;
 
     if (options?.autoUploadYouTube && verification.passed) {
-      console.log(`[VideoOrchestrator] Uploading to YouTube...`);
+      logger.info('[VideoOrchestrator] Uploading to YouTube');
       try {
         const exerciseName = meta.name || assetKey.split(':').pop() || 'Exercise';
         const coachName = coachId === 'atlas' ? 'Atlas' : 'Nova';
@@ -234,10 +236,10 @@ export class VideoOrchestrator {
 
         youtubeId = ytResult.videoId ?? undefined;
         youtubeUrl = ytResult.url;
-        console.log(`[VideoOrchestrator] YouTube upload complete: ${youtubeUrl}`);
+        logger.info('[VideoOrchestrator] YouTube upload complete', { youtubeUrl });
       } catch (ytError) {
         const error = ytError as Error;
-        console.error(`[VideoOrchestrator] YouTube upload failed:`, error.message);
+        logger.error('[VideoOrchestrator] YouTube upload failed', error);
         // Don't fail the whole operation, just log the error
       }
     }
@@ -247,6 +249,7 @@ export class VideoOrchestrator {
       parentId: assetKey,
       languageCode: lang,
       gcsPath,
+      status: 'UPLOADED',
       verificationStatus: verification.passed ? 'passed' : 'failed',
       verificationNotes: verification.notes,
       youtubeId,
@@ -258,7 +261,7 @@ export class VideoOrchestrator {
       fs.unlinkSync(outputPath);
     } catch { /* ignore */ }
 
-    console.log(`[VideoOrchestrator] Video complete: ${gcsPath} (${verification.passed ? 'PASSED' : 'FAILED'})${youtubeUrl ? ` YouTube: ${youtubeUrl}` : ''}`);
+    logger.info('[VideoOrchestrator] Video complete', { gcsPath, verificationPassed: verification.passed, youtubeUrl });
 
     return {
       language: lang,
@@ -361,6 +364,7 @@ export class VideoOrchestrator {
     parentId: string;
     languageCode: string;
     gcsPath: string;
+    status: string;
     verificationStatus: string;
     verificationNotes: string;
     youtubeId?: string;
@@ -372,11 +376,11 @@ export class VideoOrchestrator {
         status, verification_status, verification_notes,
         review_status, youtube_id, youtube_url, created_at
       )
-      VALUES ($1, $2, $3, $4, 'UPLOADED', $5, $6, 'ready_for_review', $7, $8, NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'ready_for_review', $8, $9, NOW())
       ON CONFLICT (parent_id, language_code)
       DO UPDATE SET
         gcs_path = EXCLUDED.gcs_path,
-        status = 'UPLOADED',
+        status = EXCLUDED.status,
         verification_status = EXCLUDED.verification_status,
         verification_notes = EXCLUDED.verification_notes,
         review_status = 'ready_for_review',
@@ -388,11 +392,50 @@ export class VideoOrchestrator {
       data.parentId,
       data.languageCode,
       data.gcsPath,
+      data.status,
       data.verificationStatus,
       data.verificationNotes,
       data.youtubeId || null,
       data.youtubeUrl || null
     ]);
+  }
+
+  /**
+   * Retry a failed YouTube upload for an existing localized video
+   */
+  async retryYouTubeUpload(videoId: string): Promise<{ success: boolean; youtubeUrl?: string }> {
+    const { rows } = await pool.query(
+      `SELECT parent_id, language_code, gcs_path, youtube_id FROM localized_videos WHERE id = $1`,
+      [videoId]
+    );
+    if (rows.length === 0) throw new Error('Video not found');
+    const video = rows[0];
+    if (!video.gcs_path) throw new Error('No GCS path available for retry');
+    if (video.youtube_id) throw new Error('Video already uploaded to YouTube');
+
+    // Generate signed URL from GCS
+    const bucket = storage.bucket(GCS_BUCKET);
+    const [signedUrl] = await bucket.file(video.gcs_path.replace(`gs://${GCS_BUCKET}/`, '')).getSignedUrl({
+      action: 'read',
+      expires: Date.now() + 30 * 60 * 1000 // 30 min
+    });
+
+    const { uploadToYouTube } = await import('../../services/youtubeService.js');
+    const ytResult = await uploadToYouTube({
+      videoUrl: signedUrl,
+      title: `Exercise - ${video.parent_id} (${video.language_code.toUpperCase()})`,
+      description: `Generated by Vitality AI Video Pipeline.`,
+      privacyStatus: 'unlisted'
+    });
+
+    // Update DB
+    await pool.query(
+      `UPDATE localized_videos SET youtube_id = $2, youtube_url = $3 WHERE id = $1`,
+      [videoId, ytResult.videoId, ytResult.url]
+    );
+
+    logger.info('[VideoOrchestrator] YouTube retry succeeded', { videoId, youtubeUrl: ytResult.url });
+    return { success: true, youtubeUrl: ytResult.url };
   }
 }
 

@@ -1,5 +1,6 @@
 
 import { env } from '../config/env.js';
+import { logger } from '../infra/logger.js';
 import { pool } from '../infra/db/pool.js';
 import { z } from 'zod';
 
@@ -103,7 +104,7 @@ export const generateAsset = async (options: AssetGenOptions): Promise<string | 
             const data: any = await res.json();
             value = data?.candidates?.[0]?.content?.parts?.[0]?.fileData?.fileUri;
         } catch (e) {
-            console.warn("Veo generation failed, falling back to mock", e);
+            logger.warn("Veo generation failed, falling back to mock", { error: String(e) });
             value = null;
         }
     }

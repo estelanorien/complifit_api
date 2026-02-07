@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { env } from '../config/env.js';
+import { logger } from '../infra/logger.js';
 
 let transporter: nodemailer.Transporter | null = null;
 
@@ -12,8 +13,8 @@ export function initializeEmail(): boolean {
     }
 
     if (!env.email.host || !env.email.user || !env.email.pass) {
-        console.warn('[Email] SMTP not configured. Email sending disabled.');
-        console.warn('[Email] Set SMTP_HOST, SMTP_USER, SMTP_PASS environment variables to enable.');
+        logger.warn('[Email] SMTP not configured. Email sending disabled.');
+        logger.warn('[Email] Set SMTP_HOST, SMTP_USER, SMTP_PASS environment variables to enable.');
         return false;
     }
 
@@ -28,10 +29,10 @@ export function initializeEmail(): boolean {
             }
         });
 
-        console.log('[Email] SMTP transporter initialized');
+        logger.info('[Email] SMTP transporter initialized');
         return true;
     } catch (error) {
-        console.error('[Email] Failed to initialize:', error);
+        logger.error('[Email] Failed to initialize:', error);
         return false;
     }
 }
@@ -67,7 +68,7 @@ export async function sendEmail(
 
         return { success: true, messageId: result.messageId };
     } catch (error: any) {
-        console.error('[Email] Send failed:', error);
+        logger.error('[Email] Send failed:', error);
         return { success: false, error: error.message };
     }
 }

@@ -48,6 +48,26 @@ async function main() {
     jobProcessor.start();
     translationQueue.start();
     videoQueue.start();
+
+    // Check YouTube credentials (non-blocking)
+    if (env.youtube?.clientId && env.youtube?.clientSecret && env.youtube?.refreshToken) {
+      import('./services/youtubeService.js').then(async ({ youtubeService }) => {
+        if (youtubeService?.validateCredentials) {
+          const result = await youtubeService.validateCredentials();
+          if (result.valid) {
+            app.log.info('[STARTUP] YouTube credentials validated successfully');
+          } else {
+            app.log.error(`[STARTUP] YouTube credentials INVALID: ${result.error}. Video uploads will fail.`);
+          }
+        } else {
+          app.log.info('[STARTUP] YouTube service loaded (legacy mode, no pre-validation)');
+        }
+      }).catch(err => {
+        app.log.warn(`[STARTUP] YouTube credential check skipped: ${(err as Error).message}`);
+      });
+    } else {
+      app.log.warn('[STARTUP] YouTube credentials not configured - auto-upload disabled');
+    }
   } catch (err) {
     app.log.error(err, '[STARTUP] Failed to load Fastify plugins');
     process.exit(1);

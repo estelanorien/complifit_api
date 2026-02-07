@@ -2,6 +2,7 @@
 import { AiService } from './aiService.js';
 import { pool } from '../../infra/db/pool.js';
 import { normalizeToMovementId } from './normalization.js';
+import { logger } from '../../infra/logger.js';
 
 const aiService = new AiService();
 
@@ -116,7 +117,7 @@ export class CanonicalService {
                 language: lang
             };
         } catch (e) {
-            console.error("[CanonicalService] Parse Error:", e);
+            logger.error("[CanonicalService] Parse Error:", e);
             // Fallback: simple normalization of the input name
             const prefix = type === 'meal' ? 'meal' : 'movement';
             return {

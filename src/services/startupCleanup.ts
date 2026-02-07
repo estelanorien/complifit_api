@@ -40,6 +40,36 @@ export async function runStartupCleanup(): Promise<void> {
             });
         }
 
+        // 3. Reset stuck video_jobs in 'processing' for > 30 minutes
+        const stuckVideoJobs = await pool.query(`
+            UPDATE video_jobs
+            SET status = 'pending', updated_at = NOW()
+            WHERE status = 'processing'
+            AND updated_at < NOW() - INTERVAL '30 minutes'
+            RETURNING id
+        `);
+
+        if (stuckVideoJobs.rowCount && stuckVideoJobs.rowCount > 0) {
+            logger.info(`[StartupCleanup] Reset ${stuckVideoJobs.rowCount} stuck video jobs to 'pending'`, {
+                jobIds: stuckVideoJobs.rows.slice(0, 5).map(r => r.id)
+            });
+        }
+
+        // 4. Reset localized_videos stuck in transient states for > 30 minutes
+        const stuckVideos = await pool.query(`
+            UPDATE localized_videos
+            SET status = 'FAILED', verification_notes = COALESCE(verification_notes, '') || ' | Reset: stuck in processing during restart'
+            WHERE status IN ('PROCESSING', 'VERIFICATION', 'UPLOADING')
+            AND created_at < NOW() - INTERVAL '30 minutes'
+            RETURNING id
+        `);
+
+        if (stuckVideos.rowCount && stuckVideos.rowCount > 0) {
+            logger.info(`[StartupCleanup] Reset ${stuckVideos.rowCount} stuck localized_videos to 'FAILED'`, {
+                videoIds: stuckVideos.rows.slice(0, 5).map(r => r.id)
+            });
+        }
+
         logger.info('[StartupCleanup] Cleanup complete.');
 
     } catch (e: any) {
