@@ -64,3 +64,8 @@ coverage/
 ecosystem.config.js.bak
 
 node_modules
+
+# Credentials files
+youtube_credentials.txt
+*_credentials.txt
+*.credentials.txt

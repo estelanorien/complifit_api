@@ -19,7 +19,7 @@ RUN npm run build
 EXPOSE 8080
 
 # Clean dev dependencies for a smaller image
-# RUN npm prune --production
+RUN npm prune --production
 
 # Set Node.js memory options
 ENV NODE_OPTIONS="--max-old-space-size=1536"

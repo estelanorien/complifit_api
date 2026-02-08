@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: 'vitality-api',
-      script: 'dist/server.js',
+      script: 'dist/server.cjs',
 
       // Cluster mode for better performance
       instances: 1,
@@ -43,8 +43,6 @@ module.exports = {
 
       // Cron restart (optional - restart every day at 3 AM)
       cron_restart: '0 3 * * *',
-      kill_timeout: 5000,
-      listen_timeout: 3000,
       // Instance variables
       instance_var: 'INSTANCE_ID'
     }
