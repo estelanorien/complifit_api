@@ -49,12 +49,16 @@ const envSchema = z.object({
     if (val === undefined || val === null) return undefined;
     return val === 'true' || val === '1';
   }),
+  // Anthropic Claude API
+  ANTHROPIC_API_KEY: z.string().optional(),
   // Video voiceover pipeline
   VIDEO_MUSIC_TRACK_URI: z.string().optional(),
   // AI Training Platform (separate deployment for app store compliance)
   AI_PLATFORM_URL: z.string().url().optional(),
   AI_PLATFORM_KEY: z.string().optional(),
-  PSEUDONYM_SALT: z.string().optional()
+  PSEUDONYM_SALT: z.string().optional(),
+  // Warroom skill library path
+  WARROOM_PATH: z.string().optional()
 });
 
 const parseEnv = () => {
@@ -90,10 +94,12 @@ const parseEnv = () => {
       FRONTEND_URL: process.env.FRONTEND_URL,
       GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS,
       DB_SSL_REJECT_UNAUTHORIZED: process.env.DB_SSL_REJECT_UNAUTHORIZED,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
       VIDEO_MUSIC_TRACK_URI: process.env.VIDEO_MUSIC_TRACK_URI || undefined,
       AI_PLATFORM_URL: process.env.AI_PLATFORM_URL,
       AI_PLATFORM_KEY: process.env.AI_PLATFORM_KEY,
-      PSEUDONYM_SALT: process.env.PSEUDONYM_SALT
+      PSEUDONYM_SALT: process.env.PSEUDONYM_SALT,
+      WARROOM_PATH: process.env.WARROOM_PATH
     });
     return parsed;
   } catch (error: any) {
@@ -152,7 +158,9 @@ export const env = {
   frontendUrl: envVars.FRONTEND_URL,
   googleApplicationCredentials: envVars.GOOGLE_APPLICATION_CREDENTIALS,
   dbSslRejectUnauthorized: envVars.DB_SSL_REJECT_UNAUTHORIZED ?? (envVars.NODE_ENV === 'production' ? true : false),
+  anthropicApiKey: envVars.ANTHROPIC_API_KEY,
   videoMusicTrackUri: envVars.VIDEO_MUSIC_TRACK_URI && envVars.VIDEO_MUSIC_TRACK_URI !== '' ? envVars.VIDEO_MUSIC_TRACK_URI : undefined,
+  warroomPath: envVars.WARROOM_PATH,
   // AI Training Platform (separate deployment)
   aiPlatform: {
     url: envVars.AI_PLATFORM_URL,

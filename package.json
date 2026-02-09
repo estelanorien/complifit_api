@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "esbuild src/server.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/server.cjs --external:pg-native --external:fsevents --external:firebase-admin --external:@google-cloud/text-to-speech --external:@google-cloud/storage --external:nodemailer",
+    "build": "esbuild src/server.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/server.cjs --external:pg-native --external:fsevents --external:firebase-admin --external:@google-cloud/text-to-speech --external:@google-cloud/storage --external:nodemailer --external:@anthropic-ai/sdk",
     "start": "node dist/server.cjs",
     "lint": "eslint . --ext .ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "@fastify/cors": "^8.5.0",
     "@fastify/helmet": "^11.1.1",
     "@fastify/rate-limit": "^9.0.1",

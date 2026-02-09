@@ -36,6 +36,7 @@ import { customProgramRoutes } from './routes/customPrograms.js';
 import { jobRoutes } from './routes/jobs.js';
 import { generationRoutes } from './routes/generation.js';
 import videoAdminRoutes from './routes/videoAdmin.js';
+import { smartPlanRoutes } from './routes/smartPlan.js';
 import { requestLogger, responseLogger, errorLogger } from './hooks/requestLogger.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errors.js';
@@ -135,6 +136,7 @@ export function buildServer() {
   app.register(async function (app) {
     registerAiRateLimit(app);
     app.register(aiRoutes);
+    app.register(smartPlanRoutes);
   }, { prefix: '/api' });
 
   // Admin routes with admin rate limiting

@@ -6,6 +6,24 @@
 import { pool } from '../../infra/db/pool.js';
 import { AssetRepository } from '../../infra/db/repositories/AssetRepository.js';
 import { AiService } from '../../application/services/aiService.js';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
+
+/** Probe actual video duration via ffprobe. Returns seconds (default 8). */
+async function probeDuration(uri: string): Promise<number> {
+  try {
+    const { stdout } = await execFileAsync('ffprobe', [
+      '-v', 'quiet', '-print_format', 'json', '-show_format', uri
+    ], { timeout: 15_000 });
+    const data = JSON.parse(stdout);
+    const dur = parseFloat(data?.format?.duration);
+    return dur > 0 ? dur : 8;
+  } catch {
+    return 8;
+  }
+}
 
 const aiService = new AiService();
 
@@ -100,7 +118,8 @@ export async function ensureScenePack(input: VeoDirectorInput): Promise<ClipResu
   for (const shotType of SHOT_TYPES) {
     const prompt = buildPrompt(shotType, name, type, coachId ?? null);
     const uri = await aiService.generateVideo({ prompt, referenceImage });
-    const durationSeconds = 8;
+    // Probe actual duration from Veo response metadata; fall back to 8s
+    const durationSeconds = await probeDuration(uri).catch(() => 8);
 
     const { rows } = await pool.query(
       `INSERT INTO video_source_clips (parent_id, coach_id, shot_type, uri, duration_seconds)
@@ -163,7 +182,7 @@ export async function ensureStepScenePack(input: VeoDirectorInput): Promise<Clip
     }
     const prompt = buildStepPrompt(shotType, name, type, coachId ?? null, i + 1, stepDesc);
     const uri = await aiService.generateVideo({ prompt, referenceImage });
-    const durationSeconds = 8;
+    const durationSeconds = await probeDuration(uri).catch(() => 8);
     const { rows } = await pool.query(
       `INSERT INTO video_source_clips (parent_id, coach_id, step_index, shot_type, uri, duration_seconds)
        VALUES ($1, $2, $3, $4, $5, $6)

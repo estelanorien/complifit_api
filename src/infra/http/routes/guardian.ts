@@ -2,21 +2,10 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
-import fetch from 'node-fetch';
-import { env } from '../../../config/env.js';
-import { AuthenticatedRequest, GeminiResponse } from '../types.js';
+import { AiService } from '../../../application/services/aiService.js';
+import { AuthenticatedRequest } from '../types.js';
 
-const cleanGeminiJson = (text: string): string => {
-  if (!text) return text;
-  let cleaned = text.trim();
-  cleaned = cleaned.replace(/^```[a-zA-Z]*\s*/, '').replace(/```$/, '').trim();
-  if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
-  if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
-  return cleaned.trim();
-};
-
-const GEMINI_MODEL = 'models/gemini-3-flash-preview';
-const GEN_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/${GEMINI_MODEL}:generateContent`;
+const ai = new AiService();
 
 // Helper to find meal ID in profile plan
 const findMealIdOrName = (profileData: any, dateStr: string, targetName: string): string | null => {
@@ -50,10 +39,9 @@ const findMealIdOrName = (profileData: any, dateStr: string, targetName: string)
 };
 
 export async function guardianRoutes(app: FastifyInstance) {
-  // Analyze deletion impact via Gemini
+  // Analyze deletion impact
   app.post('/guardian/analyze-deletion', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
-    if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
 
     const body = z.object({
       type: z.enum(['training', 'meal']),
@@ -129,21 +117,10 @@ export async function guardianRoutes(app: FastifyInstance) {
     `;
 
     try {
-      const res = await fetch(GEN_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': env.geminiApiKey
-        },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      const { data: result } = await ai.generateStructuredOutput({
+        prompt,
+        taskType: 'guardian_analysis',
       });
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`Gemini error ${res.status}: ${errorText}`);
-      }
-      const data: any = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const result = JSON.parse(cleanGeminiJson(text) || '{}');
 
       if (!Array.isArray(result.remedies)) result.remedies = [];
       if (result.remedies.length === 0) {
@@ -163,8 +140,6 @@ export async function guardianRoutes(app: FastifyInstance) {
     } catch (e: unknown) {
       req.log.error({ error: "Guardian analysis failed", e, requestId: req.id });
 
-      // Improved fallback: return delete_extra type which triggers simple deletion modal
-      // This ensures users always see the Guardian Modal, even when AI analysis fails
       return reply.send({
         isSafe: true,
         impactLevel: 'low',
@@ -345,30 +320,25 @@ export async function guardianRoutes(app: FastifyInstance) {
   // Analyze surplus
   app.post('/guardian/analyze-surplus', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
-    if (!env.geminiApiKey) return reply.status(500).send({ error: 'API_KEY missing' });
 
     const body = z.object({
       surplus: z.number(),
-      profile: z.any(), // TODO: define UserProfile schema
+      profile: z.any(),
       nextMealName: z.string().optional(),
       nextMealCalories: z.number().optional(),
       lang: z.string().default('en')
     }).parse(req.body);
 
     const { surplus, profile, lang, nextMealName, nextMealCalories } = body;
-    const prompt = `ACT AS GUARDIAN AI. User has ${surplus}kcal surplus. Goal: ${profile.primaryGoal}. 
+    const prompt = `ACT AS GUARDIAN AI. User has ${surplus}kcal surplus. Goal: ${profile.primaryGoal}.
     Next Meal Context: ${nextMealName ? `${nextMealName} (~${nextMealCalories} cal)` : "Unknown"}.
     Generate 4 strategies (athlete, chef, hybrid, banker). Return JSON { strategies: { athlete: {...}, ... } }. Language: ${lang}.`;
 
     try {
-      const res = await fetch(GEN_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.geminiApiKey },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      const { data: result } = await ai.generateStructuredOutput({
+        prompt,
+        taskType: 'guardian_analysis',
       });
-      const data: any = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-      const result = JSON.parse(cleanGeminiJson(text));
 
       if (!result.strategies) {
         result.strategies = {
@@ -387,12 +357,11 @@ export async function guardianRoutes(app: FastifyInstance) {
   // Analyze extra training
   app.post('/guardian/analyze-extra-training', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
-    if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
     const body = z.object({
       exerciseName: z.string(),
       durationMinutes: z.number().optional(),
       muscleGroups: z.array(z.string()).optional(),
-      profile: z.any(), // TODO: define UserProfile schema
+      profile: z.any(),
       lang: z.string().default('en'),
       todaysPlan: z.array(z.unknown()).optional()
     }).parse(req.body);
@@ -400,14 +369,10 @@ export async function guardianRoutes(app: FastifyInstance) {
     const prompt = `GUARDIAN AI - EXTRA TRAINING REVIEW. New: ${exerciseName}. Muscles: ${muscleGroups.join(',')}. Plan: ${todaysPlan.map((p: any) => p?.title).join(',')}. Profile: ${profile.primaryGoal}. Detect overload. Return JSON { warning, suggestions }.`;
 
     try {
-      const res = await fetch(GEN_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.geminiApiKey },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      const { data: parsed } = await ai.generateStructuredOutput({
+        prompt,
+        taskType: 'guardian_analysis',
       });
-      const data: any = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const parsed = JSON.parse(cleanGeminiJson(text) || '{}');
       return reply.send({ warning: parsed.warning || '', suggestions: parsed.suggestions?.slice(0, 3) || [] });
     } catch (e: unknown) {
       return reply.send({ warning: "Consider recovery.", suggestions: [] });
@@ -417,12 +382,10 @@ export async function guardianRoutes(app: FastifyInstance) {
   // Analyze meal replacement
   app.post('/guardian/analyze-meal-replacement', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
-    if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
-    // Use the same model for simplicity
     const body = z.object({
-      loggedFood: z.any(), // TODO: define FoodLog schema
-      profile: z.any(), // TODO: define UserProfile schema
-      nearbyMeals: z.array(z.any()).default([]), // TODO: define NearbyMeal schema
+      loggedFood: z.any(),
+      profile: z.any(),
+      nearbyMeals: z.array(z.any()).default([]),
       lang: z.string().default('en')
     }).parse(req.body);
     const { loggedFood, nearbyMeals } = body;
@@ -431,14 +394,11 @@ export async function guardianRoutes(app: FastifyInstance) {
     const prompt = `GUARDIAN AI. User logged ${loggedFood.name}. Nearby: ${nearbyMeals[0].name}. Should replace? JSON { shouldReplace, suggestion }.`;
 
     try {
-      const res = await fetch(GEN_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.geminiApiKey },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      const { data } = await ai.generateStructuredOutput({
+        prompt,
+        taskType: 'guardian_analysis',
       });
-      const data: any = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      return reply.send(JSON.parse(cleanGeminiJson(text)));
+      return reply.send(data);
     } catch (e: unknown) {
       return reply.send({ shouldReplace: false });
     }
@@ -453,7 +413,6 @@ export async function guardianRoutes(app: FastifyInstance) {
   // Analyze late wake-up (15:00+) and provide remedies for missed meals/workouts
   app.post('/guardian/analyze-late-wake', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
-    if (!env.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing on backend' });
 
     const body = z.object({
       wakeTime: z.string(),
@@ -553,23 +512,10 @@ export async function guardianRoutes(app: FastifyInstance) {
     `;
 
     try {
-      const res = await fetch(GEN_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': env.geminiApiKey
-        },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      const { data: result } = await ai.generateStructuredOutput({
+        prompt,
+        taskType: 'guardian_analysis',
       });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`Gemini error ${res.status}: ${errorText}`);
-      }
-
-      const data: any = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const result = JSON.parse(cleanGeminiJson(text) || '{}');
 
       // Validate and set defaults
       if (!result.severity) result.severity = 'medium';

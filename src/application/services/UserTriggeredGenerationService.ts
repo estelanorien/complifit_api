@@ -188,41 +188,64 @@ export class UserTriggeredGenerationService {
                 type: 'image'
             });
 
-            // Generate with retry (but limited retries for speed)
-            const { base64 } = await withRetry(
-                async () => {
-                    return this.aiService.generateImage({
-                        prompt,
-                        referenceImage,
-                        referenceType: referenceType as 'identity' | 'environment'
-                    });
-                },
-                'image',
-                assetKey,
-                { maxAttempts: 2 }  // Limited retries for speed
-            );
+            // Generate with retry + identity verification loop
+            // If identity verification fails, regenerate up to 2 more times before accepting
+            const MAX_IDENTITY_RETRIES = 2;
+            let finalBase64: string | null = null;
+            let identityVerified = true;
 
-            if (!base64) {
-                throw new Error('No image data returned');
+            for (let identityAttempt = 0; identityAttempt <= MAX_IDENTITY_RETRIES; identityAttempt++) {
+                const { base64 } = await withRetry(
+                    async () => {
+                        return this.aiService.generateImage({
+                            prompt,
+                            referenceImage,
+                            referenceType: referenceType as 'identity' | 'environment'
+                        });
+                    },
+                    'image',
+                    assetKey,
+                    { maxAttempts: 2 }  // Limited retries for speed
+                );
+
+                if (!base64) {
+                    throw new Error('No image data returned');
+                }
+
+                // Identity verification for exercise images with reference
+                if (request.entityType === 'ex' && referenceImage) {
+                    try {
+                        const verification = await identityVerificationService.verify(
+                            base64,
+                            referenceImage,
+                            request.preferredCoach,
+                            assetKey
+                        );
+                        identityVerified = verification.matches;
+                        if (verification.matches) {
+                            finalBase64 = base64;
+                            break; // Identity verified, use this image
+                        }
+                        if (identityAttempt < MAX_IDENTITY_RETRIES) {
+                            logger.warn(`[UserGen] Identity verification failed for ${assetKey}, retrying (${identityAttempt + 1}/${MAX_IDENTITY_RETRIES})`);
+                        } else {
+                            logger.warn(`[UserGen] Identity verification failed for ${assetKey} after ${MAX_IDENTITY_RETRIES} retries, accepting as degraded`);
+                            finalBase64 = base64;
+                        }
+                    } catch (verifyError: any) {
+                        logger.warn(`[UserGen] Identity verification error (continuing): ${verifyError.message}`);
+                        finalBase64 = base64;
+                        break; // Verification service error, accept the image
+                    }
+                } else {
+                    finalBase64 = base64;
+                    break; // No identity check needed (meal images or no reference)
+                }
             }
 
-            // Quick identity check (non-blocking - don't fail if verification says retry)
-            let identityVerified = true;
-            if (request.entityType === 'ex' && referenceImage) {
-                try {
-                    const verification = await identityVerificationService.verify(
-                        base64,
-                        referenceImage,
-                        request.preferredCoach,
-                        assetKey
-                    );
-                    identityVerified = verification.matches;
-                    if (!verification.matches) {
-                        logger.warn(`[UserGen] Identity verification failed for ${assetKey}, but continuing for user experience`);
-                    }
-                } catch (verifyError: any) {
-                    logger.warn(`[UserGen] Identity verification error (continuing): ${verifyError.message}`);
-                }
+            const base64 = finalBase64;
+            if (!base64) {
+                throw new Error('No image data returned after identity verification retries');
             }
 
             // Store asset

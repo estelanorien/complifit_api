@@ -8,6 +8,8 @@ import { uploadToYouTube } from '../../../services/youtubeService.js';
 import bcrypt from 'bcryptjs';
 import { normalizeToMovementId } from '../../../application/services/normalization.js';
 import { AuthenticatedRequest, GeminiPart, GeminiResponse, GeminiErrorDetail } from '../types.js';
+import { aiRouter } from '../../../application/services/AIRouter.js';
+import { warroomSkillService } from '../../../application/services/WarroomSkillService.js';
 
 // Audit logging for admin operations
 function auditLog(req: FastifyRequest, action: string, details: Record<string, unknown> = {}) {
@@ -830,6 +832,76 @@ export async function adminRoutes(app: FastifyInstance) {
       })),
       count: res.rows.length
     };
+  });
+
+  // ================== AI ROUTING CONFIGURATION ==================
+
+  // GET /admin/ai-routing/config — Load current routing overrides
+  app.get('/admin/ai-routing/config', { preHandler: [authGuard, adminGuard] }, async (_req, reply) => {
+    const config = await aiRouter.loadConfig();
+    return reply.send(config);
+  });
+
+  // POST /admin/ai-routing/config — Save routing overrides
+  const taskOverrideSchema = z.object({
+    tier: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+    model: z.string().optional(),
+    maxOutputTokens: z.number().optional(),
+    skillIds: z.array(z.string()).optional(),
+  });
+
+  const aiRoutingConfigSchema = z.object({
+    version: z.number(),
+    overrides: z.record(z.string(), taskOverrideSchema),
+  });
+
+  app.post('/admin/ai-routing/config', { preHandler: [authGuard, adminGuard] }, async (req, reply) => {
+    try {
+      const validated = aiRoutingConfigSchema.parse(req.body);
+      const config = {
+        ...validated,
+        updatedAt: new Date().toISOString(),
+        updatedBy: (req as AuthenticatedRequest).user?.email || 'admin',
+      };
+
+      await pool.query(
+        `INSERT INTO cached_assets(key, value, asset_type, status)
+         VALUES('ai_routing_config', $1, 'json', 'active')
+         ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`,
+        [JSON.stringify(config)]
+      );
+
+      // Invalidate in-memory cache so changes take effect immediately
+      aiRouter.invalidateConfig();
+
+      auditLog(req, 'ai_routing_config_update', {
+        overrideCount: Object.keys(validated.overrides).length,
+      });
+
+      return reply.send({ success: true });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: error.message }, 'Failed to save AI routing config');
+      return reply.status(400).send({ error: error.message || 'Invalid config' });
+    }
+  });
+
+  // GET /admin/ai-routing/skills — Return warroom skill registry
+  app.get('/admin/ai-routing/skills', { preHandler: [authGuard, adminGuard] }, async (_req, reply) => {
+    return reply.send(warroomSkillService.getRegistry());
+  });
+
+  // GET /admin/ai-routing/defaults — Return hardcoded default routing table
+  app.get('/admin/ai-routing/defaults', { preHandler: [authGuard, adminGuard] }, async (_req, reply) => {
+    return reply.send(aiRouter.getDefaultRoutingTable());
+  });
+
+  // GET /admin/ai-routing/pricing — Return model pricing + task cost profiles
+  app.get('/admin/ai-routing/pricing', { preHandler: [authGuard, adminGuard] }, async (_req, reply) => {
+    return reply.send({
+      models: aiRouter.getPricing(),
+      profiles: aiRouter.getTaskProfiles(),
+    });
   });
 }
 

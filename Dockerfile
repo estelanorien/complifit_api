@@ -1,6 +1,9 @@
 # Production image
 FROM node:20-alpine
 
+# Install ffmpeg for Phase 2 video assembly (VideoAssemblyService)
+RUN apk add --no-cache ffmpeg
+
 WORKDIR /app
 
 # Copy package files
