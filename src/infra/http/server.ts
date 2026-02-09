@@ -34,6 +34,7 @@ import { notificationRoutes } from './routes/notifications.js';
 import { socialAuthRoutes } from './routes/socialAuth.js';
 import { customProgramRoutes } from './routes/customPrograms.js';
 import { jobRoutes } from './routes/jobs.js';
+import { generationRoutes } from './routes/generation.js';
 import videoAdminRoutes from './routes/videoAdmin.js';
 import { requestLogger, responseLogger, errorLogger } from './hooks/requestLogger.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
@@ -172,6 +173,7 @@ export function buildServer() {
   app.register(subscriptionRoutes, { prefix: '/api' });
   app.register(customProgramRoutes, { prefix: '/api' });
   app.register(jobRoutes, { prefix: '/api' });
+  app.register(generationRoutes, { prefix: '/api' });
 
   return app;
 }

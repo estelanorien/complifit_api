@@ -1,8 +1,8 @@
 
 import { pool } from '../infra/db/pool.js';
 import { generateAsset } from './AssetGenerationService.js';
-import { env } from '../config/env.js';
 import { logger } from '../infra/logger.js';
+import { AssetPromptService } from '../application/services/assetPromptService.js';
 
 interface GroupAssetGenOptions {
     groupId: string;
@@ -11,16 +11,7 @@ interface GroupAssetGenOptions {
     forceRegen?: boolean;
     themeId?: string;
     targetStatus?: 'auto' | 'draft' | 'active';
-}
-
-interface GroupAssetGenOptions {
-    groupId: string;
-    groupName: string;
-    groupType: 'exercise' | 'meal';
-    forceRegen?: boolean;
-    themeId?: string;
-    targetStatus?: 'auto' | 'draft' | 'active';
-    jobId?: string; // Optional: If running inside a job context for progress reporting
+    jobId?: string;
 }
 
 function cleanJson(str: string): string {
@@ -120,11 +111,12 @@ export class BatchAssetService {
             // PERSISTENCE: Write Placeholder "generating"
             await this.cacheAsset(asset.key, '', 'image', 'generating');
 
-            const prompt = await this.constructPrompt(asset, groupName, groupType, 'standard', asset.context);
+            const { prompt, referenceImage } = await this.constructPrompt(asset, groupName, groupType, 'standard', asset.context);
             try {
                 await generateAsset({
                     mode: asset.type === 'text' ? 'json' : asset.type as any,
-                    prompt, key: asset.key, status: targetStatus, movementId
+                    prompt, key: asset.key, status: targetStatus, movementId,
+                    imageInput: referenceImage
                 });
                 results.generated++;
             } catch (e) {
@@ -196,12 +188,14 @@ export class BatchAssetService {
             // Add "Reference consistency" note to prompt if imageInput is present
             const ctx = asset.imageInput ? `${asset.context} STRICTLY MAINTAIN FACE AND IDENTITY FROM REFERENCE IMAGE.` : asset.context;
 
-            const prompt = await this.constructPrompt(asset, groupName, groupType, 'standard', ctx);
+            const { prompt, referenceImage } = await this.constructPrompt(asset, groupName, groupType, 'standard', ctx);
             try {
+                // Prefer exercise-specific ref (Phase 1), fall back to system coach ref
+                const imageRef = asset.imageInput || referenceImage;
                 await generateAsset({
-                    mode: 'image', // All steps are images for now
+                    mode: 'image',
                     prompt, key: asset.key, status: targetStatus, movementId,
-                    imageInput: asset.imageInput
+                    imageInput: imageRef
                 });
                 results.generated++;
             } catch (e) {
@@ -345,23 +339,33 @@ export class BatchAssetService {
     }
 
     private static async constructPrompt(
-        asset: { subtype: 'main' | 'step'; label?: string; type: 'image' | 'video' | 'text' },
+        asset: { key: string; subtype: 'main' | 'step'; label?: string; type: 'image' | 'video' | 'text' },
         groupName: string,
         groupType: 'exercise' | 'meal',
         mode: string,
         context?: string
-    ): Promise<string> {
-        // Hardcoded Guidelines (sync with adminService.ts)
+    ): Promise<{ prompt: string; referenceImage?: string }> {
+        // For image assets: delegate to AssetPromptService (canonical prompt builder)
+        // This handles identity detection, OUTFIT LOCK, system coach refs, footwear, medical safety
+        if (asset.type === 'image') {
+            return AssetPromptService.constructPrompt({
+                key: asset.key,
+                groupName,
+                groupType,
+                subtype: asset.subtype,
+                label: asset.label,
+                type: 'image',
+                context
+            });
+        }
+
+        // Video/text: keep existing simple logic (not affected by identity bug)
         const guidelines = {
-            styleExerciseImage: "Cinematic fitness photography. High contrast, dramatic lighting, professional gym environment, 8k resolution, highly detailed. Realistic skin textures and sweat. No text.",
-            styleMealImage: "Hyperrealistic food photography. 8k resolution, highly detailed, delicious presentation, soft studio lighting, shallow depth of field. CRITICAL: NO TEXT, NO CALORIE LABELS, NO NUTRITION INFO, NO OVERLAYS.",
-            vitalityAvatarDescription: "Athletic Mannequin figure. Faceless, featureless face. Bald head. Neutral metallic grey skin tone. Wearing solid Emerald Green athletic shorts and Slate Grey top.",
             styleExerciseVideo: "Cinematic 4k fitness shot, dark gym, moody lighting, slow motion execution. Perfect form.",
             styleMealVideo: "Cinematic 4k food videography, slow motion cooking, delicious steam, chef preparation, moody lighting."
         };
 
         let style = "";
-
         if (asset.type === 'video') {
             if (groupType === 'exercise') {
                 style = guidelines.styleExerciseVideo;
@@ -369,14 +373,6 @@ export class BatchAssetService {
                 else if (asset.label?.includes('Nova')) style += " Featuring Coach Nova (Fit, Athletic, Female Model).";
             } else {
                 style = guidelines.styleMealVideo;
-            }
-        } else {
-            // Image Styles
-            if (groupType === 'exercise') {
-                style = guidelines.styleExerciseImage;
-                style += ` Featuring: ${guidelines.vitalityAvatarDescription}.`;
-            } else if (groupType === 'meal') {
-                style = guidelines.styleMealImage;
             }
         }
 
@@ -387,15 +383,7 @@ export class BatchAssetService {
             coreDescription = `${groupName}. ${context || "Perfect execution."}`;
         }
 
-        let prompt = `${style} SUBJECT: ${coreDescription}.`;
-
-        if (groupType === 'meal' && asset.type === 'image') {
-            prompt += " CRITICAL: STRICTLY NO TEXT, NO CALORIE LABELS, NO NUMBERS, NO OVERLAYS, NO NUTRITION INFO.";
-        } else if (asset.type === 'image') {
-            prompt += " STRICTLY NO TEXT.";
-        }
-
-        return prompt;
+        return { prompt: `${style} SUBJECT: ${coreDescription}.` };
     }
 
     // --- DB HELPERS ---
