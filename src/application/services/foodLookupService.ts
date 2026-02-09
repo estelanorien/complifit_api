@@ -16,7 +16,7 @@ export interface FoodLookupResult {
   name: string;
   calories: number;
   macros: { protein: number; carbs: number; fat: number };
-  status: 'extra';
+  status: 'matched' | 'extra';
   matchIndex: number;
   confidence: number;
   isFood: boolean;

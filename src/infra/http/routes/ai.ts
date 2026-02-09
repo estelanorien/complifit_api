@@ -311,65 +311,12 @@ Return JSON: { "name": string, "calories": number, "macros": {"protein": number,
       }
       parts.push({ text: prompt });
     } else if (text) {
-      // TEXT-ONLY ANALYSIS
-      prompt = `
-      ANALYZE FOOD LOG (LANGUAGE-AGNOSTIC, QUANTITY-AWARE).
-      - The user text may be in ANY language/dialect/transliteration. Detect it yourself.
-      - ALWAYS return a best-effort JSON, never refuse.
-      - No cultural filtering. Assume the mentioned food exists; estimate realistically.
-      - Planned meals today: [${mealContext}].
-      - FIRST, decide if the text actually describes food/meal consumption.
-        * If text is clearly NOT about food (e.g. mood, workout, random sentence), set "isFood" = false, "errorType" = "not_food", calories/macros = 0, status="extra", matchIndex=-1, confidence=0 and add a short message explaining that no food was found in the text.
-      - Detect QUANTITY in the text: numbers + (porsiyon/portion/serving/adet/piece/pcs/x2/gram/gr/g/kg/kilo/yarım/half/double/çeyrek/quarter) or words (bir=1, iki=2, üç=3, dört=4, beş=5).
-      - QUANTITY DETECTION RULES:
-        * If grams mentioned: Use exact grams (e.g., "200g tavuk" = 200g chicken)
-        * If portion/serving mentioned: Standard serving sizes:
-          - Protein (meat/fish): 1 serving = 120-150g (raw) or 100-120g (cooked)
-          - Carbs (rice/pasta): 1 serving = 150-200g cooked (≈80-100g dry)
-          - Vegetables: 1 serving = 100-150g
-          - Bread: 1 serving = 50-60g (1 slice or 1 small roll)
-        * If "yarım/half": Multiply standard serving by 0.5
-        * If "double/çift": Multiply standard serving by 2.0
-        * If no quantity mentioned: Assume 1 standard serving
-      - Calories and macros MUST reflect the consumed amount (quantity-adjusted). Do NOT use generic values.
-      - Use ACCURATE caloric densities:
-        * Lean proteins: 150-200 kcal/100g (chicken breast, fish, lean beef)
-        * Fatty proteins: 250-350 kcal/100g (döner, köfte, fatty cuts)
-        * Fried foods: Add 50-100 kcal/100g to base calories
-        * Rice/Pasta (cooked): 130-150 kcal/100g
-        * Bread: 250-300 kcal/100g
-        * Vegetables (raw): 20-50 kcal/100g
-        * Vegetables (cooked with oil): 100-200 kcal/100g
-        * Oils/Sauces: 1 tbsp = ~120 kcal
-      - Calculate macros accurately:
-        * Protein: 4 kcal per gram
-        * Carbs: 4 kcal per gram  
-        * Fat: 9 kcal per gram
-        * Ensure: (protein × 4) + (carbs × 4) + (fat × 9) ≈ total calories (±10% tolerance)
-      
-      Tasks:
-      1) If text clearly does NOT describe any food, return isFood=false, errorType="not_food", calories/macros=0 and an explanatory message.
-      2) Otherwise, identify the food name (keep original language if provided) and DETECTED QUANTITY.
-      3) Calculate calories & macros (Protein/Carbs/Fat) for the SPECIFIC consumed amount:
-         - Example: "200g tavuk göğsü" → 200g × 1.65 kcal/g = 330 kcal, 60g protein, 4g fat, 0g carbs
-         - Example: "1 porsiyon döner" → 150g × 2.8 kcal/g = 420 kcal, 25g protein, 20g fat, 30g carbs
-         - Example: "2 lahmacun" → 2 × 250 kcal = 500 kcal, 20g protein, 25g fat, 45g carbs
-      4) Fuzzy-match against planned meals (case-insensitive). If no match, status = "extra", matchIndex = -1.
-      
-      Return JSON EXACTLY:
-      {
-          "name": "string",
-          "calories": number,
-          "macros": { "protein": number, "carbs": number, "fat": number },
-          "status": "matched" | "extra",
-          "matchIndex": number,
-          "confidence": number,
-          "isFood": boolean,
-          "errorType": "ok" | "not_food" | "unrecognized_food",
-          "message": "short explanation in the user's language"
-      }
-      Response language: keep detected language of input text if any; otherwise English.
-      `;
+      // TEXT-ONLY ANALYSIS — trimmed prompt (calorie densities in system prompt)
+      prompt = `ANALYZE FOOD LOG. User text may be in ANY language. Detect quantity (grams, portions, pieces, Turkish numbers: bir=1, iki=2, yarım=0.5).
+If text is NOT about food, set isFood=false, errorType="not_food", calories/macros=0.
+Otherwise: identify food, parse quantity, calculate calories/macros using standard densities (see system prompt).
+Planned meals: [${mealContext}]. Fuzzy-match if ingredients overlap. NEVER return default 350/20/35/12.
+Return JSON: {"name":string,"calories":number,"macros":{"protein":number,"carbs":number,"fat":number},"status":"matched"|"extra","matchIndex":number,"confidence":0-100,"isFood":boolean,"errorType":"ok"|"not_food"|"unrecognized_food","message":string}`;
       parts.push({ text: `User Log: "${sanitizeUserInput(text)}"` });
       parts.push({ text: prompt });
     }
@@ -535,7 +482,7 @@ Return ONLY valid JSON with these exact fields:
       let parsed: any = null;
       const foodRoute = aiRouter.route(imageBase64 ? 'food_log_image' : 'food_log_text');
 
-      // Try Claude Opus first for superior food analysis accuracy
+      // Try Claude if router sends to Anthropic (e.g. admin override)
       if (foodRoute.provider === 'anthropic') {
         try {
           let claudeText: string;
@@ -549,7 +496,7 @@ Return ONLY valid JSON with these exact fields:
               imageMimeType: imgMime as any,
               systemPrompt: foodSystemPrompt,
               model: foodRoute.model,
-              maxTokens: foodRoute.maxOutputTokens || 4096,
+              maxTokens: foodRoute.maxOutputTokens || 1024,
               temperature: 0.3,
             })).text;
           } else {
@@ -557,7 +504,7 @@ Return ONLY valid JSON with these exact fields:
               prompt: prompt + '\n\nReturn ONLY valid JSON, no explanations.',
               systemPrompt: foodSystemPrompt,
               model: foodRoute.model,
-              maxTokens: foodRoute.maxOutputTokens || 4096,
+              maxTokens: foodRoute.maxOutputTokens || 1024,
               temperature: 0.3,
             })).text;
           }
@@ -567,9 +514,10 @@ Return ONLY valid JSON with these exact fields:
         }
       }
 
-      // Gemini fallback
+      // Gemini (primary for food logs, or fallback from Claude)
+      const geminiModel = foodRoute.provider === 'gemini' ? foodRoute.model.replace('models/', '') : 'gemini-3-flash-preview';
       if (!parsed) {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': aiConfig.geminiApiKey },
           body: JSON.stringify({
@@ -647,7 +595,7 @@ Return ONLY valid JSON with these exact fields:
       const user = (req as AuthenticatedRequest).user;
       recordApiCall({
         userId: user?.userId || 'anonymous',
-        callType: 'food_analysis',
+        callType: imageBase64 ? 'food_log_image' : 'food_log_text',
         apiProvider: foodRoute.provider,
         modelVersion: foodRoute.model,
         endpoint: '/ai/food-log',
