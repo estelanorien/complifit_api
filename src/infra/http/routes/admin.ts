@@ -903,5 +903,174 @@ export async function adminRoutes(app: FastifyInstance) {
       profiles: aiRouter.getTaskProfiles(),
     });
   });
+
+  // ================== ASSET VERIFICATION ==================
+
+  // POST /admin/verify/generate — Fire-and-forget pipeline trigger
+  app.post('/admin/verify/generate', { preHandler: [authGuard, adminGuard] }, async (req, reply) => {
+    const body = z.object({
+      entityType: z.enum(['ex', 'meal']),
+      entityId: z.string().min(1),
+      entityName: z.string().min(1),
+    }).parse(req.body);
+
+    const { unifiedGenerationPipeline } = await import('../../../application/services/UnifiedGenerationPipeline.js');
+    const { AssetPromptService } = await import('../../../application/services/assetPromptService.js');
+
+    const slug = AssetPromptService.normalizeToId(body.entityName);
+    const entityKey = `${body.entityType}:${slug}`;
+
+    // Fire-and-forget — pipeline runs in background
+    unifiedGenerationPipeline.execute({
+      entityType: body.entityType,
+      entityId: body.entityId,
+      entityName: body.entityName,
+      priority: 'HIGH',
+      triggeredBy: 'admin',
+      userId: (req as AuthenticatedRequest).user?.userId,
+      options: {
+        skipTranslations: true,
+        verifyIdentity: true,
+        maxRetries: 2,
+      },
+    }).then(result => {
+      req.log.info({ entityKey, generated: result.totalGenerated, failed: result.totalFailed }, '[Verify] Pipeline completed');
+    }).catch(err => {
+      req.log.error({ entityKey, error: (err as Error).message }, '[Verify] Pipeline failed');
+    });
+
+    auditLog(req, 'verify_generate', { entityKey, entityName: body.entityName });
+
+    return reply.send({ entityKey, slug, started: true });
+  });
+
+  // GET /admin/verify/:entityType/:slug — Return all assets for verification
+  app.get('/admin/verify/:entityType/:slug', { preHandler: [authGuard, adminGuard] }, async (req, reply) => {
+    const { entityType, slug } = req.params as { entityType: string; slug: string };
+
+    if (!['ex', 'meal'].includes(entityType)) {
+      return reply.status(400).send({ error: 'entityType must be "ex" or "meal"' });
+    }
+
+    const entityKey = `${entityType}:${slug}`;
+
+    // 1. Pipeline status
+    let pipelineStatus = null;
+    try {
+      const psRes = await pool.query(
+        `SELECT meta_status, images_atlas_status, images_nova_status, images_mannequin_status,
+                video_status, translation_status, started_at, completed_at, last_error, failed_stage
+         FROM pipeline_status WHERE entity_key = $1`,
+        [entityKey]
+      );
+      if (psRes.rows.length > 0) pipelineStatus = psRes.rows[0];
+    } catch { /* table may not exist yet */ }
+
+    // 2. Meta (instructions)
+    let meta = null;
+    try {
+      const metaRes = await pool.query(
+        `SELECT value FROM cached_assets WHERE key = $1 AND status = 'active'`,
+        [`${entityKey}:none:meta:0`]
+      );
+      if (metaRes.rows.length > 0 && metaRes.rows[0].value) {
+        meta = JSON.parse(metaRes.rows[0].value);
+      }
+    } catch { /* ignore parse errors */ }
+
+    // 3. All image assets (query by prefix)
+    const imageRows = await pool.query(
+      `SELECT a.key, a.status, a.asset_type, ENCODE(b.data, 'base64') as base64
+       FROM cached_assets a
+       LEFT JOIN asset_blob_storage b ON a.key = b.key
+       WHERE a.key LIKE $1 AND a.asset_type = 'image'
+       ORDER BY a.key`,
+      [`${entityKey}:%`]
+    );
+
+    // Organize images by persona
+    const images: Record<string, { main: { key: string; base64: string; status: string } | null; steps: Array<{ key: string; base64: string; status: string; index: number }> }> = {};
+
+    for (const row of imageRows.rows) {
+      // Parse key: type:slug:persona:subtype:index
+      const parts = row.key.split(':');
+      if (parts.length !== 5) continue;
+
+      const persona = parts[2];
+      const subtype = parts[3];
+      const index = parseInt(parts[4]);
+
+      if (!images[persona]) {
+        images[persona] = { main: null, steps: [] };
+      }
+
+      const base64 = row.base64 ? `data:image/png;base64,${row.base64}` : '';
+
+      if (subtype === 'main') {
+        images[persona].main = { key: row.key, base64, status: row.status };
+      } else if (subtype === 'step') {
+        images[persona].steps.push({ key: row.key, base64, status: row.status, index });
+      }
+    }
+
+    // Sort steps by index
+    for (const persona of Object.keys(images)) {
+      images[persona].steps.sort((a, b) => a.index - b.index);
+    }
+
+    // 4. Video jobs
+    let videos: Array<{ id: string; persona: string; status: string }> = [];
+    try {
+      const videoRes = await pool.query(
+        `SELECT id, persona, status FROM video_jobs WHERE asset_key LIKE $1`,
+        [`${entityKey}%`]
+      );
+      videos = videoRes.rows;
+    } catch { /* table may not exist */ }
+
+    // 5. Reference image existence check
+    let atlasRef = false;
+    let novaRef = false;
+    try {
+      const refRes = await pool.query(
+        `SELECT key FROM cached_assets WHERE key IN ('system_coach_atlas_ref', 'system_coach_nova_ref') AND status = 'active'`
+      );
+      for (const row of refRes.rows) {
+        if (row.key === 'system_coach_atlas_ref') atlasRef = true;
+        if (row.key === 'system_coach_nova_ref') novaRef = true;
+      }
+    } catch { /* ignore */ }
+
+    // 6. Summary
+    const totalFound = imageRows.rows.filter(r => r.status === 'active').length + (meta ? 1 : 0);
+    const instructionCount = meta?.instructions?.length || 6;
+    const expectedPersonas = entityType === 'ex' ? ['atlas', 'nova'] : ['mannequin', 'none'];
+    const expectedKeys: string[] = [`${entityKey}:none:meta:0`];
+    for (const persona of expectedPersonas) {
+      expectedKeys.push(`${entityKey}:${persona}:main:0`);
+      for (let i = 1; i <= instructionCount; i++) {
+        expectedKeys.push(`${entityKey}:${persona}:step:${i}`);
+      }
+    }
+    const foundKeys = new Set(imageRows.rows.map(r => r.key));
+    if (meta) foundKeys.add(`${entityKey}:none:meta:0`);
+    const missingKeys = expectedKeys.filter(k => !foundKeys.has(k));
+
+    return reply.send({
+      entityKey,
+      entityType,
+      slug,
+      pipelineStatus,
+      meta,
+      images,
+      videos,
+      referenceImages: { atlas: atlasRef, nova: novaRef },
+      summary: {
+        totalFound,
+        totalMissing: missingKeys.length,
+        missingKeys,
+      },
+    });
+  });
 }
 
