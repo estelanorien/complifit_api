@@ -1,5 +1,8 @@
 import { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { pool, checkDatabaseHealth } from '../../db/pool.js';
+import { authGuard } from '../hooks/auth.js';
+import { AuthenticatedRequest } from '../types.js';
 
 export async function healthRoutes(app: FastifyInstance) {
   app.get('/health', async (req, reply) => {
@@ -157,6 +160,91 @@ export async function healthRoutes(app: FastifyInstance) {
         reason: 'db_error',
         error: error.message
       });
+    }
+  });
+
+  // --- Metabolic Health Endpoints ---
+
+  // Get metabolic alerts (stored in profile_data.metabolicAlerts)
+  app.get('/health/metabolic/alerts', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
+
+    try {
+      const { rows } = await pool.query(
+        `SELECT profile_data FROM user_profiles WHERE user_id = $1`,
+        [user.userId]
+      );
+
+      const profileData = rows[0]?.profile_data || {};
+      const alerts = (profileData.metabolicAlerts || []).filter(
+        (a: { status?: string }) => a.status === 'active'
+      );
+
+      return reply.send(alerts);
+    } catch (e: unknown) {
+      req.log.error(e);
+      return reply.send([]);
+    }
+  });
+
+  // Resolve a metabolic alert
+  app.post('/health/metabolic/resolve', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
+    const body = z.object({
+      alertId: z.string(),
+      action: z.string()
+    }).parse(req.body);
+
+    try {
+      const { rows } = await pool.query(
+        `SELECT profile_data FROM user_profiles WHERE user_id = $1`,
+        [user.userId]
+      );
+
+      const profileData = rows[0]?.profile_data || {};
+      const alerts = profileData.metabolicAlerts || [];
+      const idx = alerts.findIndex((a: { id?: string }) => a.id === body.alertId);
+
+      if (idx >= 0) {
+        alerts[idx].status = 'resolved';
+        alerts[idx].resolvedAt = new Date().toISOString();
+        alerts[idx].resolvedAction = body.action;
+        profileData.metabolicAlerts = alerts;
+
+        await pool.query(
+          `UPDATE user_profiles SET profile_data = $1::jsonb, updated_at = now() WHERE user_id = $2`,
+          [JSON.stringify(profileData), user.userId]
+        );
+      }
+
+      return reply.send({ success: true });
+    } catch (e: unknown) {
+      req.log.error(e);
+      return reply.status(500).send({ error: 'Failed to resolve alert' });
+    }
+  });
+
+  // Apply diet break (mark in profile for planner to pick up)
+  app.post('/planner/diet-break', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
+
+    try {
+      await pool.query(
+        `UPDATE user_profiles
+         SET profile_data = jsonb_set(
+           COALESCE(profile_data, '{}'::jsonb),
+           '{dietBreak}',
+           $1::jsonb
+         ),
+         updated_at = now()
+         WHERE user_id = $2`,
+        [JSON.stringify({ active: true, startedAt: new Date().toISOString() }), user.userId]
+      );
+
+      return reply.send({ success: true });
+    } catch (e: unknown) {
+      req.log.error(e);
+      return reply.status(500).send({ error: 'Failed to apply diet break' });
     }
   });
 }

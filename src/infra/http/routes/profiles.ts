@@ -206,6 +206,33 @@ export async function profileRoutes(app: FastifyInstance) {
     }
   });
 
+  // Trainer Profile Update
+  app.post('/profiles/trainer', { preHandler: authGuard }, async (req, reply) => {
+    const authReq = req as AuthenticatedRequest;
+    const body = z.object({ updates: z.record(z.unknown()) }).parse(req.body);
+
+    try {
+      const { rows } = await pool.query(
+        `SELECT profile_data FROM user_profiles WHERE user_id = $1`,
+        [authReq.user.userId]
+      );
+
+      const existing = rows[0]?.profile_data || {};
+      const merged = { ...existing, ...body.updates };
+
+      await pool.query(
+        `UPDATE user_profiles SET profile_data = $1::jsonb, updated_at = now() WHERE user_id = $2`,
+        [JSON.stringify(merged), authReq.user.userId]
+      );
+
+      return reply.send({ success: true, profile: merged });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'Trainer profile update failed', message: error.message });
+      return reply.status(500).send({ error: 'Trainer profile update failed' });
+    }
+  });
+
   // FCM Token (for push notifications)
   app.post('/profiles/fcm-token', { preHandler: authGuard }, async (req, reply) => {
     const authReq = req as AuthenticatedRequest;

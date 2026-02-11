@@ -1,7 +1,9 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
+import { pool } from '../../db/pool.js';
 import { AiService } from '../../../application/services/aiService.js';
+import { AuthenticatedRequest } from '../types.js';
 
 const ai = new AiService();
 
@@ -150,6 +152,43 @@ Language: ${lang}.`;
       return reply.status(500).send({
         error: isProduction ? 'Culinary explorer service unavailable' : (error.message || 'Explorer failed')
       });
+    }
+  });
+
+  // Log adjustment decisions
+  app.post('/coach/adjustments', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
+    const body = req.body as Record<string, unknown>;
+
+    try {
+      await pool.query(
+        `INSERT INTO coach_adjustments(id, user_id, adjustment_data, created_at)
+         VALUES(gen_random_uuid(), $1, $2, now())`,
+        [user.userId, JSON.stringify(body)]
+      );
+      return reply.send({ success: true });
+    } catch (e: unknown) {
+      // Table might not exist yet - log and return success to not block the client
+      const error = e as { code?: string; message?: string };
+      if (error.code === '42P01') {
+        // Table doesn't exist - store in profile_data as fallback
+        try {
+          await pool.query(
+            `UPDATE user_profiles
+             SET profile_data = jsonb_set(
+               COALESCE(profile_data, '{}'::jsonb),
+               '{adjustmentLog}',
+               COALESCE(profile_data->'adjustmentLog', '[]'::jsonb) || $1::jsonb
+             ),
+             updated_at = now()
+             WHERE user_id = $2`,
+            [JSON.stringify([body]), user.userId]
+          );
+        } catch { /* best effort */ }
+        return reply.send({ success: true });
+      }
+      req.log.error({ error: 'Coach adjustment log failed', message: error.message });
+      return reply.status(500).send({ error: 'Failed to log adjustment' });
     }
   });
 

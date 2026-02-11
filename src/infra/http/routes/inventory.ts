@@ -141,6 +141,58 @@ export async function inventoryRoutes(app: FastifyInstance) {
     return { items: SHOP_ITEMS };
   });
 
+  // Consume an inventory item
+  app.post('/inventory/consume', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
+    const body = z.object({
+      itemId: z.string(),
+      quantity: z.number().int().positive().default(1)
+    }).parse(req.body);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const { rows } = await client.query(
+        `SELECT profile_data FROM user_profiles WHERE user_id = $1 FOR UPDATE`,
+        [user.userId]
+      );
+
+      const profileData = rows[0]?.profile_data || {};
+      const inventory = profileData.inventory || {};
+      const current = inventory[body.itemId] || 0;
+
+      if (current < body.quantity) {
+        await client.query('ROLLBACK');
+        return reply.status(400).send({ error: 'Insufficient quantity' });
+      }
+
+      inventory[body.itemId] = current - body.quantity;
+      if (inventory[body.itemId] <= 0) delete inventory[body.itemId];
+      profileData.inventory = inventory;
+
+      await client.query(
+        `UPDATE user_profiles SET profile_data = $1::jsonb, updated_at = now() WHERE user_id = $2`,
+        [JSON.stringify(profileData), user.userId]
+      );
+
+      await client.query('COMMIT');
+
+      return reply.send({
+        itemId: body.itemId,
+        quantity: body.quantity,
+        remaining: inventory[body.itemId] || 0,
+        inventory
+      });
+    } catch (e: any) {
+      await client.query('ROLLBACK');
+      req.log.error(e);
+      return reply.status(500).send({ error: e.message || 'Consume failed' });
+    } finally {
+      client.release();
+    }
+  });
+
   // Get user's current inventory
   app.get('/inventory', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
