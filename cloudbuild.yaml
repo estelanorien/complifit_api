@@ -34,8 +34,6 @@ steps:
       - '--cpu-boost'
       - '--execution-environment'
       - 'gen2'
-      - '--set-env-vars'
-      - 'NODE_ENV=production,DATABASE_URL=$_DATABASE_URL,JWT_SECRET=$_JWT_SECRET,GEMINI_API_KEY=$_GEMINI_API_KEY,GOOGLE_PLACES_KEY=$_GOOGLE_PLACES_KEY,ALLOWED_ORIGINS=$_ALLOWED_ORIGINS,DB_SSL_REJECT_UNAUTHORIZED=false'
 
 images:
   - 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/vitality-api:$COMMIT_SHA'
