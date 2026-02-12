@@ -7,6 +7,7 @@ import { aiRouter } from '../../../application/services/AIRouter.js';
 import { tryLocalFoodLookup } from '../../../application/services/foodLookupService.js';
 import { pool } from '../../db/pool.js';
 import { authGuard } from '../hooks/auth.js';
+import { proGuard } from '../hooks/proGuard.js';
 import fetch from 'node-fetch';
 import { aiConfig } from '../../../config/ai.js';
 import { recordApiCall } from '../../../services/aiDataCollector.js';
@@ -133,7 +134,7 @@ export async function aiRoutes(app: FastifyInstance) {
   const ai = new AiService();
 
   // Basit rate limit, uygulama geneli rate-limit varsa kaldırılabilir
-  app.post('/ai/text', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/ai/text', { preHandler: proGuard }, async (req, reply) => {
     const startTime = Date.now();
     const parsed = textSchema.parse(req.body);
     const result = await ai.generateText(parsed);
@@ -154,7 +155,7 @@ export async function aiRoutes(app: FastifyInstance) {
     return reply.send(result);
   });
 
-  app.post('/ai/image', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/ai/image', { preHandler: proGuard }, async (req, reply) => {
     const startTime = Date.now();
     const inputSchema = imageSchema.extend({
       referenceImage: z.string().optional() // Base64 image data
@@ -828,7 +829,7 @@ Return ONLY valid JSON with these exact fields:
     referenceImage: z.string().optional() // Base64 image for image-to-image consistency
   });
 
-  app.post('/ai/generate/image', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/ai/generate/image', { preHandler: proGuard }, async (req, reply) => {
     const startTime = Date.now();
     try {
       const { prompt, referenceImage } = imgProxySchema.parse(req.body);
@@ -1104,7 +1105,7 @@ Return ONLY valid JSON with these exact fields:
   });
 
   // Generate step image (exercise or recipe step)
-  app.post('/ai/generate/step-image', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/ai/generate/step-image', { preHandler: proGuard }, async (req, reply) => {
     if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
     const startTime = Date.now();
 
@@ -1177,7 +1178,7 @@ Return ONLY valid JSON with these exact fields:
   });
 
   // Generate gamification asset
-  app.post('/ai/generate/gamification-asset', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/ai/generate/gamification-asset', { preHandler: proGuard }, async (req, reply) => {
     if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
     const startTime = Date.now();
 
@@ -1250,7 +1251,7 @@ Return ONLY valid JSON with these exact fields:
   });
 
   // Generate portion visual
-  app.post('/ai/generate/portion-visual', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/ai/generate/portion-visual', { preHandler: proGuard }, async (req, reply) => {
     if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
     const startTime = Date.now();
 

@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
+import { proGuard } from '../hooks/proGuard.js';
 import { pool } from '../../db/pool.js';
 import { smartPlanner, SmartPlanRequest } from '../../../application/services/SmartPlannerService.js';
 import { PlanService } from '../../../application/services/planService.js';
@@ -22,7 +23,7 @@ export async function smartPlanRoutes(app: FastifyInstance) {
    * POST /plans/smart — Generate a coordinated training + nutrition plan.
    * Uses SmartPlannerService (Claude Opus coordinated call with Gemini fallback).
    */
-  app.post('/plans/smart', { preHandler: authGuard }, withErrorHandler(async (req: any, reply) => {
+  app.post('/plans/smart', { preHandler: proGuard }, withErrorHandler(async (req: any, reply) => {
     const user = req.user;
     const body = generateSchema.parse(req.body);
 

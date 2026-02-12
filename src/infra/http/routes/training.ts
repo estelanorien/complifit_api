@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
+import { proGuard } from '../hooks/proGuard.js';
 import { pool } from '../../db/pool.js';
 import { TrainingPlan, generateTrainingPlan } from '../../../application/services/trainingService.js';
 import { saveTrainingProgram } from './_utils/saveTrainingPlan.js';
@@ -21,7 +22,7 @@ export async function trainingRoutes(app: FastifyInstance) {
     startDate: z.string().optional()
   });
 
-  app.post('/training/generate', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/training/generate', { preHandler: proGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
     const body = generateSchema.parse(req.body);
     try {

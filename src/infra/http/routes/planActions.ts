@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
+import { proGuard } from '../hooks/proGuard.js';
 import { pool } from '../../db/pool.js';
 import { AiService } from '../../../application/services/aiService.js';
 import { PlanService } from '../../../application/services/planService.js';
@@ -20,7 +21,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
     const aiService = new AiService();
 
     // Generate a complete Smart Plan (Training + Nutrition)
-    app.post('/plans/generate', { preHandler: authGuard }, withErrorHandler(async (req: any, reply) => {
+    app.post('/plans/generate', { preHandler: proGuard }, withErrorHandler(async (req: any, reply) => {
         const user = req.user;
         const body = z.object({
             profile: UserProfileSchema,

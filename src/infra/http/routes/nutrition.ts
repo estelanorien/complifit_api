@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
+import { proGuard } from '../hooks/proGuard.js';
 import { pool } from '../../db/pool.js';
 import { MealPlan, generateNutritionPlan } from '../../../application/services/nutritionService.js';
 import { AuthenticatedRequest } from '../types.js';
@@ -87,7 +88,7 @@ export async function nutritionRoutes(app: FastifyInstance) {
     startDate: z.string().optional()
   });
 
-  app.post('/nutrition/generate', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/nutrition/generate', { preHandler: proGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
     const body = generateSchema.parse(req.body);
     try {

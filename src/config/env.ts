@@ -58,7 +58,10 @@ const envSchema = z.object({
   AI_PLATFORM_KEY: z.string().optional(),
   PSEUDONYM_SALT: z.string().optional(),
   // Warroom skill library path
-  WARROOM_PATH: z.string().optional()
+  WARROOM_PATH: z.string().optional(),
+  // RevenueCat (Subscription verification)
+  REVENUECAT_API_KEY: z.string().optional(),
+  REVENUECAT_WEBHOOK_AUTH: z.string().optional()
 });
 
 const parseEnv = () => {
@@ -99,7 +102,9 @@ const parseEnv = () => {
       AI_PLATFORM_URL: process.env.AI_PLATFORM_URL,
       AI_PLATFORM_KEY: process.env.AI_PLATFORM_KEY,
       PSEUDONYM_SALT: process.env.PSEUDONYM_SALT,
-      WARROOM_PATH: process.env.WARROOM_PATH
+      WARROOM_PATH: process.env.WARROOM_PATH,
+      REVENUECAT_API_KEY: process.env.REVENUECAT_API_KEY,
+      REVENUECAT_WEBHOOK_AUTH: process.env.REVENUECAT_WEBHOOK_AUTH
     });
     return parsed;
   } catch (error: any) {
@@ -161,6 +166,11 @@ export const env = {
   anthropicApiKey: envVars.ANTHROPIC_API_KEY,
   videoMusicTrackUri: envVars.VIDEO_MUSIC_TRACK_URI && envVars.VIDEO_MUSIC_TRACK_URI !== '' ? envVars.VIDEO_MUSIC_TRACK_URI : undefined,
   warroomPath: envVars.WARROOM_PATH,
+  // RevenueCat (Subscription verification)
+  revenueCat: {
+    apiKey: envVars.REVENUECAT_API_KEY,
+    webhookAuth: envVars.REVENUECAT_WEBHOOK_AUTH
+  },
   // AI Training Platform (separate deployment)
   aiPlatform: {
     url: envVars.AI_PLATFORM_URL,
