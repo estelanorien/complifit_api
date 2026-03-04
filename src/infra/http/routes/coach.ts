@@ -56,7 +56,7 @@ export async function coachRoutes(app: FastifyInstance) {
 
   const tipsSchema = z.object({
     recentFoods: z.array(z.string()),
-    profile: z.any(),
+    profile: z.record(z.any()),
     lang: z.string().default('en')
   });
 
@@ -119,7 +119,7 @@ Language: ${lang}.`;
   });
 
   const explorerSchema = z.object({
-    profile: z.any(),
+    profile: z.record(z.any()),
     lang: z.string().default('en')
   });
 
@@ -196,7 +196,7 @@ Language: ${lang}.`;
   app.post('/coach/agent', { preHandler: authGuard }, async (req, reply) => {
     const body = z.object({
       history: z.array(z.unknown()),
-      profile: z.any(),
+      profile: z.record(z.any()),
       lang: z.string().default('en')
     }).parse(req.body);
 

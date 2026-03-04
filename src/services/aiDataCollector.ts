@@ -6,11 +6,12 @@
  */
 
 import { createHash } from 'crypto';
+import { env } from '../config/env.js';
 
 // Environment variables (optional - disabled if not set)
-const AI_PLATFORM_URL = process.env.AI_PLATFORM_URL;
-const AI_PLATFORM_KEY = process.env.AI_PLATFORM_KEY;
-const PSEUDONYM_SALT = process.env.PSEUDONYM_SALT || 'vitality-default-salt';
+const AI_PLATFORM_URL = env.aiPlatform.url;
+const AI_PLATFORM_KEY = env.aiPlatform.apiKey;
+const PSEUDONYM_SALT = env.aiPlatform.pseudonymSalt || (env.nodeEnv === 'production' ? '' : 'vitality-default-salt');
 
 // PII patterns for stripping
 const PII_PATTERNS = [

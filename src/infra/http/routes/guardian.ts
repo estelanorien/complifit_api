@@ -47,7 +47,7 @@ export async function guardianRoutes(app: FastifyInstance) {
       type: z.enum(['training', 'meal']),
       title: z.string(),
       calories: z.number(),
-      profile: z.any(), // TODO: define UserProfile schema
+      profile: z.record(z.any()),
       remainingItems: z.number(),
       lang: z.string().default('en'),
       recentLogs: z.array(z.string()).default([]),
@@ -161,8 +161,8 @@ export async function guardianRoutes(app: FastifyInstance) {
   app.post('/guardian/apply-remedy', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
     const body = z.object({
-      remedy: z.any(), // TODO: define RemedyAction schema
-      item: z.any(), // TODO: define PlanItem schema
+      remedy: z.record(z.any()),
+      item: z.record(z.any()),
       date: z.string(),
       remainingMeals: z.array(z.unknown()).default([])
     }).parse(req.body);
@@ -323,7 +323,7 @@ export async function guardianRoutes(app: FastifyInstance) {
 
     const body = z.object({
       surplus: z.number(),
-      profile: z.any(),
+      profile: z.record(z.any()),
       nextMealName: z.string().optional(),
       nextMealCalories: z.number().optional(),
       lang: z.string().default('en')
@@ -361,7 +361,7 @@ export async function guardianRoutes(app: FastifyInstance) {
       exerciseName: z.string(),
       durationMinutes: z.number().optional(),
       muscleGroups: z.array(z.string()).optional(),
-      profile: z.any(),
+      profile: z.record(z.any()),
       lang: z.string().default('en'),
       todaysPlan: z.array(z.unknown()).optional()
     }).parse(req.body);
@@ -383,9 +383,9 @@ export async function guardianRoutes(app: FastifyInstance) {
   app.post('/guardian/analyze-meal-replacement', { preHandler: authGuard }, async (req, reply) => {
     const user = (req as AuthenticatedRequest).user;
     const body = z.object({
-      loggedFood: z.any(),
-      profile: z.any(),
-      nearbyMeals: z.array(z.any()).default([]),
+      loggedFood: z.record(z.any()),
+      profile: z.record(z.any()),
+      nearbyMeals: z.array(z.record(z.any())).default([]),
       lang: z.string().default('en')
     }).parse(req.body);
     const { loggedFood, nearbyMeals } = body;
@@ -422,7 +422,7 @@ export async function guardianRoutes(app: FastifyInstance) {
         calories: z.number().optional(),
         scheduledTime: z.string()
       })),
-      profile: z.any(), // TODO: define UserProfile schema
+      profile: z.record(z.any()),
       availableSlots: z.array(z.object({
         start: z.string(),
         end: z.string()
@@ -590,7 +590,7 @@ export async function guardianRoutes(app: FastifyInstance) {
       recommendation: z.object({
         id: z.string(),
         type: z.enum(['consolidate_meals', 'reschedule_workout', 'recovery_day', 'quick_meal', 'skip_item']),
-        data: z.any() // TODO: define recommendation data per type
+        data: z.record(z.any())
       }),
       date: z.string(),
       wakeTime: z.string()

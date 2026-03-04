@@ -5,6 +5,7 @@ import { proGuard } from '../hooks/proGuard.js';
 import { pool } from '../../db/pool.js';
 import { MealPlan, generateNutritionPlan } from '../../../application/services/nutritionService.js';
 import { AuthenticatedRequest } from '../types.js';
+import { env } from '../../../config/env.js';
 import { PoolClient } from 'pg';
 
 const toJsonOrNull = (value: unknown) => {
@@ -277,7 +278,7 @@ export async function nutritionRoutes(app: FastifyInstance) {
     }
 
     // 2. Call CalorieNinjas API
-    const apiKey = process.env.CALORIENINJAS_API_KEY;
+    const apiKey = env.calorieNinjasApiKey;
     if (!apiKey && body.source !== 'cache') {
       // No API key - return empty with warning
       req.log.warn({ msg: 'CalorieNinjas API key not configured' });

@@ -6,9 +6,22 @@ import { invalidateTierCache } from '../hooks/proGuard.js';
 import { AuthenticatedRequest } from '../types.js';
 import { env } from '../../../config/env.js';
 
+// UUID v4 pattern for validating user IDs
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function subscriptionRoutes(app: FastifyInstance) {
-    // 1. Upgrade to Pro (Mock / Web fallback)
+    // 1. Upgrade to Pro — disabled in production (requires native app store purchase)
     app.post('/subscription/upgrade', { preHandler: authGuard }, async (req, reply) => {
+        const isProduction = env.revenueCat.apiKey && env.revenueCat.apiKey !== '';
+
+        if (isProduction) {
+            return reply.status(403).send({
+                error: 'Direct upgrade not available',
+                message: 'Please subscribe through the mobile app (iOS/Android).'
+            });
+        }
+
+        // Development/testing only — no payment processor configured
         const user = (req as AuthenticatedRequest).user;
 
         await pool.query(
@@ -22,7 +35,7 @@ export async function subscriptionRoutes(app: FastifyInstance) {
 
         invalidateTierCache(user.userId);
 
-        return { success: true, message: 'Welcome to Complifit Pro!', tier: 'pro' };
+        return { success: true, message: 'Welcome to Complifit Pro! (dev mode)', tier: 'pro' };
     });
 
     // 2. Downgrade/Cancel (Mock / Web fallback)
@@ -133,13 +146,16 @@ export async function subscriptionRoutes(app: FastifyInstance) {
 
     // 5. RevenueCat S2S Webhook
     app.post('/subscription/webhook', async (req: FastifyRequest, reply: FastifyReply) => {
-        // Verify webhook auth token
+        // Verify webhook auth token — ALWAYS required, fail-safe if not configured
         const webhookAuth = env.revenueCat.webhookAuth;
-        if (webhookAuth) {
-            const authHeader = req.headers.authorization;
-            if (!authHeader || authHeader !== `Bearer ${webhookAuth}`) {
-                return reply.status(401).send({ error: 'Unauthorized' });
-            }
+        if (!webhookAuth) {
+            req.log.error('REVENUECAT_WEBHOOK_AUTH not configured — rejecting webhook');
+            return reply.status(503).send({ error: 'Webhook not configured' });
+        }
+
+        const authHeader = req.headers.authorization;
+        if (!authHeader || authHeader !== `Bearer ${webhookAuth}`) {
+            return reply.status(401).send({ error: 'Unauthorized' });
         }
 
         try {
@@ -159,6 +175,12 @@ export async function subscriptionRoutes(app: FastifyInstance) {
             if (!appUserId) {
                 req.log.warn({ eventType, message: 'Webhook event missing app_user_id' });
                 return reply.status(400).send({ error: 'Missing app_user_id' });
+            }
+
+            // Validate app_user_id is a valid UUID to prevent injection
+            if (!UUID_REGEX.test(appUserId)) {
+                req.log.warn({ eventType, appUserId, message: 'Webhook event has invalid app_user_id format' });
+                return reply.status(400).send({ error: 'Invalid app_user_id format' });
             }
 
             let tier = 'free';

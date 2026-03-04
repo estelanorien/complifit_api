@@ -182,7 +182,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
 
     const body = z.object({
       amountToBurn: z.number().min(50).max(2000),
-      profile: z.any(), // TODO: define UserProfile schema
+      profile: z.record(z.any()),
       lang: z.string().default('en')
     }).parse(req.body);
 
@@ -282,7 +282,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
 
     const body = z.object({
       creditAmount: z.number().min(100).max(1500),
-      profile: z.any(), // TODO: define UserProfile schema
+      profile: z.record(z.any()),
       lang: z.string().default('en')
     }).parse(req.body);
 

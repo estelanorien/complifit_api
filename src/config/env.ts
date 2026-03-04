@@ -61,7 +61,9 @@ const envSchema = z.object({
   WARROOM_PATH: z.string().optional(),
   // RevenueCat (Subscription verification)
   REVENUECAT_API_KEY: z.string().optional(),
-  REVENUECAT_WEBHOOK_AUTH: z.string().optional()
+  REVENUECAT_WEBHOOK_AUTH: z.string().optional(),
+  // CalorieNinjas (Nutrition lookup)
+  CALORIENINJAS_API_KEY: z.string().optional()
 });
 
 const parseEnv = () => {
@@ -104,7 +106,8 @@ const parseEnv = () => {
       PSEUDONYM_SALT: process.env.PSEUDONYM_SALT,
       WARROOM_PATH: process.env.WARROOM_PATH,
       REVENUECAT_API_KEY: process.env.REVENUECAT_API_KEY,
-      REVENUECAT_WEBHOOK_AUTH: process.env.REVENUECAT_WEBHOOK_AUTH
+      REVENUECAT_WEBHOOK_AUTH: process.env.REVENUECAT_WEBHOOK_AUTH,
+      CALORIENINJAS_API_KEY: process.env.CALORIENINJAS_API_KEY
     });
     return parsed;
   } catch (error: any) {
@@ -176,5 +179,6 @@ export const env = {
     url: envVars.AI_PLATFORM_URL,
     apiKey: envVars.AI_PLATFORM_KEY,
     pseudonymSalt: envVars.PSEUDONYM_SALT
-  }
+  },
+  calorieNinjasApiKey: envVars.CALORIENINJAS_API_KEY
 };

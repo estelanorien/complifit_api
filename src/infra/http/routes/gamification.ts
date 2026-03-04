@@ -18,7 +18,7 @@ const actionSchema = z.object({
         'log_scan',
         'streak_freeze'
     ]),
-    data: z.any().optional() // TODO: define per-action data schema
+    data: z.record(z.any()).optional()
 });
 
 const BADGES_DEFINITIONS = [

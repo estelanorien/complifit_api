@@ -5,7 +5,7 @@ import { AuthenticatedRequest } from '../types.js';
 
 // Subscription tier cache with 5-minute TTL to avoid N+1 DB queries
 const tierCache = new Map<string, { tier: string; expires: number }>();
-const TIER_CACHE_TTL = 5 * 60 * 1000;
+const TIER_CACHE_TTL = 30 * 1000; // 30 seconds — short enough to avoid stale access after subscription change
 
 export function invalidateTierCache(userId: string) {
   tierCache.delete(userId);

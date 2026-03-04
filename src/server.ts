@@ -30,6 +30,15 @@ async function main() {
   process.on('SIGTERM', () => void closeGracefully('SIGTERM'));
   process.on('SIGINT', () => void closeGracefully('SIGINT'));
 
+  // Catch unhandled errors to prevent silent crashes
+  process.on('unhandledRejection', (reason, promise) => {
+    app.log.error({ reason, promise }, 'Unhandled promise rejection');
+  });
+  process.on('uncaughtException', (error) => {
+    app.log.error({ error }, 'Uncaught exception — shutting down');
+    void closeGracefully('UNCAUGHT_EXCEPTION');
+  });
+
   // Ensure all plugins are ready before listening
   try {
     app.log.info('[STARTUP] Waiting for Fastify plugins to load...');
