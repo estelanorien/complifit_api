@@ -5,6 +5,72 @@ import { env } from '../../../config/env.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import fetch from 'node-fetch';
+import { sendPasswordResetEmail, isEmailConfigured } from '../../../services/emailService.js';
+import jwksClient from 'jwks-rsa';
+
+// Apple JWKS client for JWT signature verification
+const appleJwksClient = jwksClient({
+    jwksUri: 'https://appleid.apple.com/auth/keys',
+    cache: true,
+    cacheMaxAge: 86400000, // 24 hours
+    rateLimit: true,
+    jwksRequestsPerMinute: 10
+});
+
+// Helper to get Apple signing key
+const getAppleSigningKey = (kid: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        appleJwksClient.getSigningKey(kid, (err, key) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+            if (!key) {
+                reject(new Error('No signing key found'));
+                return;
+            }
+            const signingKey = key.getPublicKey();
+            resolve(signingKey);
+        });
+    });
+};
+
+// Helper to verify Apple JWT with full signature verification
+const verifyAppleToken = async (identityToken: string): Promise<{
+    sub: string;
+    email?: string;
+    email_verified?: string;
+    iss: string;
+    aud: string;
+    exp: number;
+}> => {
+    // First decode header to get the key ID (kid)
+    const decodedHeader = jwt.decode(identityToken, { complete: true });
+    if (!decodedHeader || typeof decodedHeader === 'string' || !decodedHeader.header.kid) {
+        throw new Error('Invalid token: cannot decode header');
+    }
+
+    const kid = decodedHeader.header.kid;
+
+    // Get the signing key from Apple's JWKS endpoint
+    const signingKey = await getAppleSigningKey(kid);
+
+    // Verify the token with the signing key
+    const verified = jwt.verify(identityToken, signingKey, {
+        algorithms: ['RS256'],
+        issuer: 'https://appleid.apple.com',
+        audience: env.oauth.apple.clientId
+    }) as {
+        sub: string;
+        email?: string;
+        email_verified?: string;
+        iss: string;
+        aud: string;
+        exp: number;
+    };
+
+    return verified;
+};
 
 // Helper to issue JWT token
 const issueToken = (payload: { userId: string; email: string }) => {
@@ -75,6 +141,10 @@ export async function socialAuthRoutes(app: FastifyInstance) {
 
         try {
             // Verify Google ID token
+            // Note: Google's tokeninfo endpoint only supports GET with token in query param.
+            // This is Google's official API design. The token is a short-lived ID token,
+            // not a long-lived access token, so the security risk is mitigated.
+            // For higher security, consider using google-auth-library for local JWT verification.
             const googleResponse = await fetch(
                 `https://oauth2.googleapis.com/tokeninfo?id_token=${body.idToken}`
             );
@@ -112,8 +182,9 @@ export async function socialAuthRoutes(app: FastifyInstance) {
             });
 
             return { user, token };
-        } catch (e: any) {
-            req.log.error({ error: 'Google auth failed', message: e.message });
+        } catch (e: unknown) {
+            const error = e as Error;
+            req.log.error({ error: 'Google auth failed', message: error.message });
             return reply.status(500).send({ error: 'Google authentication failed' });
         }
     });
@@ -132,8 +203,14 @@ export async function socialAuthRoutes(app: FastifyInstance) {
 
         try {
             // Verify Facebook access token and get user info
+            // Using Authorization header instead of query param for security (avoids token in logs)
             const fbResponse = await fetch(
-                `https://graph.facebook.com/me?access_token=${body.accessToken}&fields=id,email,name`
+                `https://graph.facebook.com/me?fields=id,email,name`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${body.accessToken}`
+                    }
+                }
             );
 
             if (!fbResponse.ok) {
@@ -168,8 +245,9 @@ export async function socialAuthRoutes(app: FastifyInstance) {
             });
 
             return { user, token };
-        } catch (e: any) {
-            req.log.error({ error: 'Facebook auth failed', message: e.message });
+        } catch (e: unknown) {
+            const error = e as Error;
+            req.log.error({ error: 'Facebook auth failed', message: error.message });
             return reply.status(500).send({ error: 'Facebook authentication failed' });
         }
     });
@@ -195,16 +273,27 @@ export async function socialAuthRoutes(app: FastifyInstance) {
         }).parse(req.body);
 
         try {
-            // Decode Apple identity token (JWT)
-            // Note: In production, you should verify the signature with Apple's public keys
-            const decoded = jwt.decode(body.identityToken) as {
+            // Verify Apple identity token with full cryptographic signature verification
+            let decoded: {
                 sub: string;
                 email?: string;
                 email_verified?: string;
-            } | null;
+                iss: string;
+                aud: string;
+                exp: number;
+            };
 
-            if (!decoded || !decoded.sub) {
-                return reply.status(401).send({ error: 'Invalid Apple token' });
+            try {
+                decoded = await verifyAppleToken(body.identityToken);
+            } catch (verifyError: unknown) {
+                const err = verifyError as Error;
+                req.log.warn({
+                    type: 'apple_token_verification_failed',
+                    error: err.message
+                });
+                return reply.status(401).send({
+                    error: 'Invalid Apple token: Signature verification failed'
+                });
             }
 
             // Apple may not always provide email (only on first login)
@@ -237,8 +326,9 @@ export async function socialAuthRoutes(app: FastifyInstance) {
             });
 
             return { user, token };
-        } catch (e: any) {
-            req.log.error({ error: 'Apple auth failed', message: e.message });
+        } catch (e: unknown) {
+            const error = e as Error;
+            req.log.error({ error: 'Apple auth failed', message: error.message });
             return reply.status(500).send({ error: 'Apple authentication failed' });
         }
     });
@@ -276,24 +366,45 @@ export async function socialAuthRoutes(app: FastifyInstance) {
                 [userCheck.rows[0].id, resetToken]
             );
 
-            // TODO: Send email with reset link
-            // For now, log the token (in production, integrate with SendGrid/Mailgun/AWS SES)
-            req.log.info({
-                type: 'password_reset_requested',
-                userId: userCheck.rows[0].id,
-                email: body.email,
-                // In production, don't log the token
-                message: 'Email integration pending - configure email service'
-            });
+            // Send password reset email
+            if (isEmailConfigured()) {
+                const emailResult = await sendPasswordResetEmail(
+                    body.email,
+                    resetToken,
+                    userCheck.rows[0].username
+                );
+
+                if (emailResult.success) {
+                    req.log.info({
+                        type: 'password_reset_email_sent',
+                        userId: userCheck.rows[0].id,
+                        email: body.email
+                    });
+                } else {
+                    req.log.error({
+                        type: 'password_reset_email_failed',
+                        userId: userCheck.rows[0].id,
+                        error: emailResult.error
+                    });
+                }
+            } else {
+                req.log.warn({
+                    type: 'password_reset_requested',
+                    userId: userCheck.rows[0].id,
+                    email: body.email,
+                    message: 'Email service not configured - set SMTP_HOST, SMTP_USER, SMTP_PASS'
+                });
+            }
 
             return {
                 success: true,
                 message: 'If an account exists, a reset email has been sent.',
-                // Remove this in production - only for development
-                _devToken: process.env.NODE_ENV !== 'production' ? resetToken : undefined
+                // Include token in dev mode for testing (remove in production)
+                _devToken: process.env.NODE_ENV !== 'production' && !isEmailConfigured() ? resetToken : undefined
             };
-        } catch (e: any) {
-            req.log.error({ error: 'Password reset request failed', message: e.message });
+        } catch (e: unknown) {
+            const error = e as Error;
+            req.log.error({ error: 'Password reset request failed', message: error.message });
             return reply.status(500).send({ error: 'Failed to process password reset request' });
         }
     });

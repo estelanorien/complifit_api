@@ -2,6 +2,7 @@ import { pool } from '../../infra/db/pool.js';
 import { AiService } from './aiService.js';
 import { translationQueue } from './translationQueueService.js';
 import { videoQueue } from './videoQueueService.js';
+import { logger } from '../../infra/logger.js';
 
 const aiService = new AiService();
 
@@ -110,7 +111,7 @@ ${trimmedText}`;
      */
     async publishAndTranslate(groupId: string, groupName: string, groupType: 'exercise' | 'meal'): Promise<void> {
         try {
-            console.log(`[TranslationService] Publishing Group: ${groupName} (${groupId})`);
+            logger.info(`[TranslationService] Publishing Group: ${groupName} (${groupId})`);
 
             // 1. Promote ALL assets in this group to 'active'
             await pool.query(
@@ -132,7 +133,7 @@ ${trimmedText}`;
                 [groupId]
             );
 
-            console.log(`[TranslationService] Enqueueing translations for ${jsonRows.length} assets`);
+            logger.info(`[TranslationService] Enqueueing translations for ${jsonRows.length} assets`);
             for (const row of jsonRows) {
                 await translationQueue.enqueue(row.key);
             }
@@ -144,17 +145,17 @@ ${trimmedText}`;
                 const mainJsonAsset = jsonRows[0].key; // Usually the Instructions JSON
 
                 if (groupType === 'exercise') {
-                    console.log(`[TranslationService] Enqueueing Video jobs for Atlas & Nova: ${groupId}`);
+                    logger.info(`[TranslationService] Enqueueing Video jobs for Atlas & Nova: ${groupId}`);
                     await videoQueue.enqueue(mainJsonAsset, 'atlas');
                     await videoQueue.enqueue(mainJsonAsset, 'nova');
                 } else {
-                    console.log(`[TranslationService] Enqueueing Video job for Meal: ${groupId}`);
+                    logger.info(`[TranslationService] Enqueueing Video job for Meal: ${groupId}`);
                     await videoQueue.enqueue(mainJsonAsset, null);
                 }
             }
 
         } catch (e) {
-            console.error(`[TranslationService] publishAndTranslate failed for ${groupId}`, e);
+            logger.error(`[TranslationService] publishAndTranslate failed for ${groupId}`, e);
             throw e;
         }
     }

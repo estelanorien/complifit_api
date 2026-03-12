@@ -32,13 +32,38 @@ const envSchema = z.object({
   APPLE_CLIENT_ID: z.string().optional(),
   APPLE_TEAM_ID: z.string().optional(),
   APPLE_KEY_ID: z.string().optional(),
+  // Email (SMTP) configuration
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.string().optional().transform(val => val ? Number(val) : 587),
+  SMTP_SECURE: z.string().optional().transform(val => val === 'true'),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  EMAIL_FROM: z.string().optional(),
+  EMAIL_FROM_NAME: z.string().optional().default('Vitality App'),
+  // Frontend URL for password reset links
+  FRONTEND_URL: z.string().optional().default('https://vitality.app'),
+  // Google Application Credentials for Firebase
+  GOOGLE_APPLICATION_CREDENTIALS: z.string().optional(),
   // Database SSL configuration
-  // Accepts 'true', '1', 'false', '0', or undefined
-  // Defaults to true in production, false in development
   DB_SSL_REJECT_UNAUTHORIZED: z.string().optional().transform(val => {
     if (val === undefined || val === null) return undefined;
     return val === 'true' || val === '1';
-  })
+  }),
+  // Anthropic Claude API
+  ANTHROPIC_API_KEY: z.string().optional(),
+  // Video voiceover pipeline
+  VIDEO_MUSIC_TRACK_URI: z.string().optional(),
+  // AI Training Platform (separate deployment for app store compliance)
+  AI_PLATFORM_URL: z.string().url().optional(),
+  AI_PLATFORM_KEY: z.string().optional(),
+  PSEUDONYM_SALT: z.string().optional(),
+  // Warroom skill library path
+  WARROOM_PATH: z.string().optional(),
+  // RevenueCat (Subscription verification)
+  REVENUECAT_API_KEY: z.string().optional(),
+  REVENUECAT_WEBHOOK_AUTH: z.string().optional(),
+  // CalorieNinjas (Nutrition lookup)
+  CALORIENINJAS_API_KEY: z.string().optional()
 });
 
 const parseEnv = () => {
@@ -61,10 +86,28 @@ const parseEnv = () => {
       GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
       FACEBOOK_APP_ID: process.env.FACEBOOK_APP_ID,
       FACEBOOK_APP_SECRET: process.env.FACEBOOK_APP_SECRET,
-    APPLE_CLIENT_ID: process.env.APPLE_CLIENT_ID,
-    APPLE_TEAM_ID: process.env.APPLE_TEAM_ID,
-    APPLE_KEY_ID: process.env.APPLE_KEY_ID,
-    DB_SSL_REJECT_UNAUTHORIZED: process.env.DB_SSL_REJECT_UNAUTHORIZED
+      APPLE_CLIENT_ID: process.env.APPLE_CLIENT_ID,
+      APPLE_TEAM_ID: process.env.APPLE_TEAM_ID,
+      APPLE_KEY_ID: process.env.APPLE_KEY_ID,
+      SMTP_HOST: process.env.SMTP_HOST,
+      SMTP_PORT: process.env.SMTP_PORT,
+      SMTP_SECURE: process.env.SMTP_SECURE,
+      SMTP_USER: process.env.SMTP_USER,
+      SMTP_PASS: process.env.SMTP_PASS,
+      EMAIL_FROM: process.env.EMAIL_FROM,
+      EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME,
+      FRONTEND_URL: process.env.FRONTEND_URL,
+      GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+      DB_SSL_REJECT_UNAUTHORIZED: process.env.DB_SSL_REJECT_UNAUTHORIZED,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      VIDEO_MUSIC_TRACK_URI: process.env.VIDEO_MUSIC_TRACK_URI || undefined,
+      AI_PLATFORM_URL: process.env.AI_PLATFORM_URL,
+      AI_PLATFORM_KEY: process.env.AI_PLATFORM_KEY,
+      PSEUDONYM_SALT: process.env.PSEUDONYM_SALT,
+      WARROOM_PATH: process.env.WARROOM_PATH,
+      REVENUECAT_API_KEY: process.env.REVENUECAT_API_KEY,
+      REVENUECAT_WEBHOOK_AUTH: process.env.REVENUECAT_WEBHOOK_AUTH,
+      CALORIENINJAS_API_KEY: process.env.CALORIENINJAS_API_KEY
     });
     return parsed;
   } catch (error: any) {
@@ -111,6 +154,31 @@ export const env = {
       keyId: envVars.APPLE_KEY_ID
     }
   },
-  dbSslRejectUnauthorized: envVars.DB_SSL_REJECT_UNAUTHORIZED ?? (envVars.NODE_ENV === 'production' ? true : false)
+  email: {
+    host: envVars.SMTP_HOST,
+    port: envVars.SMTP_PORT,
+    secure: envVars.SMTP_SECURE,
+    user: envVars.SMTP_USER,
+    pass: envVars.SMTP_PASS,
+    from: envVars.EMAIL_FROM,
+    fromName: envVars.EMAIL_FROM_NAME
+  },
+  frontendUrl: envVars.FRONTEND_URL,
+  googleApplicationCredentials: envVars.GOOGLE_APPLICATION_CREDENTIALS,
+  dbSslRejectUnauthorized: envVars.DB_SSL_REJECT_UNAUTHORIZED ?? (envVars.NODE_ENV === 'production' ? true : false),
+  anthropicApiKey: envVars.ANTHROPIC_API_KEY,
+  videoMusicTrackUri: envVars.VIDEO_MUSIC_TRACK_URI && envVars.VIDEO_MUSIC_TRACK_URI !== '' ? envVars.VIDEO_MUSIC_TRACK_URI : undefined,
+  warroomPath: envVars.WARROOM_PATH,
+  // RevenueCat (Subscription verification)
+  revenueCat: {
+    apiKey: envVars.REVENUECAT_API_KEY,
+    webhookAuth: envVars.REVENUECAT_WEBHOOK_AUTH
+  },
+  // AI Training Platform (separate deployment)
+  aiPlatform: {
+    url: envVars.AI_PLATFORM_URL,
+    apiKey: envVars.AI_PLATFORM_KEY,
+    pseudonymSalt: envVars.PSEUDONYM_SALT
+  },
+  calorieNinjasApiKey: envVars.CALORIENINJAS_API_KEY
 };
-

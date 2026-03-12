@@ -4,17 +4,18 @@ import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
 import fetch from 'node-fetch';
 import { env } from '../../../config/env.js';
+import { AuthenticatedRequest, GeminiResponse } from '../types.js';
 
 export async function calorieBankRoutes(app: FastifyInstance) {
   const txSchema = z.object({
     type: z.string(),
     amount: z.number(),
     description: z.string().optional(),
-    impact: z.any().optional()
+    impact: z.unknown().optional()
   });
 
   app.get('/calorie-bank/transactions', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT id, type, amount, description, impact, created_at
        FROM calorie_transactions
@@ -34,7 +35,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
   });
 
   app.post('/calorie-bank/transactions', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = txSchema.parse(req.body);
     const { rows } = await pool.query(
       `INSERT INTO calorie_transactions(user_id, type, amount, description, impact)
@@ -63,7 +64,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
   });
 
   app.post('/calorie-bank/event', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = eventSchema.parse(req.body);
     const { rows } = await pool.query(
       `INSERT INTO event_sessions(user_id, start_time, metadata)
@@ -81,7 +82,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
   });
 
   app.patch('/calorie-bank/event/current', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = eventUpdateSchema.parse(req.body);
     const { rows } = await pool.query(
       `SELECT id, accumulated_calories
@@ -107,7 +108,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
   });
 
   app.get('/calorie-bank/event/current', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT id, start_time, accumulated_calories, pending_review, is_active
        FROM event_sessions
@@ -181,7 +182,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
 
     const body = z.object({
       amountToBurn: z.number().min(50).max(2000),
-      profile: z.any(),
+      profile: z.record(z.any()),
       lang: z.string().default('en')
     }).parse(req.body);
 
@@ -250,15 +251,16 @@ export async function calorieBankRoutes(app: FastifyInstance) {
           : `Gemini error ${res.status}: ${errorText}`);
       }
 
-      const data: any = await res.json();
+      const data = await res.json() as GeminiResponse;
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
 
-      let workout: any = {};
+      let workout: Record<string, unknown> = {};
       try {
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        workout = JSON.parse(cleaned);
-      } catch (e) {
-        req.log.error({ error: 'Failed to parse workout response', e, requestId: (req as any).requestId });
+        workout = JSON.parse(cleaned) as Record<string, unknown>;
+      } catch (parseError: unknown) {
+        const pError = parseError as Error;
+        req.log.error({ error: 'Failed to parse workout response', message: pError.message, requestId: req.id });
         return reply.status(500).send({ error: 'Failed to parse AI response' });
       }
 
@@ -267,9 +269,10 @@ export async function calorieBankRoutes(app: FastifyInstance) {
       }
 
       return reply.send(workout);
-    } catch (e: any) {
-      req.log.error({ error: 'generate-burner-workout failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'Generate burner workout failed' });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'generate-burner-workout failed', message: error.message, requestId: req.id });
+      return reply.status(500).send({ error: error.message || 'Generate burner workout failed' });
     }
   });
 
@@ -279,7 +282,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
 
     const body = z.object({
       creditAmount: z.number().min(100).max(1500),
-      profile: z.any(),
+      profile: z.record(z.any()),
       lang: z.string().default('en')
     }).parse(req.body);
 
@@ -349,15 +352,16 @@ export async function calorieBankRoutes(app: FastifyInstance) {
           : `Gemini error ${res.status}: ${errorText}`);
       }
 
-      const data: any = await res.json();
+      const data = await res.json() as GeminiResponse;
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
 
-      let meal: any = {};
+      let meal: Record<string, unknown> = {};
       try {
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        meal = JSON.parse(cleaned);
-      } catch (e) {
-        req.log.error({ error: 'Failed to parse meal response', e, requestId: (req as any).requestId });
+        meal = JSON.parse(cleaned) as Record<string, unknown>;
+      } catch (parseError: unknown) {
+        const pError = parseError as Error;
+        req.log.error({ error: 'Failed to parse meal response', message: pError.message, requestId: req.id });
         return reply.status(500).send({ error: 'Failed to parse AI response' });
       }
 
@@ -366,15 +370,16 @@ export async function calorieBankRoutes(app: FastifyInstance) {
       }
 
       return reply.send(meal);
-    } catch (e: any) {
-      req.log.error({ error: 'generate-reward-meal failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'Generate reward meal failed' });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'generate-reward-meal failed', message: error.message, requestId: req.id });
+      return reply.status(500).send({ error: error.message || 'Generate reward meal failed' });
     }
   });
 
   // Get ledger entries (debts and credits)
   app.get('/calorie-bank/ledger', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { status } = req.query as { status?: string };
 
     try {
@@ -383,7 +388,7 @@ export async function calorieBankRoutes(app: FastifyInstance) {
         FROM ledger_entries
         WHERE user_id = $1
       `;
-      const params: any[] = [user.userId];
+      const params: (string | number)[] = [user.userId];
 
       if (status) {
         query += ` AND status = $2`;
@@ -405,8 +410,9 @@ export async function calorieBankRoutes(app: FastifyInstance) {
           resolvedAt: r.resolved_at
         }))
       });
-    } catch (e: any) {
-      req.log.error({ error: 'Ledger fetch failed', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'Ledger fetch failed', message: error.message, requestId: req.id });
       return reply.status(500).send({ error: 'Failed to fetch ledger entries' });
     }
   });

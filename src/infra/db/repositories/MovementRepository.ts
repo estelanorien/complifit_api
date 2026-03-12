@@ -1,0 +1,262 @@
+import { pool } from '../pool.js';
+
+// ============================================================================
+// Database Row Types
+// ============================================================================
+
+export interface ExerciseRow {
+    id: string;
+    name: string;
+    metadata?: Record<string, unknown> | null;
+    equipment?: string[] | string | null;
+    difficulty?: string | null;
+    created_at?: Date;
+    is_canonical?: boolean;
+}
+
+export interface MealRow {
+    id: string;
+    name: string;
+    instructions?: string[] | string | null;
+    metadata?: Record<string, unknown> | null;
+    created_at?: Date;
+}
+
+export interface MovementSummary {
+    id: string;
+    name: string;
+    type: 'ex' | 'meal';
+    asset_status: {
+        total: number;
+        complete: number;
+        failed: number;
+    };
+}
+
+export interface MovementMetadata {
+    instructions?: string[];
+    safety?: string[];
+    tips?: string[];
+    commonMistakes?: string[];
+    [key: string]: unknown;
+}
+
+/**
+ * MovementRepository - Data access for the core Exercises and Meals entities.
+ * Decouples the domain logic from raw database schema.
+ */
+export class MovementRepository {
+
+    /**
+     * Fetch all available exercises with basic metadata.
+     * Returns only canonical (English) rows when is_canonical column exists; otherwise all rows.
+     */
+    static async findAllExercises(): Promise<ExerciseRow[]> {
+        try {
+            const res = await pool.query<ExerciseRow>(`
+                SELECT id, name, metadata, equipment, difficulty, created_at
+                FROM training_exercises
+                WHERE name IS NOT NULL AND name != ''
+                  AND (is_canonical IS NOT DISTINCT FROM true)
+                ORDER BY name ASC
+            `);
+            return res.rows;
+        } catch (e: unknown) {
+            const error = e as Error;
+            if (error.message?.includes('is_canonical')) {
+                const res = await pool.query<ExerciseRow>(`
+                    SELECT id, name, metadata, equipment, difficulty, created_at
+                    FROM training_exercises
+                    WHERE name IS NOT NULL AND name != ''
+                    ORDER BY name ASC
+                `);
+                return res.rows;
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Fetch all available meals.
+     */
+    static async findAllMeals(): Promise<MealRow[]> {
+        const res = await pool.query<MealRow>(`
+            SELECT id, name, instructions, created_at
+            FROM meals
+            WHERE name IS NOT NULL AND name != ''
+            ORDER BY name ASC
+        `);
+        return res.rows;
+    }
+
+    /**
+     * Find a single exercise by ID.
+     */
+    static async findExerciseById(id: string): Promise<ExerciseRow | null> {
+        const res = await pool.query<ExerciseRow>(
+            `SELECT id, name, metadata, equipment FROM training_exercises WHERE id = $1`,
+            [id]
+        );
+        return res.rows[0] || null;
+    }
+
+    /**
+     * Find a single meal by ID.
+     */
+    static async findMealById(id: string): Promise<MealRow | null> {
+        const res = await pool.query<MealRow>(
+            `SELECT id, name, instructions, metadata FROM meals WHERE id = $1`,
+            [id]
+        );
+        return res.rows[0] || null;
+    }
+
+    /**
+     * Find a single exercise by Name (Fallback for batch operations).
+     */
+    static async findExerciseByName(name: string): Promise<ExerciseRow | null> {
+        const res = await pool.query<ExerciseRow>(
+            `SELECT id, name, metadata, equipment FROM training_exercises WHERE name = $1`,
+            [name]
+        );
+        return res.rows[0] || null;
+    }
+
+    /**
+     * Find a single meal by Name (Fallback for batch operations).
+     */
+    static async findMealByName(name: string): Promise<MealRow | null> {
+        const res = await pool.query<MealRow>(
+            `SELECT id, name, instructions, metadata FROM meals WHERE name = $1`,
+            [name]
+        );
+        return res.rows[0] || null;
+    }
+
+    /**
+     * Find exercise by name with fuzzy match (ILIKE) when exact match fails.
+     * Used when frontend sends display name that may differ slightly from DB.
+     */
+    static async findExerciseByNameFuzzy(name: string): Promise<ExerciseRow | null> {
+        const trimmed = (name || '').trim();
+        if (!trimmed) return null;
+        const res = await pool.query<ExerciseRow>(
+            `SELECT id, name, metadata, equipment FROM training_exercises
+             WHERE name ILIKE $1 OR TRIM(name) ILIKE $1
+             ORDER BY LENGTH(name) ASC
+             LIMIT 1`,
+            [trimmed]
+        );
+        return res.rows[0] || null;
+    }
+
+    /**
+     * Find meal by name with fuzzy match (ILIKE) when exact match fails.
+     */
+    static async findMealByNameFuzzy(name: string): Promise<MealRow | null> {
+        const trimmed = (name || '').trim();
+        if (!trimmed) return null;
+        const res = await pool.query<MealRow>(
+            `SELECT id, name, instructions, metadata FROM meals
+             WHERE name ILIKE $1 OR TRIM(name) ILIKE $1
+             ORDER BY LENGTH(name) ASC
+             LIMIT 1`,
+            [trimmed]
+        );
+        return res.rows[0] || null;
+    }
+
+    /**
+     * Find exercise by normalized slug (e.g. ankle_alphabet_ankle_sprain).
+     * Used when frontend sends display name; we normalize and match DB name normalized the same way.
+     */
+    static async findExerciseBySlug(slug: string): Promise<ExerciseRow | null> {
+        if (!slug || !/^[a-z0-9_]+$/.test(slug)) return null;
+        const res = await pool.query<ExerciseRow>(
+            `SELECT id, name, metadata, equipment FROM training_exercises
+             WHERE REGEXP_REPLACE(LOWER(TRIM(name)), '[^a-z0-9]+', '_', 'g') = $1
+             ORDER BY LENGTH(name) ASC
+             LIMIT 1`,
+            [slug]
+        );
+        return res.rows[0] || null;
+    }
+
+    /**
+     * Find meal by normalized slug.
+     */
+    static async findMealBySlug(slug: string): Promise<MealRow | null> {
+        if (!slug || !/^[a-z0-9_]+$/.test(slug)) return null;
+        const res = await pool.query<MealRow>(
+            `SELECT id, name, instructions, metadata FROM meals
+             WHERE REGEXP_REPLACE(LOWER(TRIM(name)), '[^a-z0-9]+', '_', 'g') = $1
+             ORDER BY LENGTH(name) ASC
+             LIMIT 1`,
+            [slug]
+        );
+        return res.rows[0] || null;
+    }
+
+    /**
+     * Get unique movements (exercises and meals) for admin listing.
+     * Only canonical (English) exercises when is_canonical exists; otherwise all.
+     */
+    static async getMovementManifest(): Promise<{ exercises: ExerciseRow[], meals: MealRow[] }> {
+        let exerciseRes: { rows: ExerciseRow[] };
+        try {
+            exerciseRes = await pool.query<ExerciseRow>(`
+                SELECT DISTINCT ON (name) name, metadata, id
+                FROM training_exercises
+                WHERE name IS NOT NULL AND name != ''
+                  AND (is_canonical IS NOT DISTINCT FROM true)
+                ORDER BY name, created_at DESC
+            `);
+        } catch (e: unknown) {
+            const error = e as Error;
+            if (error.message?.includes('is_canonical')) {
+                exerciseRes = await pool.query<ExerciseRow>(`
+                    SELECT DISTINCT ON (name) name, metadata, id
+                    FROM training_exercises
+                    WHERE name IS NOT NULL AND name != ''
+                    ORDER BY name, created_at DESC
+                `);
+            } else {
+                throw e;
+            }
+        }
+
+        const mealRes = await pool.query<MealRow>(`
+            SELECT DISTINCT ON (name) name, instructions, id
+            FROM meals
+            WHERE name IS NOT NULL AND name != ''
+            ORDER BY name, created_at DESC
+        `);
+
+        return {
+            exercises: exerciseRes.rows,
+            meals: mealRes.rows
+        };
+    }
+
+    /**
+     * Sync metadata (instructions, safety, etc.) back to the entity table.
+     */
+    static async updateMetadata(type: 'ex' | 'meal', id: string, metadata: MovementMetadata): Promise<void> {
+        if (type === 'ex') {
+            await pool.query(
+                `UPDATE training_exercises SET
+                    metadata = jsonb_set(COALESCE(metadata, '{}'), '{generated_instructions}', $1)
+                 WHERE id = $2 OR name = $3`,
+                [JSON.stringify(metadata), id, id.replace(/_/g, ' ')]
+            );
+        } else {
+            await pool.query(
+                `UPDATE meals SET
+                    instructions = $1,
+                    metadata = $2
+                 WHERE id = $3 OR name = $4`,
+                [JSON.stringify(metadata.instructions), JSON.stringify(metadata), id, id.replace(/_/g, ' ')]
+            );
+        }
+    }
+}

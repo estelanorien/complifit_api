@@ -1,8 +1,8 @@
-
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
+import { AuthenticatedRequest } from '../types.js';
 
 const actionSchema = z.object({
     action: z.enum([
@@ -18,7 +18,7 @@ const actionSchema = z.object({
         'log_scan',
         'streak_freeze'
     ]),
-    data: z.any().optional()
+    data: z.record(z.any()).optional()
 });
 
 const BADGES_DEFINITIONS = [
@@ -37,7 +37,7 @@ const BADGES_DEFINITIONS = [
 
 export async function gamificationRoutes(app: FastifyInstance) {
     app.post('/gamification/action', { preHandler: authGuard }, async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const body = actionSchema.parse(req.body);
         const { action, data } = body;
 
@@ -145,10 +145,166 @@ export async function gamificationRoutes(app: FastifyInstance) {
                 message
             };
 
-        } catch (e: any) {
+        } catch (e: unknown) {
             await client.query('ROLLBACK');
             req.log.error(e);
             return reply.status(500).send({ error: 'Gamification action failed' });
+        } finally {
+            client.release();
+        }
+    });
+
+    // Get current gamification state
+    app.get('/gamification/state', { preHandler: authGuard }, async (req, reply) => {
+        const user = (req as AuthenticatedRequest).user;
+
+        try {
+            const { rows } = await pool.query(
+                `SELECT profile_data FROM user_profiles WHERE user_id = $1`,
+                [user.userId]
+            );
+
+            const profileData = rows[0]?.profile_data || {};
+
+            return reply.send({
+                xp: profileData.willpower || 0,
+                sparks: profileData.sparks || 0,
+                flexPoints: profileData.flexPoints || 0,
+                badges: profileData.badges || [],
+                level: Math.floor((profileData.willpower || 0) / 100) + 1,
+                streak: profileData.streak || 0
+            });
+        } catch (e: unknown) {
+            req.log.error(e);
+            return reply.status(500).send({ error: 'Failed to fetch gamification state' });
+        }
+    });
+
+    // Reconcile client state with server (server is authoritative)
+    app.post('/gamification/reconcile', { preHandler: authGuard }, async (req, reply) => {
+        const user = (req as AuthenticatedRequest).user;
+
+        try {
+            const { rows } = await pool.query(
+                `SELECT profile_data FROM user_profiles WHERE user_id = $1`,
+                [user.userId]
+            );
+
+            const profileData = rows[0]?.profile_data || {};
+
+            // Server state is always authoritative
+            return reply.send({
+                xp: profileData.willpower || 0,
+                sparks: profileData.sparks || 0,
+                flexPoints: profileData.flexPoints || 0,
+                badges: profileData.badges || [],
+                level: Math.floor((profileData.willpower || 0) / 100) + 1,
+                streak: profileData.streak || 0
+            });
+        } catch (e: unknown) {
+            req.log.error(e);
+            return reply.status(500).send({ error: 'Reconciliation failed' });
+        }
+    });
+
+    // Validate transaction before allowing it
+    app.post('/gamification/validate-transaction', { preHandler: authGuard }, async (req, reply) => {
+        const user = (req as AuthenticatedRequest).user;
+        const body = z.object({
+            type: z.enum(['spend_sparks', 'spend_flex', 'earn_sparks', 'earn_flex']),
+            amount: z.number().positive(),
+            reason: z.string(),
+            timestamp: z.number()
+        }).parse(req.body);
+
+        try {
+            const { rows } = await pool.query(
+                `SELECT profile_data FROM user_profiles WHERE user_id = $1`,
+                [user.userId]
+            );
+
+            const profileData = rows[0]?.profile_data || {};
+            const currentSparks = profileData.sparks || 0;
+            const currentFlex = profileData.flexPoints || 0;
+
+            if (body.type === 'spend_sparks' && currentSparks < body.amount) {
+                return reply.send({ allowed: false, error: 'Insufficient sparks' });
+            }
+            if (body.type === 'spend_flex' && currentFlex < body.amount) {
+                return reply.send({ allowed: false, error: 'Insufficient flex points' });
+            }
+
+            const newBalance = body.type === 'spend_sparks' ? currentSparks - body.amount
+                : body.type === 'earn_sparks' ? currentSparks + body.amount
+                : body.type === 'spend_flex' ? currentFlex - body.amount
+                : currentFlex + body.amount;
+
+            return reply.send({ allowed: true, newBalance });
+        } catch (e: unknown) {
+            req.log.error(e);
+            return reply.status(500).send({ error: 'Validation failed' });
+        }
+    });
+
+    // Execute transaction with server-side validation
+    app.post('/gamification/transaction', { preHandler: authGuard }, async (req, reply) => {
+        const user = (req as AuthenticatedRequest).user;
+        const body = z.object({
+            type: z.enum(['spend_sparks', 'spend_flex', 'earn_sparks', 'earn_flex']),
+            amount: z.number().positive(),
+            reason: z.string(),
+            timestamp: z.number()
+        }).parse(req.body);
+
+        const client = await pool.connect();
+        try {
+            await client.query('SET statement_timeout = 10000');
+            await client.query('BEGIN');
+
+            const { rows } = await client.query(
+                `SELECT profile_data FROM user_profiles WHERE user_id = $1 FOR UPDATE`,
+                [user.userId]
+            );
+
+            const profileData = rows[0]?.profile_data || {};
+
+            if (body.type === 'spend_sparks') {
+                if ((profileData.sparks || 0) < body.amount) {
+                    await client.query('ROLLBACK');
+                    return reply.status(400).send({ error: 'Insufficient sparks' });
+                }
+                profileData.sparks = (profileData.sparks || 0) - body.amount;
+            } else if (body.type === 'earn_sparks') {
+                profileData.sparks = (profileData.sparks || 0) + body.amount;
+            } else if (body.type === 'spend_flex') {
+                if ((profileData.flexPoints || 0) < body.amount) {
+                    await client.query('ROLLBACK');
+                    return reply.status(400).send({ error: 'Insufficient flex points' });
+                }
+                profileData.flexPoints = (profileData.flexPoints || 0) - body.amount;
+            } else if (body.type === 'earn_flex') {
+                profileData.flexPoints = (profileData.flexPoints || 0) + body.amount;
+            }
+
+            await client.query(
+                `UPDATE user_profiles SET profile_data = $1::jsonb, updated_at = now() WHERE user_id = $2`,
+                [JSON.stringify(profileData), user.userId]
+            );
+
+            await client.query('COMMIT');
+
+            return reply.send({
+                xp: profileData.willpower || 0,
+                sparks: profileData.sparks || 0,
+                flexPoints: profileData.flexPoints || 0,
+                badges: profileData.badges || [],
+                level: Math.floor((profileData.willpower || 0) / 100) + 1,
+                streak: profileData.streak || 0
+            });
+        } catch (e: unknown) {
+            await client.query('ROLLBACK');
+            req.log.error(e);
+            return reply.status(500).send({ error: 'Transaction failed' });
         } finally {
             client.release();
         }

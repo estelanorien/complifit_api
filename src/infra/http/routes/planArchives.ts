@@ -3,11 +3,12 @@ import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
 import { withErrorHandler } from './_utils/errorHandler.js';
+import { AuthenticatedRequest } from '../types.js';
 
 export async function planArchiveRoutes(app: FastifyInstance) {
     // List archive
     app.get('/plans/archive', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const { rows } = await pool.query(
             `SELECT id, name, date_created, training, nutrition, progress_day_index, summary
        FROM saved_smart_plans
@@ -20,11 +21,11 @@ export async function planArchiveRoutes(app: FastifyInstance) {
 
     // Save to archive (manual)
     app.post('/plans/archive', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const body = z.object({
             name: z.string(),
-            training: z.any(),
-            nutrition: z.any(),
+            training: z.unknown(),
+            nutrition: z.unknown(),
             progressDayIndex: z.number().optional().default(0),
             summary: z.string().optional()
         }).parse(req.body);
@@ -41,7 +42,7 @@ export async function planArchiveRoutes(app: FastifyInstance) {
 
     // Restore from archive
     app.post('/plans/restore-archived', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const { id, startDate } = z.object({
             id: z.string().uuid(),
             startDate: z.string().optional().default(new Date().toISOString().split('T')[0])
@@ -86,7 +87,7 @@ export async function planArchiveRoutes(app: FastifyInstance) {
 
     // Delete from archive (standard)
     app.delete('/plans/delete-archived', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const { id } = z.object({ id: z.string().uuid() }).parse(req.body);
 
         const { rowCount } = await pool.query(
@@ -103,7 +104,7 @@ export async function planArchiveRoutes(app: FastifyInstance) {
 
     // Delete from archive (legacy path param)
     app.delete('/plans/archive/:id', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
 
         const { rowCount } = await pool.query(
@@ -120,7 +121,7 @@ export async function planArchiveRoutes(app: FastifyInstance) {
 
     // Update archive name
     app.patch('/plans/update-archived-name', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const { id, name } = z.object({
             id: z.string().uuid(),
             name: z.string().min(1)

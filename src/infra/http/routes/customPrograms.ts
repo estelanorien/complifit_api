@@ -4,11 +4,12 @@ import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
 import { withErrorHandler } from './_utils/errorHandler.js';
 import { CustomProgramService } from '../../../application/services/customProgramService.js';
+import { AuthenticatedRequest } from '../types.js';
 
 export async function customProgramRoutes(app: FastifyInstance) {
     // Parse image to text (OCR)
     app.post('/custom-programs/parse-photo', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const body = z.object({
             imageBase64: z.string(),
             mimeType: z.string()
@@ -73,7 +74,7 @@ export async function customProgramRoutes(app: FastifyInstance) {
 
     // Convert approved text to structured program
     app.post('/custom-programs/extract-structure', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const body = z.object({
             text: z.string(),
             type: z.enum(['training', 'nutrition', 'both'])
@@ -100,9 +101,9 @@ export async function customProgramRoutes(app: FastifyInstance) {
 
     // Validate program (Free tier)
     app.post('/custom-programs/validate', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const body = z.object({
-            program: z.any(),
+            program: z.unknown(),
             type: z.enum(['training', 'nutrition'])
         }).parse(req.body);
 
@@ -123,9 +124,9 @@ export async function customProgramRoutes(app: FastifyInstance) {
 
     // Comprehensive coaching (Pro tier)
     app.post('/custom-programs/coach-feedback', { preHandler: authGuard }, withErrorHandler(async (req, reply) => {
-        const user = (req as any).user;
+        const user = (req as AuthenticatedRequest).user;
         const body = z.object({
-            program: z.any(),
+            program: z.unknown(),
             type: z.enum(['training', 'nutrition'])
         }).parse(req.body);
 

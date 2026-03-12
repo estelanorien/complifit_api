@@ -24,9 +24,10 @@ export async function locationRoutes(app: FastifyInstance) {
       // Placeholder: Return empty array for now
       // TODO: Integrate with Google Places API or OpenStreetMap Nominatim
       return reply.send([]);
-    } catch (e: any) {
-      req.log.error({ error: 'nearby-places failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'Find nearby places failed' });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'nearby-places failed', message: error.message, requestId: req.id });
+      return reply.status(500).send({ error: error.message || 'Find nearby places failed' });
     }
   });
 
@@ -45,9 +46,10 @@ export async function locationRoutes(app: FastifyInstance) {
       
       // Placeholder implementation
       return reply.send([]);
-    } catch (e: any) {
-      req.log.error({ error: 'geocode failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'Geocode failed' });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'geocode failed', message: error.message, requestId: req.id });
+      return reply.status(500).send({ error: error.message || 'Geocode failed' });
     }
   });
 }

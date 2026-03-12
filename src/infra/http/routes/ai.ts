@@ -2,10 +2,17 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AiService } from '../../../application/services/aiService.js';
+import { claudeService } from '../../../application/services/ClaudeService.js';
+import { aiRouter } from '../../../application/services/AIRouter.js';
+import { tryLocalFoodLookup } from '../../../application/services/foodLookupService.js';
 import { pool } from '../../db/pool.js';
 import { authGuard } from '../hooks/auth.js';
+import { proGuard } from '../hooks/proGuard.js';
 import fetch from 'node-fetch';
 import { aiConfig } from '../../../config/ai.js';
+import { recordApiCall } from '../../../services/aiDataCollector.js';
+import { AuthenticatedRequest, GeminiPart, GeminiResponse } from '../types.js';
+import { logger } from '../../../infra/logger.js';
 
 const textSchema = z.object({
   prompt: z.string().min(1),
@@ -18,16 +25,16 @@ const imageSchema = z.object({
 });
 
 const generateSchema = z.object({
-  parts: z.array(z.any()),
+  parts: z.array(z.unknown()),
   model: z.string().optional(),
-  generationConfig: z.any().optional(),
-  tools: z.any().optional()
+  generationConfig: z.record(z.unknown()).optional(),
+  tools: z.array(z.unknown()).optional()
 });
 
 const foodLogSchema = z.object({
   text: z.string().optional(),
   imageBase64: z.string().optional(),
-  contextMeals: z.array(z.any()).optional(),
+  contextMeals: z.array(z.record(z.unknown())).optional(),
   lang: z.string().optional()
 });
 
@@ -48,30 +55,137 @@ const ensureFoodCacheTable = async () => {
   foodCacheReady = true;
 };
 
+/**
+ * Sanitize user input before including in AI prompts to prevent prompt injection.
+ * Removes characters that could escape prompt context or manipulate AI behavior.
+ */
+function sanitizeUserInput(text: string | undefined | null): string {
+  if (!text) return '';
+  return text
+    // Remove structural characters that could escape context
+    .replace(/[`]/g, "'")                                    // Backticks to single quotes
+    .replace(/\{\{|\}\}/g, '')                               // Template literals
+    .replace(/\[\[|\]\]/g, '')                               // Wiki-style brackets
+    // Remove role markers that could override system prompts
+    .replace(/\b(system|assistant|user|model|human|ai)\s*:/gi, '$1 -')
+    // Remove markdown code blocks that could contain instructions
+    .replace(/```[\s\S]*?```/g, '[code block removed]')
+    // Remove XML-like tags that could be interpreted as instructions
+    .replace(/<\/?(?:system|prompt|instruction|ignore|override)[^>]*>/gi, '')
+    // Limit length to prevent context overflow
+    .slice(0, 2000)
+    .trim();
+}
+
+/**
+ * Extract JSON from AI response text robustly.
+ * Handles various response formats and common issues.
+ */
+function extractJsonFromResponse(text: string): object | null {
+  if (!text) return null;
+
+  // Try direct parse first
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Continue to fallbacks
+  }
+
+  // Remove markdown code blocks
+  let cleaned = text.trim()
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  // Try parsing cleaned text
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // Continue to fallbacks
+  }
+
+  // Find JSON object or array boundaries
+  const jsonMatch = cleaned.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[1]);
+    } catch {
+      // Continue to fix common issues
+    }
+
+    // Try to fix common JSON issues
+    let fixedJson = jsonMatch[1]
+      .replace(/,\s*([}\]])/g, '$1')           // Remove trailing commas
+      .replace(/'/g, '"')                       // Single to double quotes (careful with apostrophes)
+      .replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3'); // Quote unquoted keys
+
+    try {
+      return JSON.parse(fixedJson);
+    } catch {
+      // Give up
+    }
+  }
+
+  return null;
+}
+
 export async function aiRoutes(app: FastifyInstance) {
   const ai = new AiService();
 
   // Basit rate limit, uygulama geneli rate-limit varsa kaldırılabilir
-  app.post('/ai/text', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/ai/text', { preHandler: proGuard }, async (req, reply) => {
+    const startTime = Date.now();
     const parsed = textSchema.parse(req.body);
     const result = await ai.generateText(parsed);
+
+    // Record for AI training (fire-and-forget)
+    const user = (req as AuthenticatedRequest).user;
+    recordApiCall({
+      userId: user?.userId || 'anonymous',
+      callType: 'text_generation',
+      apiProvider: 'gemini',
+      modelVersion: parsed.model || 'gemini-3-flash-preview',
+      endpoint: '/ai/text',
+      requestPrompt: sanitizeUserInput(parsed.prompt),
+      responseRaw: result,
+      latencyMs: Date.now() - startTime
+    }).catch(() => {});
+
     return reply.send(result);
   });
 
-  app.post('/ai/image', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/ai/image', { preHandler: proGuard }, async (req, reply) => {
+    const startTime = Date.now();
     const inputSchema = imageSchema.extend({
       referenceImage: z.string().optional() // Base64 image data
     });
 
     const parsed = inputSchema.parse(req.body);
     const result = await ai.generateImage(parsed);
+
+    // Record for AI training (fire-and-forget)
+    const user = (req as AuthenticatedRequest).user;
+    recordApiCall({
+      userId: user?.userId || 'anonymous',
+      callType: 'image_generation',
+      apiProvider: 'gemini',
+      modelVersion: 'gemini-2.5-flash-image',
+      endpoint: '/ai/image',
+      requestPrompt: sanitizeUserInput(parsed.prompt),
+      requestContext: { hasReferenceImage: !!parsed.referenceImage },
+      responseRaw: { hasImage: !!result },
+      latencyMs: Date.now() - startTime
+    }).catch(() => {});
+
     return reply.send(result);
   });
 
   // General Gemini proxy (server-side key)
   app.post('/ai/generate-content', { preHandler: authGuard }, async (req, reply) => {
+    const startTime = Date.now();
     const body = generateSchema.parse(req.body || {});
-    const { parts, model = 'models/gemini-1.5-flash', generationConfig, tools } = body;
+    const { parts, model = 'models/gemini-3-flash-preview', generationConfig, tools } = body;
 
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent`, {
@@ -94,10 +208,26 @@ export async function aiRoutes(app: FastifyInstance) {
       const data: any = await res.json();
       const contentParts = data?.candidates?.[0]?.content?.parts || [];
       const firstText = contentParts.find((p: any) => p?.text)?.text || '';
+
+      // Record for AI training (fire-and-forget)
+      const user = (req as AuthenticatedRequest).user;
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'content_generation',
+        apiProvider: 'gemini',
+        modelVersion: model,
+        endpoint: '/ai/generate-content',
+        requestPrompt: parts.map((p: any) => p?.text || '[non-text]').join(' ').substring(0, 500),
+        requestContext: { hasTools: !!tools, partsCount: parts.length },
+        responseRaw: { text: firstText.substring(0, 500), partsCount: contentParts.length },
+        latencyMs: Date.now() - startTime
+      }).catch(() => {});
+
       return reply.send({ text: firstText, parts: contentParts });
-    } catch (e: any) {
-      req.log.error({ error: 'generate-content proxy failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'generate failed' });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'generate-content proxy failed', e, requestId: req.id });
+      return reply.status(500).send({ error: error.message || 'generate failed' });
     }
   });
 
@@ -121,6 +251,15 @@ export async function aiRoutes(app: FastifyInstance) {
 
     await ensureFoodCacheTable().catch(() => { });
 
+    // LOCAL DB LOOKUP — short-circuit AI for known foods (text-only, zero cost)
+    if (text && !imageBase64) {
+      const localResult = tryLocalFoodLookup(text, lang, contextMeals as any);
+      if (localResult) {
+        req.log.info({ source: 'local_db', name: localResult.name, calories: localResult.calories, message: 'Food resolved from local DB (zero AI cost)' });
+        return reply.send(localResult);
+      }
+    }
+
     const mealContext = contextMeals
       .map((m: any, i: number) => `${i}: ${m?.recipe?.name || m?.recipe?.title || 'meal'} (${m?.recipe?.calories ?? 'unk'} kcal)`)
       .join(', ');
@@ -131,7 +270,7 @@ export async function aiRoutes(app: FastifyInstance) {
 
     if (imageBase64) {
       // CHECK PRO TIER
-      const user = (req as any).user;
+      const user = (req as AuthenticatedRequest).user;
       const { rows } = await pool.query('SELECT subscription_tier FROM profiles WHERE user_id = $1', [user.userId]);
       const tier = rows[0]?.subscription_tier || 'free';
 
@@ -143,196 +282,47 @@ export async function aiRoutes(app: FastifyInstance) {
         });
       }
 
-      // IMAGE-FIRST ANALYSIS: Prioritize visual recognition and detect NON-FOOD images
-      prompt = `
-      FOOD IMAGE ANALYSIS - CRITICAL TASK.
-      
-      You are an expert nutritionist and food recognition AI, specializing in both GLOBAL and TURKISH CUISINE.
-      Analyze the FOOD PHOTO provided.
-      
-      STEP 0: CONTEXT CHECK
-      - You are analysing a photo for a fitness/nutrition app.
-      - If the image contains food, drink, or supplements, proceed to analyze it.
-      - If the image contains absolutely NO food (e.g. just a face, a landscape, a document), set "isFood" = false.
-      - Be lenient: messy plates, packed food, and restaurant menus are acceptable context.
+      // IMAGE ANALYSIS — trimmed prompt (calorie densities are in system prompt)
+      const turkishBlock = (lang === 'tr') ? `
+For Turkish dishes, estimate: Döner ~280kcal/200g, Lahmacun ~280kcal/piece, Pide ~500kcal/whole, Köfte ~80kcal/piece, Börek ~300kcal/150g, Çorba ~180kcal/bowl, Baklava ~200kcal/piece.
+Turkish translations: Tavuk=Chicken, Et=Meat, Balık=Fish, Pilav=Rice, Makarna=Pasta, Salata=Salad, Çorba=Soup.` : '';
 
-      STEP 1: VISUAL PORTION ANALYSIS (CRITICAL - BE PRECISE)
-      - CAREFULLY examine the image. Analyze the ACTUAL VISIBLE AMOUNT of food, not just the dish type.
-      - Estimate portion size using visual references:
-        * Compare food size to common objects (e.g., deck of cards = 85g meat, tennis ball = 1 cup rice, thumb = 1 tbsp oil)
-        * Estimate plate/bowl diameter: Small plate (18-20cm) vs Large plate (25-30cm) vs Extra large (30cm+)
-        * Visual volume estimation: Is the plate 1/4 full, 1/2 full, 3/4 full, or overflowing?
-        * Count individual items: How many pieces of bread? How many meatballs? How many slices?
-      - Identify EVERY dish present with SPECIFIC AMOUNTS:
-        * Main protein: Estimate weight in grams (e.g., "150g grilled chicken breast" not just "chicken")
-        * Carbohydrates: Estimate volume (e.g., "1.5 cups rice" or "200g pasta")
-        * Vegetables: Estimate volume (e.g., "2 cups mixed salad" or "1 cup roasted vegetables")
-        * Fats/Oils: Visible oil, butter, sauces (e.g., "2 tbsp olive oil" or "heavy cream sauce")
-        * Bread/Sides: Count pieces and estimate size (e.g., "2 pieces pide" or "1 large simit")
-      - For Turkish dishes, identify SPECIFIC AMOUNTS:
-        * Döner: Estimate thickness and width (e.g., "200g döner" = ~450 kcal, "150g" = ~340 kcal)
-        * Lahmacun: Count pieces and estimate size (e.g., "1 large lahmacun" = ~280 kcal, "1 small" = ~200 kcal)
-        * Pide: Estimate size (e.g., "1/2 pide" = ~250 kcal, "full pide" = ~500 kcal)
-        * Köfte: Count pieces and estimate size (e.g., "4 medium köfte" = ~320 kcal, "6 small" = ~240 kcal)
-        * Börek: Count pieces and type (e.g., "2 cheese börek" = ~500 kcal, "1 meat börek" = ~350 kcal)
-        * Çorba: Estimate bowl size (e.g., "1 large bowl mercimek çorbası" = ~250 kcal, "1 small" = ~150 kcal)
-        * Baklava: Count pieces and estimate size (e.g., "2 pieces baklava" = ~400 kcal, "1 piece" = ~200 kcal)
-      
-      STEP 2: DETAILED CALORIE CALCULATION (SCIENTIFIC & ACCURATE)
-      - ⚠️ CRITICAL: You MUST calculate calories based on ACTUAL VISUAL PORTION ESTIMATION.
-      - ⚠️ NEVER return default values like 350 calories, 20g protein, 35g carbs, 12g fat.
-      - ⚠️ If you return 350/20/35/12, your response will be REJECTED.
-      - Calculate calories using STANDARD NUTRITION DATABASES and visual portion estimates.
-      - Use these caloric densities per 100g (adjust based on VISUAL WEIGHT):
-        * Lean proteins (grilled chicken, fish): 150-200 kcal/100g
-        * Fatty proteins (döner, köfte with oil): 250-350 kcal/100g
-        * Fried proteins: 300-400 kcal/100g
-        * Rice/Pilav: 130-150 kcal/100g (cooked)
-        * Pasta: 130-150 kcal/100g (cooked)
-        * Bread: 250-300 kcal/100g
-        * Vegetables (raw): 20-50 kcal/100g
-        * Vegetables (cooked with oil): 100-200 kcal/100g
-        * Olive oil/Butter: 900 kcal/100g (1 tbsp = ~120 kcal)
-        * Cheese: 300-400 kcal/100g
-        * Nuts: 600-700 kcal/100g
-      - Calculate macros based on portion size:
-        * Protein: 4 kcal per gram
-        * Carbs: 4 kcal per gram
-        * Fat: 9 kcal per gram
-      - IMPORTANT: Sum ALL components separately:
-        * Main dish calories + Side dish calories + Sauce calories + Bread calories + Drink calories = TOTAL
-      - Be REALISTIC: A typical restaurant meal with protein, carbs, vegetables, and sauce is usually 600-1000 kcal.
-      - For Turkish restaurant meals, typical ranges:
-        * Simple meal (1 main + bread): 500-700 kcal
-        * Standard meal (main + rice + salad + bread): 700-900 kcal
-        * Large meal (main + multiple sides + bread + drink): 900-1200 kcal
-        * Fast food style (döner wrap, lahmacun with ayran): 600-800 kcal
-      
-      STEP 3: MATCHING (CRITICAL - BE SMART AND LENIENT)
-      - Planned meals: [${mealContext}].
-      - Your goal is to MATCH the photo to a planned meal if possible.
-      - Be VERY LENIENT and SMART in matching:
-        * "Grilled Chicken" matches "Chicken Breast", "Tavuk", "Izgara Tavuk"
-        * "Pasta" matches "Spaghetti", "Makarna", "Penne"
-        * "Rice" matches "Pilav", "White Rice", "Brown Rice"
-        * "Salad" matches "Salata", "Green Salad", "Mixed Salad"
-        * "Soup" matches "Çorba", "Soup", "Mercimek Çorbası"
-      - If the main ingredients overlap (even partially), consider it a MATCH.
-      - Consider Turkish-English translations: "Tavuk" = "Chicken", "Et" = "Meat", "Balık" = "Fish", etc.
-      - If matched, set "status" = "matched" and "matchIndex" = index of the meal (0-based).
-      - If clearly different (e.g. photo is Pizza, plan is Salad), set "status" = "extra".
-      
-      STEP 4: UNRECOGNIZED / ERROR HANDLING
-      - If the image is food but too blurry/dark/unclear to identify:
-        * Set "isFood" = false, "errorType" = "unrecognized_food".
-        * Set calories = 0, macros = {protein: 0, carbs: 0, fat: 0}
-        * Set confidence = 0
-      - If the image contains NO food at all (face, landscape, document, etc.):
-        * Set "isFood" = false, "errorType" = "not_food".
-        * Set calories = 0, macros = {protein: 0, carbs: 0, fat: 0}
-        * Set confidence = 0
-      - If you CAN identify the food, set "isFood" = true, "errorType" = "ok", and provide your best estimate with confidence score (0-100).
-      
-      CALCULATION EXAMPLE:
-      If you see a plate with:
-      - 200g grilled chicken breast (200g × 1.65 kcal/g = 330 kcal, 60g protein, 4g fat, 0g carbs)
-      - 150g rice pilav (150g × 1.4 kcal/g = 210 kcal, 4g protein, 0.5g fat, 45g carbs)
-      - 100g roasted vegetables with oil (100g × 1.5 kcal/g = 150 kcal, 2g protein, 8g fat, 15g carbs)
-      - 1 piece bread (50g × 2.7 kcal/g = 135 kcal, 4g protein, 1g fat, 25g carbs)
-      TOTAL: 825 kcal, 70g protein, 13.5g fat, 85g carbs
-      
-      RETURN JSON EXACTLY:
-      {
-          "name": "string (food name with portion details, e.g. 'Grilled Chicken with Rice and Vegetables')",
-          "calories": number (integer, MUST be realistic based on visual portion. NEVER use 350 as default!),
-          "macros": { 
-              "protein": number (grams, must match calories: protein × 4 + carbs × 4 + fat × 9 ≈ calories),
-              "carbs": number (grams),
-              "fat": number (grams)
-          },
-          "status": "matched" | "extra",
-          "matchIndex": number,
-          "confidence": number (0-100, higher if portion is clear, lower if uncertain),
-          "isFood": boolean,
-          "errorType": "ok" | "not_food" | "unrecognized_food",
-          "message": "Short feedback string describing what you see and estimated portion (e.g. '200g grilled chicken with 1.5 cups rice and mixed vegetables, estimated 850 kcal')"
-      }
-      
-      CRITICAL: Do NOT use generic/sablon values. Calculate based on ACTUAL VISUAL ESTIMATION of portion sizes.
-      Start.`;
+      prompt = `FOOD IMAGE ANALYSIS.
+Analyze the photo. If it contains NO food, set "isFood"=false, "errorType"="not_food", calories/macros=0.
+
+PORTION ESTIMATION:
+- Estimate weight in grams using plate size and visual references (deck of cards=85g meat, tennis ball=1 cup)
+- Count individual items, estimate plate fullness
+- Identify each component: protein (grams), carbs (grams), vegetables, fats/oils, bread/sides
+${turkishBlock}
+MATCHING:
+- Planned meals: [${mealContext}].
+- Fuzzy-match photo to planned meal. If main ingredients overlap, status="matched" with matchIndex (0-based). Otherwise status="extra".
+
+NEVER return default 350/20/35/12. Calculate from visual estimation. Sum all components.
+Ensure: protein*4 + carbs*4 + fat*9 ≈ total calories (10% tolerance).
+
+Return JSON: { "name": string, "calories": number, "macros": {"protein": number, "carbs": number, "fat": number}, "status": "matched"|"extra", "matchIndex": number, "confidence": 0-100, "isFood": boolean, "errorType": "ok"|"not_food"|"unrecognized_food", "message": string }`;
 
       // Add image first, then text context if any, then prompt
       const mime = imageBase64.includes('png') ? 'image/png' : 'image/jpeg';
       parts.push({ inlineData: { mimeType: mime, data: imageBase64.split(',')[1] } });
       if (text && text.trim()) {
-        parts.push({ text: `User context/description: "${text}"` });
+        parts.push({ text: `User context/description: "${sanitizeUserInput(text)}"` });
       }
       parts.push({ text: prompt });
     } else if (text) {
-      // TEXT-ONLY ANALYSIS
-      prompt = `
-      ANALYZE FOOD LOG (LANGUAGE-AGNOSTIC, QUANTITY-AWARE).
-      - The user text may be in ANY language/dialect/transliteration. Detect it yourself.
-      - ALWAYS return a best-effort JSON, never refuse.
-      - No cultural filtering. Assume the mentioned food exists; estimate realistically.
-      - Planned meals today: [${mealContext}].
-      - FIRST, decide if the text actually describes food/meal consumption.
-        * If text is clearly NOT about food (e.g. mood, workout, random sentence), set "isFood" = false, "errorType" = "not_food", calories/macros = 0, status="extra", matchIndex=-1, confidence=0 and add a short message explaining that no food was found in the text.
-      - Detect QUANTITY in the text: numbers + (porsiyon/portion/serving/adet/piece/pcs/x2/gram/gr/g/kg/kilo/yarım/half/double/çeyrek/quarter) or words (bir=1, iki=2, üç=3, dört=4, beş=5).
-      - QUANTITY DETECTION RULES:
-        * If grams mentioned: Use exact grams (e.g., "200g tavuk" = 200g chicken)
-        * If portion/serving mentioned: Standard serving sizes:
-          - Protein (meat/fish): 1 serving = 120-150g (raw) or 100-120g (cooked)
-          - Carbs (rice/pasta): 1 serving = 150-200g cooked (≈80-100g dry)
-          - Vegetables: 1 serving = 100-150g
-          - Bread: 1 serving = 50-60g (1 slice or 1 small roll)
-        * If "yarım/half": Multiply standard serving by 0.5
-        * If "double/çift": Multiply standard serving by 2.0
-        * If no quantity mentioned: Assume 1 standard serving
-      - Calories and macros MUST reflect the consumed amount (quantity-adjusted). Do NOT use generic values.
-      - Use ACCURATE caloric densities:
-        * Lean proteins: 150-200 kcal/100g (chicken breast, fish, lean beef)
-        * Fatty proteins: 250-350 kcal/100g (döner, köfte, fatty cuts)
-        * Fried foods: Add 50-100 kcal/100g to base calories
-        * Rice/Pasta (cooked): 130-150 kcal/100g
-        * Bread: 250-300 kcal/100g
-        * Vegetables (raw): 20-50 kcal/100g
-        * Vegetables (cooked with oil): 100-200 kcal/100g
-        * Oils/Sauces: 1 tbsp = ~120 kcal
-      - Calculate macros accurately:
-        * Protein: 4 kcal per gram
-        * Carbs: 4 kcal per gram  
-        * Fat: 9 kcal per gram
-        * Ensure: (protein × 4) + (carbs × 4) + (fat × 9) ≈ total calories (±10% tolerance)
-      
-      Tasks:
-      1) If text clearly does NOT describe any food, return isFood=false, errorType="not_food", calories/macros=0 and an explanatory message.
-      2) Otherwise, identify the food name (keep original language if provided) and DETECTED QUANTITY.
-      3) Calculate calories & macros (Protein/Carbs/Fat) for the SPECIFIC consumed amount:
-         - Example: "200g tavuk göğsü" → 200g × 1.65 kcal/g = 330 kcal, 60g protein, 4g fat, 0g carbs
-         - Example: "1 porsiyon döner" → 150g × 2.8 kcal/g = 420 kcal, 25g protein, 20g fat, 30g carbs
-         - Example: "2 lahmacun" → 2 × 250 kcal = 500 kcal, 20g protein, 25g fat, 45g carbs
-      4) Fuzzy-match against planned meals (case-insensitive). If no match, status = "extra", matchIndex = -1.
-      
-      Return JSON EXACTLY:
-      {
-          "name": "string",
-          "calories": number,
-          "macros": { "protein": number, "carbs": number, "fat": number },
-          "status": "matched" | "extra",
-          "matchIndex": number,
-          "confidence": number,
-          "isFood": boolean,
-          "errorType": "ok" | "not_food" | "unrecognized_food",
-          "message": "short explanation in the user's language"
-      }
-      Response language: keep detected language of input text if any; otherwise English.
-      `;
-      parts.push({ text: `User Log: "${text}"` });
+      // TEXT-ONLY ANALYSIS — trimmed prompt (calorie densities in system prompt)
+      prompt = `ANALYZE FOOD LOG. User text may be in ANY language. Detect quantity (grams, portions, pieces, Turkish numbers: bir=1, iki=2, yarım=0.5).
+If text is NOT about food, set isFood=false, errorType="not_food", calories/macros=0.
+Otherwise: identify food, parse quantity, calculate calories/macros using standard densities (see system prompt).
+Planned meals: [${mealContext}]. Fuzzy-match if ingredients overlap. NEVER return default 350/20/35/12.
+Return JSON: {"name":string,"calories":number,"macros":{"protein":number,"carbs":number,"fat":number},"status":"matched"|"extra","matchIndex":number,"confidence":0-100,"isFood":boolean,"errorType":"ok"|"not_food"|"unrecognized_food","message":string}`;
+      parts.push({ text: `User Log: "${sanitizeUserInput(text)}"` });
       parts.push({ text: prompt });
     }
 
-    const model = 'models/gemini-1.5-flash';
+    const model = 'models/gemini-3-flash-preview';
 
     // Helper function to ensure response has all required fields
     // CRITICAL: Only use defaults if AI didn't provide values. If AI provided values, use them!
@@ -369,13 +359,13 @@ export async function aiRoutes(app: FastifyInstance) {
         // If AI didn't provide proper values, throw error instead of using defaults
         if (!hasCalories || !hasMacros) {
           req.log.error({
-            requestId: (req as any).requestId,
+            requestId: req.id,
             hasCalories,
             hasMacros,
             message: '❌ ensureDefaults: AI did not provide required values!'
           });
           req.log.error({
-            requestId: (req as any).requestId,
+            requestId: req.id,
             obj: JSON.stringify(obj, null, 2),
             message: 'AI response object'
           });
@@ -432,7 +422,7 @@ export async function aiRoutes(app: FastifyInstance) {
               cachedResp?.macros?.fat === 12;
 
             if (isCachedDefault) {
-              req.log.error({ error: '🚨 Cached response has default values - ignoring cache and recalculating', requestId: (req as any).requestId });
+              req.log.error({ error: '🚨 Cached response has default values - ignoring cache and recalculating', requestId: req.id });
               // Don't return cached - let it fall through to AI call
             } else {
               return reply.send(ensureDefaults(cachedResp));
@@ -455,7 +445,7 @@ export async function aiRoutes(app: FastifyInstance) {
               cachedResp?.macros?.fat === 12;
 
             if (isCachedDefault) {
-              req.log.error({ error: '🚨 Cached response has default values - ignoring cache and recalculating', requestId: (req as any).requestId });
+              req.log.error({ error: '🚨 Cached response has default values - ignoring cache and recalculating', requestId: req.id });
               // Don't return cached - let it fall through to AI call
             } else {
               return reply.send(ensureDefaults(cachedResp));
@@ -463,28 +453,18 @@ export async function aiRoutes(app: FastifyInstance) {
           }
         }
       } catch (e) {
-        req.log.warn({ error: e, requestId: (req as any).requestId, message: 'food-log cache lookup failed' });
+        req.log.warn({ error: e, requestId: req.id, message: 'food-log cache lookup failed' });
       }
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': aiConfig.geminiApiKey
-        },
-        body: JSON.stringify({
-          contents: [{ parts }],
-          systemInstruction: {
-            parts: [{
-              text: `You are an expert nutritionist and food recognition AI. Your task is to analyze food images and text with EXTREME ACCURACY in calorie and macro estimation.
+      const foodSystemPrompt = `You are an expert nutritionist and food recognition AI. Your task is to analyze food images and text with EXTREME ACCURACY in calorie and macro estimation.
 
 CRITICAL CALORIE CALCULATION RULES:
-1. ⚠️ NEVER use generic or default values like 350 calories, 20g protein, 35g carbs, 12g fat.
-2. ⚠️ If you return 350/20/35/12, your response will be REJECTED and you will be asked to recalculate.
+1. NEVER use generic or default values like 350 calories, 20g protein, 35g carbs, 12g fat.
+2. If you return 350/20/35/12, your response will be REJECTED.
 3. Always calculate based on ACTUAL VISUAL ESTIMATION or SPECIFIC QUANTITY mentioned.
-2. For images: Estimate portion size visually using reference objects (deck of cards, tennis ball, thumb, plate size).
-3. For text: Parse exact quantities (grams, portions, pieces) and calculate accordingly.
-4. Use standard caloric densities per 100g:
+4. For images: Estimate portion size visually using reference objects (deck of cards, tennis ball, thumb, plate size).
+5. For text: Parse exact quantities (grams, portions, pieces) and calculate accordingly.
+6. Use standard caloric densities per 100g:
    - Lean proteins: 150-200 kcal/100g
    - Fatty proteins: 250-350 kcal/100g
    - Fried foods: base + 50-100 kcal/100g
@@ -492,147 +472,89 @@ CRITICAL CALORIE CALCULATION RULES:
    - Bread: 250-300 kcal/100g
    - Vegetables (raw): 20-50 kcal/100g
    - Vegetables (cooked with oil): 100-200 kcal/100g
-   - Oils: 900 kcal/100g (1 tbsp ≈ 120 kcal)
-5. Calculate macros: protein × 4 + carbs × 4 + fat × 9 ≈ total calories (±10% tolerance).
-6. Sum ALL components: main dish + sides + sauces + bread + drinks = TOTAL calories.
-7. Be REALISTIC: A typical restaurant meal is 600-1000 kcal, not 200-300 kcal.
+   - Oils: 900 kcal/100g (1 tbsp = 120 kcal)
+7. Calculate macros: protein x 4 + carbs x 4 + fat x 9 must approximate total calories (10% tolerance).
+8. Sum ALL components: main dish + sides + sauces + bread + drinks = TOTAL calories.
+9. Be REALISTIC: A typical restaurant meal is 600-1000 kcal, not 200-300 kcal.
 
-Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATION, not generic templates.`
-            }]
-          },
-          // enforce JSON schema
-          generationConfig: {
-            responseMimeType: 'application/json',
-            temperature: 0.3, // Lower temperature for more consistent, accurate calculations
-            responseSchema: {
-              type: 'object',
-              required: ['name', 'calories', 'macros', 'status', 'matchIndex', 'confidence', 'isFood', 'errorType', 'message'],
-              properties: {
-                name: { type: 'string' },
-                calories: {
-                  type: 'number',
-                  description: 'Total calories calculated based on visual portion estimation. MUST be realistic (typically 200-1200 for meals).'
-                },
-                macros: {
-                  type: 'object',
-                  required: ['protein', 'carbs', 'fat'],
-                  properties: {
-                    protein: {
-                      type: 'number',
-                      description: 'Protein in grams. Must satisfy: protein × 4 + carbs × 4 + fat × 9 ≈ calories'
-                    },
-                    carbs: {
-                      type: 'number',
-                      description: 'Carbohydrates in grams'
-                    },
-                    fat: {
-                      type: 'number',
-                      description: 'Fat in grams'
-                    }
-                  }
-                },
-                status: {
-                  type: 'string',
-                  enum: ['matched', 'extra'],
-                  description: 'matched if food matches a planned meal, extra otherwise'
-                },
-                matchIndex: {
-                  type: 'number',
-                  description: 'Index of matched meal (0-based) if status is matched, else -1'
-                },
-                confidence: {
-                  type: 'number',
-                  description: 'Confidence score 0-100 based on how clear the portion size is'
-                },
-                isFood: {
-                  type: 'boolean',
-                  description: 'true if image contains food, false otherwise'
-                },
-                errorType: {
-                  type: 'string',
-                  enum: ['ok', 'not_food', 'unrecognized_food'],
-                  description: 'ok if food identified, not_food if no food in image, unrecognized_food if too blurry'
-                },
-                message: {
-                  type: 'string',
-                  description: 'Description of what was identified and estimated portion (e.g. "200g grilled chicken with 1.5 cups rice, estimated 850 kcal")'
-                }
-              }
-            }
-          }
-        })
-      });
-      if (!res.ok) {
-        const txt = await res.text();
-        req.log.error({
-          requestId: (req as any).requestId,
-          status: res.status,
-          responseText: txt,
-          message: 'food-log proxy: non-200'
-        });
-        throw new Error(`Gemini food-log error ${res.status}: ${txt}`);
-      }
-      const data: any = await res.json();
-      // Find first parsable text part
-      const responseParts: any[] = data?.candidates?.[0]?.content?.parts || [];
-      // Improved JSON extraction
-      const findAllJson = (str: string) => {
-        const jsonPattern = /\{(?:[^{}]|([^{}]|)*)*\}/g;
-        // Simple brace matching might be enough for flat JSON or single object
-        // But for nested, a recursive parser or reliable regex is hard.
-        // Let's rely on finding the first '{' and the last '}'
-        const firstOpen = str.indexOf('{');
-        const lastClose = str.lastIndexOf('}');
-        if (firstOpen !== -1 && lastClose > firstOpen) {
-          return str.substring(firstOpen, lastClose + 1);
-        }
-        return null;
-      };
+Return ONLY valid JSON with these exact fields:
+{ "name": string, "calories": number, "macros": { "protein": number, "carbs": number, "fat": number }, "status": "matched"|"extra", "matchIndex": number, "confidence": number (0-100), "isFood": boolean, "errorType": "ok"|"not_food"|"unrecognized_food", "message": string }`;
 
       let parsed: any = null;
-      for (const p of responseParts) {
-        const candidateText = p?.text;
-        if (!candidateText) continue;
+      const foodRoute = aiRouter.route(imageBase64 ? 'food_log_image' : 'food_log_text');
+
+      // Try Claude if router sends to Anthropic (e.g. admin override)
+      if (foodRoute.provider === 'anthropic') {
         try {
-          let cleaned = candidateText.trim();
-          // Remove markdown blocks
-          cleaned = cleaned.replace(/```json/g, '').replace(/```/g, '');
-
-          // Try parsing the whole thing first
-          try {
-            parsed = JSON.parse(cleaned);
-          } catch {
-            // If failed, try extracting JSON substring
-            const extracted = findAllJson(cleaned);
-            if (extracted) {
-              parsed = JSON.parse(extracted);
-            }
+          let claudeText: string;
+          if (imageBase64) {
+            const imgMime = imageBase64.includes('png') ? 'image/png' : 'image/jpeg';
+            const imgData = imageBase64.split(',')[1] || imageBase64;
+            const userContext = text ? `User description: "${sanitizeUserInput(text)}"\n\n` : '';
+            claudeText = (await claudeService.analyzeImage({
+              prompt: userContext + prompt,
+              imageBase64: imgData,
+              imageMimeType: imgMime as any,
+              systemPrompt: foodSystemPrompt,
+              model: foodRoute.model,
+              maxTokens: foodRoute.maxOutputTokens || 1024,
+              temperature: 0.3,
+            })).text;
+          } else {
+            claudeText = (await claudeService.generateText({
+              prompt: prompt + '\n\nReturn ONLY valid JSON, no explanations.',
+              systemPrompt: foodSystemPrompt,
+              model: foodRoute.model,
+              maxTokens: foodRoute.maxOutputTokens || 1024,
+              temperature: 0.3,
+            })).text;
           }
-
-          if (parsed) break;
-        } catch (e) {
-          continue;
+          parsed = extractJsonFromResponse(claudeText);
+        } catch (e: any) {
+          logger.warn(`[ai/food-log] Claude failed, falling back to Gemini: ${e.message}`);
         }
       }
 
+      // Gemini (primary for food logs, or fallback from Claude)
+      const geminiModel = foodRoute.provider === 'gemini' ? foodRoute.model.replace('models/', '') : 'gemini-3-flash-preview';
       if (!parsed) {
-        req.log.warn({ responseParts: JSON.stringify(responseParts).slice(0, 1000), message: 'food-log proxy: could not parse candidate parts' });
-        // If Gemini refused (e.g. safety), it might return text. Treat as "Not Food" / Error.
-        const refusalText = responseParts.map(p => p.text).join(' ');
-        if (refusalText.toLowerCase().includes("cannot") || refusalText.toLowerCase().includes("safety")) {
-          return reply.send({
-            isFood: false,
-            errorType: 'not_food',
-            message: 'Image could not be processed (Safety/Policy).',
-            name: 'Invalid Image',
-            calories: 0,
-            macros: { protein: 0, carbs: 0, fat: 0 },
-            status: 'extra',
-            matchIndex: -1,
-            confidence: 0
-          });
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': aiConfig.geminiApiKey },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            systemInstruction: { parts: [{ text: foodSystemPrompt }] },
+            generationConfig: { responseMimeType: 'application/json', temperature: 0.3 }
+          })
+        });
+        if (!res.ok) {
+          const txt = await res.text();
+          req.log.error({ requestId: req.id, status: res.status, responseText: txt, message: 'food-log proxy: non-200' });
+          throw new Error(`Gemini food-log error ${res.status}: ${txt}`);
         }
-        throw new Error("JSON parsing failed");
+        const data: any = await res.json();
+        const responseParts: any[] = data?.candidates?.[0]?.content?.parts || [];
+
+        for (const p of responseParts) {
+          const candidateText = p?.text;
+          if (!candidateText) continue;
+          try {
+            parsed = extractJsonFromResponse(candidateText);
+            if (parsed) break;
+          } catch { continue; }
+        }
+
+        if (!parsed) {
+          const refusalText = responseParts.map((p: any) => p.text).join(' ');
+          if (refusalText.toLowerCase().includes("cannot") || refusalText.toLowerCase().includes("safety")) {
+            return reply.send({
+              isFood: false, errorType: 'not_food', message: 'Image could not be processed (Safety/Policy).',
+              name: 'Invalid Image', calories: 0, macros: { protein: 0, carbs: 0, fat: 0 },
+              status: 'extra', matchIndex: -1, confidence: 0
+            });
+          }
+          throw new Error("JSON parsing failed");
+        }
       }
 
       // CRITICAL: Check if AI returned default values (this check MUST happen BEFORE ensureDefaults)
@@ -645,16 +567,16 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
       if (isDefaultValues) {
         req.log.error({
-          requestId: (req as any).requestId,
+          requestId: req.id,
           parsed,
           message: '🚨🚨🚨 CRITICAL: AI returned default values (350/20/35/12)!'
         });
         req.log.error({
-          requestId: (req as any).requestId,
+          requestId: req.id,
           message: 'AI did NOT calculate - rejecting response!'
         });
         req.log.error({
-          requestId: (req as any).requestId,
+          requestId: req.id,
           response: JSON.stringify(parsed, null, 2),
           message: 'Full response'
         });
@@ -664,10 +586,24 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       // If we get here, AI provided non-default values - proceed with ensureDefaults
       const finalResp = ensureDefaults(parsed);
       req.log.info({
-        requestId: (req as any).requestId,
+        requestId: req.id,
         calories: finalResp.calories,
         macros: finalResp.macros,
         message: '✅ AI provided calculated values'
+      });
+
+      // Record for AI training (fire-and-forget)
+      const user = (req as AuthenticatedRequest).user;
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: imageBase64 ? 'food_log_image' : 'food_log_text',
+        apiProvider: foodRoute.provider,
+        modelVersion: foodRoute.model,
+        endpoint: '/ai/food-log',
+        requestPrompt: prompt,
+        requestContext: { hasImage: !!imageBase64, mealContext, lang },
+        responseRaw: finalResp,
+        responseParsed: { name: finalResp.name, calories: finalResp.calories, macros: finalResp.macros }
       });
 
       // 2) Cache store (best effort)
@@ -695,15 +631,16 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
           }
         }
       } catch (e) {
-        req.log.warn({ error: e, requestId: (req as any).requestId, message: 'food-log cache save failed' });
+        req.log.warn({ error: e, requestId: req.id, message: 'food-log cache save failed' });
       }
 
       return reply.send(finalResp);
-    } catch (e: any) {
-      req.log.error({ error: 'food-log proxy failed', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'food-log proxy failed', e, requestId: req.id });
 
       // If error is about default values, return a more helpful error
-      if (e.message?.includes('default values') || e.message?.includes('recalculation needed')) {
+      if (error.message?.includes('default values') || error.message?.includes('recalculation needed')) {
         return reply.status(500).send({
           name: 'Calculation Error',
           message: 'AI did not calculate calories properly. Please try again with a clearer photo or add a description.',
@@ -735,7 +672,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
 
   // 5. Chat (Coach)
   const chatSchema = z.object({
-    history: z.array(z.any()),
+    history: z.array(z.unknown()),
     context: z.enum(['nutrition', 'training']),
     lang: z.string().default('en'),
     systemPrompt: z.string().optional()
@@ -752,31 +689,32 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       }
       sys += ` Language: ${lang}. Keep responses concise.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': aiConfig.geminiApiKey
-        },
-        body: JSON.stringify({
-          contents: history,
-          systemInstruction: { parts: [{ text: sys }] }
-        })
+      const { text: replyText } = await ai.generateChat({
+        messages: history as any[],
+        systemPrompt: sys,
+        taskType: 'coach_chat',
       });
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        const isProduction = process.env.NODE_ENV === 'production';
-        throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
-      }
-      const data: any = await res.json();
-      const replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "Thinking...";
+      // Record for AI training (fire-and-forget)
+      const user = (req as AuthenticatedRequest).user;
+      const route = aiRouter.route('coach_chat');
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'coach_chat',
+        apiProvider: route.provider,
+        modelVersion: route.model,
+        endpoint: '/ai/chat/coach',
+        requestPrompt: history.map((h: any) => h.parts?.map((p: any) => p.text).join('')).join('\n'),
+        requestContext: { context, lang },
+        responseRaw: { reply: replyText || 'Thinking...' }
+      });
 
-      return reply.send({ reply: replyText });
-    } catch (e: any) {
+      return reply.send({ reply: replyText || 'Thinking...' });
+    } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
-      return reply.status(500).send({ error: isProduction ? 'Coach chat service unavailable' : (e.message || 'Coach chat failed') });
+      return reply.status(500).send({ error: isProduction ? 'Coach chat service unavailable' : (error.message || 'Coach chat failed') });
     }
   });
 
@@ -788,11 +726,12 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   });
 
   app.post('/ai/recipes/suggest', { preHandler: authGuard }, async (req, reply) => {
+    const startTime = Date.now();
     try {
       const { ingredients, imageBase64, lang } = recipeSchema.parse(req.body);
       const parts: any[] = [{ text: `Suggest 2 recipes based on these ingredients/fridge photo. Language: ${lang}. Return JSON array of recipes.` }];
 
-      if (ingredients) parts.push({ text: `Ingredients: ${ingredients}` });
+      if (ingredients) parts.push({ text: `Ingredients: ${sanitizeUserInput(ingredients)}` });
       if (imageBase64) {
         const cleanerBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
         parts.push({ inlineData: { mimeType: 'image/jpeg', data: cleanerBase64 } });
@@ -815,14 +754,33 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const data: any = await res.json();
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
 
-      // Clean JSON
-      let cleaned = text.trim().replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
-      const json = JSON.parse(cleaned);
+      // Use robust JSON extraction
+      const json = extractJsonFromResponse(text);
+      if (!json) {
+        req.log.error({ text: text.substring(0, 500), message: 'Failed to parse recipe suggestion response' });
+        throw new Error('Failed to parse AI response');
+      }
+
+      // Record for AI training (fire-and-forget)
+      const user = (req as AuthenticatedRequest).user;
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'recipe_suggestion',
+        apiProvider: 'gemini',
+        modelVersion: 'gemini-3-flash-preview',
+        endpoint: '/ai/recipes/suggest',
+        requestPrompt: `Ingredients: ${sanitizeUserInput(ingredients || '')}`,
+        requestContext: { hasImage: !!imageBase64, lang },
+        responseRaw: json,
+        latencyMs: Date.now() - startTime
+      }).catch(() => {});
+
       return reply.send(json);
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
-      return reply.status(500).send({ error: isProduction ? 'Recipe suggestion service unavailable' : (e.message || 'Recipe suggestion failed') });
+      return reply.status(500).send({ error: isProduction ? 'Recipe suggestion service unavailable' : (error.message || 'Recipe suggestion failed') });
     }
   });
 
@@ -835,31 +793,33 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   app.post('/ai/exercise/details', { preHandler: authGuard }, async (req, reply) => {
     try {
       const { name, lang } = exDetailSchema.parse(req.body);
-      const prompt = `Provide details for exercise: "${name}". Language: ${lang}. Return JSON: { instructions: string[], safetyTips: string[], targetMuscles: string[] }. Output JSON only.`;
+      const prompt = `Provide details for exercise: "${sanitizeUserInput(name)}". Language: ${lang}. Return JSON: { instructions: string[], safetyTips: string[], targetMuscles: string[] }. Output JSON only.`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': aiConfig.geminiApiKey
-        },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      const { data: parsed } = await ai.generateStructuredOutput({
+        prompt,
+        taskType: 'exercise_details',
       });
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        const isProduction = process.env.NODE_ENV === 'production';
-        throw new Error(isProduction ? `AI service error (${res.status})` : `Gemini error ${res.status}: ${errorText}`);
-      }
-      const data: any = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+      // Record for AI training (fire-and-forget)
+      const user = (req as AuthenticatedRequest).user;
+      const route = aiRouter.route('exercise_details');
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'exercise_details',
+        apiProvider: route.provider,
+        modelVersion: route.model,
+        endpoint: '/ai/exercise/details',
+        requestPrompt: prompt,
+        requestContext: { exerciseName: name, lang },
+        responseRaw: parsed
+      }).catch(() => {});
 
-      let cleaned = text.trim().replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
-      return reply.send(JSON.parse(cleaned));
-    } catch (e: any) {
+      return reply.send(parsed);
+    } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
-      return reply.status(500).send({ error: isProduction ? 'Exercise details service unavailable' : (e.message || 'Exercise details failed') });
+      return reply.status(500).send({ error: isProduction ? 'Exercise details service unavailable' : (error.message || 'Exercise details failed') });
     }
   });
 
@@ -869,7 +829,8 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
     referenceImage: z.string().optional() // Base64 image for image-to-image consistency
   });
 
-  app.post('/ai/generate/image', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/ai/generate/image', { preHandler: proGuard }, async (req, reply) => {
+    const startTime = Date.now();
     try {
       const { prompt, referenceImage } = imgProxySchema.parse(req.body);
 
@@ -882,8 +843,10 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       // Build parts array
       const parts: any[] = [];
 
+      // Sanitize user input first, then clean for image generation
+      const safePrompt = sanitizeUserInput(prompt);
       // Clean the prompt to prevent text overlays (translate to English, remove step numbers)
-      const cleanedPrompt = await ai.cleanImagePrompt(prompt);
+      const cleanedPrompt = await ai.cleanImagePrompt(safePrompt);
 
       // Enhanced prompt for image generation
       let enhancedPrompt = cleanedPrompt;
@@ -949,6 +912,21 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       if (imagePart?.inlineData?.data) {
         const mimeType = imagePart.inlineData.mimeType || 'image/png';
         req.log.info({ model, mimeType }, 'Image generated successfully');
+
+        // Record for AI training (fire-and-forget)
+        const user = (req as AuthenticatedRequest).user;
+        recordApiCall({
+          userId: user?.userId || 'anonymous',
+          callType: 'coach_image',
+          apiProvider: 'gemini',
+          modelVersion: model,
+          endpoint: '/ai/generate/image',
+          requestPrompt: safePrompt.substring(0, 500),
+          requestContext: { hasReferenceImage: !!referenceImage },
+          responseRaw: { hasImage: true, mimeType },
+          latencyMs: Date.now() - startTime
+        }).catch(() => {});
+
         return reply.send({ image: `data:${mimeType};base64,${imagePart.inlineData.data}` });
       }
 
@@ -961,12 +939,13 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       // No image returned - log for debugging
       req.log.warn({ model, responseKeys: Object.keys(data || {}), partsCount: responseParts.length }, 'No image in Gemini response');
       return reply.send({ error: 'No image returned from AI', raw: responseParts });
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
       req.log.error(e);
 
       // Always show rate limit errors to the user
-      const errorMessage = e.message || 'Image generation failed';
+      const errorMessage = error.message || 'Image generation failed';
       const isRateLimitError = errorMessage.includes('Rate limit') || errorMessage.includes('quota');
 
       return reply.status(500).send({
@@ -978,6 +957,7 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   // Menu photo analysis - extract multiple dishes from menu photo
   app.post('/ai/menu-analysis', { preHandler: authGuard }, async (req, reply) => {
     if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
+    const startTime = Date.now();
 
     const body = z.object({
       imageBase64: z.string(),
@@ -1089,29 +1069,45 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const data: any = await res.json();
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
 
-      let items: any[] = [];
-      try {
-        const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        items = JSON.parse(cleaned);
-      } catch (e) {
-        req.log.error({ error: 'Failed to parse menu analysis response', e, requestId: (req as any).requestId });
+      // Use robust JSON extraction
+      const parsed = extractJsonFromResponse(text);
+      if (!parsed) {
+        req.log.error({ error: 'Failed to parse menu analysis response', text: text.substring(0, 500), requestId: req.id });
         return reply.status(500).send({ error: 'Failed to parse AI response' });
       }
 
-      if (!Array.isArray(items)) {
+      const items = Array.isArray(parsed) ? parsed : [parsed];
+      if (items.length === 0) {
         return reply.status(500).send({ error: 'Invalid response format - expected array' });
       }
 
+      // Record for AI training (fire-and-forget)
+      const user = (req as AuthenticatedRequest).user;
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'menu_analysis',
+        apiProvider: 'gemini',
+        modelVersion: 'gemini-3-flash-preview',
+        endpoint: '/ai/menu-analysis',
+        requestPrompt: 'MENU PHOTO ANALYSIS - EXTRACT ALL DISHES',
+        requestContext: { hasImage: true, restaurantName, allergenCount: allergens.length, lang },
+        responseRaw: items,
+        responseParsed: { itemCount: items.length },
+        latencyMs: Date.now() - startTime
+      }).catch(() => {});
+
       return reply.send(items);
-    } catch (e: any) {
-      req.log.error({ error: 'menu-analysis failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'Menu analysis failed' });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'menu-analysis failed', e, requestId: req.id });
+      return reply.status(500).send({ error: error.message || 'Menu analysis failed' });
     }
   });
 
   // Generate step image (exercise or recipe step)
-  app.post('/ai/generate/step-image', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/ai/generate/step-image', { preHandler: proGuard }, async (req, reply) => {
     if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
+    const startTime = Date.now();
 
     const body = z.object({
       type: z.enum(['exercise', 'recipe']),
@@ -1124,9 +1120,11 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
     try {
       const { type, name, instruction, index, lang } = body;
 
+      const safeName = sanitizeUserInput(name);
+      const safeInstruction = sanitizeUserInput(instruction);
       const prompt = type === 'exercise'
-        ? `Fitness photography: ${name} exercise, step ${index || 1}. ${instruction}. Proper form, athletic model, gym setting, cinematic lighting, 8k resolution, professional quality.`
-        : `Food photography: ${name} recipe, step ${index || 1}. ${instruction}. Hyperrealistic, delicious, soft lighting, 8k resolution, professional quality.`;
+        ? `Fitness photography: ${safeName} exercise, step ${index || 1}. ${safeInstruction}. Proper form, athletic model, gym setting, cinematic lighting, 8k resolution, professional quality.`
+        : `Food photography: ${safeName} recipe, step ${index || 1}. ${safeInstruction}. Hyperrealistic, delicious, soft lighting, 8k resolution, professional quality.`;
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`, {
         method: 'POST',
@@ -1154,19 +1152,35 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const inline = parts.find((p: any) => p.inlineData?.data);
 
       if (inline?.inlineData?.data) {
+        // Record for AI training (fire-and-forget)
+        const user = (req as AuthenticatedRequest).user;
+        recordApiCall({
+          userId: user?.userId || 'anonymous',
+          callType: 'step_image_generation',
+          apiProvider: 'gemini',
+          modelVersion: 'gemini-2.5-flash-image',
+          endpoint: '/ai/generate/step-image',
+          requestPrompt: prompt,
+          requestContext: { type, name: safeName, index, lang },
+          responseRaw: { hasImage: true },
+          latencyMs: Date.now() - startTime
+        }).catch(() => {});
+
         return reply.send({ image: `data:image/png;base64,${inline.inlineData.data}` });
       }
 
       return reply.status(500).send({ error: 'No image returned from AI' });
-    } catch (e: any) {
-      req.log.error({ error: 'generate step-image failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'Generate step image failed' });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'generate step-image failed', e, requestId: req.id });
+      return reply.status(500).send({ error: error.message || 'Generate step image failed' });
     }
   });
 
   // Generate gamification asset
-  app.post('/ai/generate/gamification-asset', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/ai/generate/gamification-asset', { preHandler: proGuard }, async (req, reply) => {
     if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
+    const startTime = Date.now();
 
     const body = z.object({
       type: z.enum(['challenge', 'badge', 'item']),
@@ -1177,11 +1191,12 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
     try {
       const { type, context, lang } = body;
 
+      const safeContext = sanitizeUserInput(context);
       const prompt = type === 'challenge'
-        ? `Gaming challenge icon: ${context}. Bold, colorful, motivational, 8k resolution, professional game asset style.`
+        ? `Gaming challenge icon: ${safeContext}. Bold, colorful, motivational, 8k resolution, professional game asset style.`
         : type === 'badge'
-          ? `Achievement badge icon: ${context}. Metallic, shiny, prestigious, 8k resolution, professional game asset style.`
-          : `Game item icon: ${context}. Detailed, appealing, 8k resolution, professional game asset style.`;
+          ? `Achievement badge icon: ${safeContext}. Metallic, shiny, prestigious, 8k resolution, professional game asset style.`
+          : `Game item icon: ${safeContext}. Detailed, appealing, 8k resolution, professional game asset style.`;
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`, {
         method: 'POST',
@@ -1209,20 +1224,36 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const inline = parts.find((p: any) => p.inlineData?.data);
 
       if (inline?.inlineData?.data) {
+        // Record for AI training (fire-and-forget)
+        const user = (req as AuthenticatedRequest).user;
+        recordApiCall({
+          userId: user?.userId || 'anonymous',
+          callType: 'gamification_asset_generation',
+          apiProvider: 'gemini',
+          modelVersion: 'gemini-2.5-flash-image',
+          endpoint: '/ai/generate/gamification-asset',
+          requestPrompt: prompt,
+          requestContext: { type, context: safeContext, lang },
+          responseRaw: { hasImage: true },
+          latencyMs: Date.now() - startTime
+        }).catch(() => {});
+
         return reply.send({ image: `data:image/png;base64,${inline.inlineData.data}` });
       }
 
       return reply.status(500).send({ error: 'No image returned from AI' });
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'generate gamification-asset failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: isProduction ? 'Asset generation service unavailable' : (e.message || 'Generate gamification asset failed') });
+      req.log.error({ error: 'generate gamification-asset failed', e, requestId: req.id });
+      return reply.status(500).send({ error: isProduction ? 'Asset generation service unavailable' : (error.message || 'Generate gamification asset failed') });
     }
   });
 
   // Generate portion visual
-  app.post('/ai/generate/portion-visual', { preHandler: authGuard }, async (req, reply) => {
+  app.post('/ai/generate/portion-visual', { preHandler: proGuard }, async (req, reply) => {
     if (!aiConfig.geminiApiKey) return reply.status(500).send({ error: 'GEMINI_API_KEY missing' });
+    const startTime = Date.now();
 
     const body = z.object({
       mealName: z.string(),
@@ -1235,7 +1266,8 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const { mealName, calories, type, lang } = body;
 
       const sizeDesc = type === 'large' ? 'large portion' : 'small portion';
-      const prompt = `Food photography: ${mealName}, ${sizeDesc}, ${calories} calories. Visual portion size comparison, hyperrealistic, professional quality, 8k resolution, soft lighting.`;
+      const safeMealName = sanitizeUserInput(mealName);
+      const prompt = `Food photography: ${safeMealName}, ${sizeDesc}, ${calories} calories. Visual portion size comparison, hyperrealistic, professional quality, 8k resolution, soft lighting.`;
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`, {
         method: 'POST',
@@ -1263,14 +1295,29 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
       const inline = parts.find((p: any) => p.inlineData?.data);
 
       if (inline?.inlineData?.data) {
+        // Record for AI training (fire-and-forget)
+        const user = (req as AuthenticatedRequest).user;
+        recordApiCall({
+          userId: user?.userId || 'anonymous',
+          callType: 'portion_visual_generation',
+          apiProvider: 'gemini',
+          modelVersion: 'gemini-2.5-flash-image',
+          endpoint: '/ai/generate/portion-visual',
+          requestPrompt: prompt,
+          requestContext: { mealName: safeMealName, calories, type, lang },
+          responseRaw: { hasImage: true },
+          latencyMs: Date.now() - startTime
+        }).catch(() => {});
+
         return reply.send({ image: `data:image/png;base64,${inline.inlineData.data}` });
       }
 
       return reply.status(500).send({ error: 'No image returned from AI' });
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'generate portion-visual failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: isProduction ? 'Portion visual generation service unavailable' : (e.message || 'Generate portion visual failed') });
+      req.log.error({ error: 'generate portion-visual failed', e, requestId: req.id });
+      return reply.status(500).send({ error: isProduction ? 'Portion visual generation service unavailable' : (error.message || 'Generate portion visual failed') });
     }
   });
 
@@ -1280,85 +1327,98 @@ Your responses must be ACCURATE, REALISTIC, and based on ACTUAL PORTION ESTIMATI
   });
 
   app.post('/ai/verify-workout', { preHandler: authGuard }, async (req, reply) => {
+    const startTime = Date.now();
     const { imageBase64 } = verifyWorkoutSchema.parse(req.body);
 
     try {
       const mime = imageBase64.includes('png') ? 'image/png' : 'image/jpeg';
       const cleanBase64 = imageBase64.split(',')[1] || imageBase64;
 
-      const prompt = `
-      WORKOUT VERIFICATION TASK.
-      
-      Analyze this selfie/photo to determine if the person has JUST COMPLETED A WORKOUT.
-      
-      Look for these indicators:
-      - Gym equipment visible (dumbbells, machines, mats)
-      - Athletic wear (tank top, shorts, sneakers)
-      - Signs of exertion (sweat, flushed skin, tired expression)
-      - Gym environment (mirrors, lockers, outdoor trail)
-      - Post-workout context (water bottle, towel)
-      
-      Be LENIENT but not foolish:
-      - Accept: Sweaty person in gym, person on running trail, home workout with mat
-      - Reject: Person at desk, obvious old photo, professional photoshoot
-      
-      Return JSON:
-      {
-        "verified": boolean,
-        "confidence": number (0-100),
-        "notes": "string explaining what you see"
-      }
-      `;
+      const prompt = `WORKOUT VERIFICATION TASK.
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': aiConfig.geminiApiKey
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
+Analyze this selfie/photo to determine if the person has JUST COMPLETED A WORKOUT.
+
+Look for these indicators:
+- Gym equipment visible (dumbbells, machines, mats)
+- Athletic wear (tank top, shorts, sneakers)
+- Signs of exertion (sweat, flushed skin, tired expression)
+- Gym environment (mirrors, lockers, outdoor trail)
+- Post-workout context (water bottle, towel)
+
+Be LENIENT but not foolish:
+- Accept: Sweaty person in gym, person on running trail, home workout with mat
+- Reject: Person at desk, obvious old photo, professional photoshoot
+
+Return ONLY valid JSON:
+{ "verified": boolean, "confidence": number (0-100), "notes": "string explaining what you see" }`;
+
+      let parsed: any = null;
+      const route = aiRouter.route('workout_verification');
+
+      // Try Claude Opus first for better accuracy
+      if (route.provider === 'anthropic') {
+        try {
+          const { text } = await claudeService.analyzeImage({
+            prompt,
+            imageBase64: cleanBase64,
+            imageMimeType: mime as any,
+            model: route.model,
+            maxTokens: route.maxOutputTokens || 1024,
+            temperature: 0.3,
+          });
+          parsed = extractJsonFromResponse(text);
+        } catch (e: any) {
+          logger.warn(`[ai/verify-workout] Claude failed, falling back to Gemini: ${e.message}`);
+        }
+      }
+
+      // Gemini fallback
+      if (!parsed) {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': aiConfig.geminiApiKey },
+          body: JSON.stringify({
+            contents: [{ parts: [
               { inlineData: { mimeType: mime, data: cleanBase64 } },
               { text: prompt }
-            ]
-          }],
-          generationConfig: {
-            responseMimeType: 'application/json',
-            temperature: 0.3,
-            responseSchema: {
-              type: 'object',
-              required: ['verified', 'confidence', 'notes'],
-              properties: {
-                verified: { type: 'boolean' },
-                confidence: { type: 'number' },
-                notes: { type: 'string' }
-              }
-            }
-          }
-        })
-      });
-
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(`Gemini verify-workout error ${res.status}: ${txt}`);
+            ]}],
+            generationConfig: { responseMimeType: 'application/json', temperature: 0.3 }
+          })
+        });
+        if (!res.ok) throw new Error(`Gemini verify-workout error ${res.status}`);
+        const data: any = await res.json();
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+        parsed = extractJsonFromResponse(text);
       }
 
-      const data: any = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-      const parsed = JSON.parse(text);
+      const result = {
+        verified: parsed?.verified ?? false,
+        confidence: parsed?.confidence ?? 0,
+        notes: parsed?.notes ?? 'Could not analyze image'
+      };
 
-      return reply.send({
-        verified: parsed.verified ?? false,
-        confidence: parsed.confidence ?? 0,
-        notes: parsed.notes ?? 'Could not analyze image'
-      });
-    } catch (e: any) {
-      req.log.error({ error: 'verify-workout failed', e, requestId: (req as any).requestId });
+      // Record for AI training (fire-and-forget)
+      const user = (req as AuthenticatedRequest).user;
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'workout_verification',
+        apiProvider: route.provider,
+        modelVersion: route.model,
+        endpoint: '/ai/verify-workout',
+        requestPrompt: 'WORKOUT VERIFICATION TASK',
+        requestContext: { hasImage: true },
+        responseRaw: result,
+        latencyMs: Date.now() - startTime
+      }).catch(() => {});
+
+      return reply.send(result);
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'verify-workout failed', e, requestId: req.id });
       return reply.status(500).send({
         verified: false,
         confidence: 0,
-        notes: e.message || 'Verification failed'
+        notes: error.message || 'Verification failed'
       });
     }
   });
@@ -1407,42 +1467,51 @@ If the image is not a suitable body photo (clothed, face-only, unclear, or inapp
 Return ONLY valid JSON, no markdown.`;
 
     try {
-      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': aiConfig.geminiApiKey
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: prompt },
-              { inlineData: { mimeType: 'image/jpeg', data: imageBase64.replace(/^data:image\/\w+;base64,/, '') } }
-            ]
-          }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 1024 }
-        })
-      });
+      const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      let parsed: Record<string, any> | null = null;
+      const route = aiRouter.route('body_composition');
 
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(`Gemini Vision error ${res.status}: ${txt.substring(0, 200)}`);
+      // Try Claude Opus first for medical-grade accuracy
+      if (route.provider === 'anthropic') {
+        try {
+          const { text: rawText } = await claudeService.analyzeImage({
+            prompt,
+            imageBase64: cleanBase64,
+            imageMimeType: 'image/jpeg',
+            model: route.model,
+            maxTokens: route.maxOutputTokens || 1024,
+            temperature: 0.3,
+          });
+          parsed = extractJsonFromResponse(rawText) as Record<string, any> | null;
+        } catch (e: any) {
+          logger.warn(`[ai/body-composition] Claude failed, falling back to Gemini: ${e.message}`);
+        }
       }
 
-      const data: any = await res.json();
-      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-
-      // Clean JSON from markdown blocks
-      const cleanJson = rawText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
-
-      let parsed;
-      try {
-        parsed = JSON.parse(cleanJson);
-      } catch {
-        return reply.status(400).send({
-          error: true,
-          message: 'Could not parse analysis results'
+      // Gemini fallback
+      if (!parsed) {
+        const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': aiConfig.geminiApiKey },
+          body: JSON.stringify({
+            contents: [{ parts: [
+              { text: prompt },
+              { inlineData: { mimeType: 'image/jpeg', data: cleanBase64 } }
+            ]}],
+            generationConfig: { temperature: 0.3, maxOutputTokens: 1024 }
+          })
         });
+        if (!res.ok) {
+          const txt = await res.text();
+          throw new Error(`Gemini Vision error ${res.status}: ${txt.substring(0, 200)}`);
+        }
+        const data: any = await res.json();
+        const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+        parsed = extractJsonFromResponse(rawText) as Record<string, any> | null;
+      }
+
+      if (!parsed) {
+        return reply.status(400).send({ error: true, message: 'Could not parse analysis results' });
       }
 
       if (parsed.error) {
@@ -1450,22 +1519,33 @@ Return ONLY valid JSON, no markdown.`;
       }
 
       // Store analysis in database for tracking progress
-      const user = (req as any).user;
+      const user = (req as AuthenticatedRequest).user;
       await pool.query(
         `INSERT INTO body_composition_logs (user_id, estimated_bf, body_type, analysis, created_at)
          VALUES ($1, $2, $3, $4, NOW())`,
         [user.userId, parsed.estimatedBodyFatPercentage, parsed.bodyType, JSON.stringify(parsed)]
       ).catch(() => { /* Table may not exist, ignore */ });
 
-      return reply.send({
-        success: true,
-        ...parsed
+      // Record for AI training (fire-and-forget)
+      recordApiCall({
+        userId: user?.userId || 'anonymous',
+        callType: 'body_composition',
+        apiProvider: route.provider,
+        modelVersion: route.model,
+        endpoint: '/ai/analyze-body-composition',
+        requestPrompt: prompt,
+        requestContext: { gender, age, height, weight },
+        responseRaw: parsed,
+        responseParsed: { bodyFat: parsed.estimatedBodyFatPercentage, bodyType: parsed.bodyType }
       });
-    } catch (e: any) {
-      req.log.error({ error: 'analyze-body-composition failed', e, requestId: (req as any).requestId });
+
+      return reply.send({ success: true, ...parsed });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'analyze-body-composition failed', e, requestId: req.id });
       return reply.status(500).send({
         error: true,
-        message: e.message || 'Body composition analysis failed'
+        message: error.message || 'Body composition analysis failed'
       });
     }
   });

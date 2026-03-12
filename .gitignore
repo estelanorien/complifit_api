@@ -57,9 +57,15 @@ coverage/
 *.sqlite
 *.sqlite3
 *.db
+*.backup
 
 # PM2
 .pm2/
 ecosystem.config.js.bak
 
 node_modules
+
+# Credentials files
+youtube_credentials.txt
+*_credentials.txt
+*.credentials.txt

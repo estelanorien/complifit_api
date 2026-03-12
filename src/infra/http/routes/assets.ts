@@ -1,8 +1,47 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
 import { canonicalService } from '../../../application/services/canonicalService.js';
+import { AssetRepository } from '../../db/repositories/AssetRepository.js';
+import { UnifiedKey } from '../../../domain/UnifiedKey.js';
+import { AssetPromptService } from '../../../application/services/assetPromptService.js';
+import { MovementRepository } from '../../db/repositories/MovementRepository.js';
+import { UnifiedAssetService } from '../../../application/services/UnifiedAssetService.js';
+import { AssetStatus, AssetType } from '../types.js';
+
+// Types for this route
+interface AssetRow {
+  key: string;
+  value?: string | null;
+  asset_type?: string;
+  status?: string;
+  created_at?: Date;
+  buffer?: Buffer | null;
+  text_context?: string | null;
+  text_context_simple?: string | null;
+  prompt?: string | null;
+  mode?: string | null;
+  source?: string | null;
+  created_by?: string | null;
+  meta_created_at?: Date | null;
+  movement_id?: string | null;
+  translation_status?: string | null;
+  translation_error?: string | null;
+  video_status?: string | null;
+  video_error?: string | null;
+  step_index?: number | null;
+  persona?: string | null;
+}
+
+interface AssetMetadata {
+  text_context?: string | null;
+  text_context_simple?: string | null;
+}
+
+interface DbError extends Error {
+  code?: string;
+}
 
 const assetSchema = z.object({
   key: z.string(),
@@ -28,72 +67,47 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
 
-  app.get('/assets/:key', { preHandler: authGuard }, async (req, reply) => {
-    const { key } = req.params as any;
+  app.get<{ Params: { key: string } }>('/assets/:key', { preHandler: authGuard }, async (req, reply) => {
+    const { key } = req.params;
     try {
       const decodedKey = decodeURIComponent(key);
 
-      // 1. Search for asset
-      let { rows } = await pool.query(
-        `SELECT value, asset_type, status FROM cached_assets WHERE key=$1 LIMIT 1`,
-        [decodedKey]
-      );
+      // 1. Search for asset via Repository
+      const asset = await AssetRepository.findByKey(decodedKey);
 
-      // 1.1 Meta-Fallback: If _meta requested but not found, try to resolve to group-level meta
-      if (rows.length === 0 && decodedKey.endsWith('_meta')) {
-        // IMPROVED: Strip any known suffixes recursively
-        const groupMetaKey = decodedKey.split('_meta')[0]
-          .replace(/_(atlas|nova|mannequin)$/, '')
-          .replace(/_(main|step_\d+|video_.*)$/, '')
-          .replace(/_(atlas|nova|mannequin)$/, '') // Repeat to catch double suffixes
-          + '_meta';
-
-        if (groupMetaKey !== decodedKey) {
-          req.log.info(`[Proxy] Meta-Fallback: ${decodedKey} -> ${groupMetaKey}`);
-          const metaFallback = await pool.query(
-            `SELECT value, asset_type, status FROM cached_assets WHERE key=$1 LIMIT 1`,
-            [groupMetaKey]
-          );
-          if (metaFallback.rows.length > 0) rows = metaFallback.rows;
-        }
-      }
-
-      // 1.2 Return immediately if found and active
-      if (rows.length > 0) {
-        let { value, asset_type, status } = rows[0];
-
-        // Enrichment: If it's an image, try to fetch associated instructions for Admin UI
-        let textContext = '';
-        let textContextSimple = '';
-
-        if (asset_type === 'image' && (status === 'active' || status === 'auto' || status === 'generating')) {
-          const groupMetaKey = decodedKey
-            .replace(/_(atlas|nova|mannequin)_(main|step_\d+|video_.*)$/, '_meta')
-            .replace(/_(main|step_\d+|video_.*)$/, '_meta');
-
-          const metaRes = await pool.query(`SELECT value FROM cached_assets WHERE key=$1 LIMIT 1`, [groupMetaKey]);
-          if (metaRes.rows.length > 0) {
-            try {
-              const meta = JSON.parse(metaRes.rows[0].value);
-              const stepMatch = decodedKey.match(/step_(\d+)$/);
-              if (stepMatch) {
-                const stepNum = parseInt(stepMatch[1]);
-                const instrs = meta.instructions || meta.steps || [];
-                if (instrs[stepNum - 1]) {
-                  const instr = instrs[stepNum - 1];
-                  textContext = instr.detailed || instr.instruction || instr.description || '';
-                  textContextSimple = instr.simple || instr.cue || '';
-                }
-              } else {
-                textContext = meta.description || meta.recipeDescription || meta.textContext || '';
-                textContextSimple = meta.summary || meta.textContextSimple || '';
-              }
-            } catch (e) { /* ignore parse errors */ }
+      if (asset) {
+        let { buffer, asset_type, status, metadata, value: dbValue } = asset;
+        let value = dbValue || '';
+        
+        // CRITICAL FIX: If buffer exists (from asset_blob_storage), convert it to base64
+        // buffer.toString() without encoding returns binary data with null bytes
+        if (buffer && Buffer.isBuffer(buffer)) {
+          if (asset_type === 'image') {
+            // Convert binary PNG buffer to base64 string
+            value = buffer.toString('base64');
+          } else if (asset_type === 'json') {
+            // For JSON, convert buffer to UTF-8 string
+            value = buffer.toString('utf-8');
+          } else {
+            // For other types, use base64
+            value = buffer.toString('base64');
           }
         }
 
+        // If image, ensure base64 prefix
+        if (asset_type === 'image' && value && !value.startsWith('data:image')) {
+          value = `data:image/png;base64,${value}`;
+        }
+
+        // Return immediately if active/generating
         if (status === 'active' || status === 'auto' || status === 'generating') {
-          return { value, assetType: asset_type, status, textContext, textContextSimple };
+          return {
+            value,
+            assetType: asset_type,
+            status,
+            textContext: metadata?.text_context || '',
+            textContextSimple: metadata?.text_context_simple || ''
+          };
         }
       }
 
@@ -114,7 +128,6 @@ export async function assetsRoutes(app: FastifyInstance) {
 
         req.log.info(`[Proxy] Discovery Attempt: ${decodedKey} -> Slug: ${movementSlug}`);
 
-        // ULTRA FUZZY SEARCH
         const groupRes = await pool.query(
           `SELECT id, name FROM ${tableName} 
            WHERE name ILIKE $1 
@@ -130,34 +143,20 @@ export async function assetsRoutes(app: FastifyInstance) {
           const { id, name } = groupRes.rows[0];
           req.log.info(`[Proxy] Discovery SUCCESS: ${name} (${id})`);
 
-          // Trigger generation in background
-          const { BatchAssetService } = await import('../../../services/BatchAssetService.js');
-          BatchAssetService.generateGroupAssets({
-            groupId: id,
-            groupName: name,
-            groupType: isExercise ? 'exercise' : 'meal',
-            targetStatus: 'auto'
-          }).catch((err: any) => req.log.error(`[SmartProxy] Background gen failed for ${name}:`, err));
-
+          // Background generation is handled by Admin explicitly now
           const isMeta = decodedKey.endsWith('_meta');
           return {
             value: isMeta ? {} : '',
             assetType: isMeta ? 'json' : 'image',
             status: 'generating'
           };
-        } else {
-          req.log.warn(`[Proxy] Discovery FAILED: No match in ${tableName} for ${movementSlug}`);
         }
       }
 
       return reply.status(404).send({ error: 'Asset not found' });
-    } catch (error: any) {
-      req.log.error({
-        error: 'GET /assets/:key failed',
-        key,
-        message: error.message,
-        requestId: (req as any).requestId
-      });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'GET /assets/:key failed', key, message: error.message });
       return reply.status(500).send({ error: error.message || 'Internal server error' });
     }
   });
@@ -174,19 +173,18 @@ export async function assetsRoutes(app: FastifyInstance) {
 
       // Insert or update asset
       try {
-        await pool.query(
-          `INSERT INTO cached_assets(key, value, asset_type, status)
-           VALUES($1,$2,$3,$4)
-           ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, asset_type=EXCLUDED.asset_type, status=EXCLUDED.status`,
-          [body.key, body.value, body.type, body.status]
-        );
-      } catch (dbError: any) {
+        await AssetRepository.save(body.key, {
+          value: body.value,
+          status: body.status as AssetStatus,
+          type: body.type as AssetType
+        });
+      } catch (e: unknown) {
+        const dbError = e as DbError;
         req.log.error({
-          error: 'Failed to insert/update cached_assets',
+          error: 'Failed to insert/update cached_assets via Repository',
           key: body.key,
           dbError: dbError.message,
-          code: dbError.code,
-          requestId: (req as any).requestId
+          requestId: req.id
         });
 
         // Provide user-friendly error messages
@@ -209,13 +207,14 @@ export async function assetsRoutes(app: FastifyInstance) {
              ON CONFLICT (key) DO UPDATE SET prompt=EXCLUDED.prompt, mode=EXCLUDED.mode, source=EXCLUDED.source, created_by=EXCLUDED.created_by, movement_id=EXCLUDED.movement_id`,
             [body.key, prompt || null, mode || null, source || null, createdBy || null, movementId || null]
           );
-        } catch (metaError: any) {
+        } catch (e: unknown) {
+          const metaError = e as DbError;
           req.log.error({
             error: 'Failed to insert/update cached_asset_meta',
             key: body.key,
             metaError: metaError.message,
             code: metaError.code,
-            requestId: (req as any).requestId
+            requestId: req.id
           });
           // Don't fail the whole request if metadata insert fails
           // Asset was saved successfully
@@ -223,12 +222,13 @@ export async function assetsRoutes(app: FastifyInstance) {
       }
 
       return reply.send({ success: true });
-    } catch (error: any) {
+    } catch (e: unknown) {
+      const error = e as Error;
       req.log.error({
         error: 'POST /assets failed',
         message: error.message,
         stack: error.stack,
-        requestId: (req as any).requestId
+        requestId: req.id
       });
 
       // Handle Zod validation errors
@@ -246,7 +246,8 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   app.post('/assets/check', { preHandler: authGuard }, async (req) => {
-    const { keys } = req.body as any;
+    const body = req.body as { keys?: string[] };
+    const keys = body?.keys;
     if (!Array.isArray(keys) || keys.length === 0) return [];
     const { rows } = await pool.query(
       `SELECT key, status FROM cached_assets WHERE key = ANY($1) AND status IN ('active','auto','draft')`,
@@ -255,21 +256,91 @@ export async function assetsRoutes(app: FastifyInstance) {
     return rows;
   });
 
-  app.post('/assets/batch', { preHandler: authGuard }, async (req) => {
-    const { keys } = req.body as any;
-    if (!Array.isArray(keys) || keys.length === 0) return {};
-    const { rows } = await pool.query(
-      `SELECT key, value FROM cached_assets WHERE key = ANY($1) AND status IN ('active','auto','draft')`,
-      [keys]
-    );
-    const result: Record<string, string> = {};
-    rows.forEach(r => { result[r.key] = r.value; });
-    return result;
+  app.post('/assets/batch', { preHandler: authGuard }, async (req, reply) => {
+    const safeSendEmpty = () => { if (!reply.sent) try { reply.send({}); } catch { /* ignore */ } };
+    try {
+      const rawBody = req.body as { keys?: string[] } | string[];
+      const keys: string[] = (rawBody && typeof rawBody === 'object' && 'keys' in rawBody && Array.isArray(rawBody.keys))
+        ? rawBody.keys
+        : Array.isArray(rawBody)
+          ? rawBody
+          : [];
+      // Deduplicate and limit keys to prevent huge responses (each image ~2MB)
+      const uniqueKeys = [...new Set(keys.filter((k): k is string => typeof k === 'string'))];
+      const cappedKeys = uniqueKeys.slice(0, 15); // Max 15 images (~30MB max response)
+      if (cappedKeys.length === 0) {
+        return safeSendEmpty();
+      }
+
+      const client = await pool.connect();
+      let rows: AssetRow[] = [];
+      try {
+        await client.query(`SET statement_timeout = '60000'`);
+        // Primary query: no meta join so we always return results when keys exist (no schema dependency)
+        const res = await client.query<AssetRow>(
+          `SELECT a.key, a.value, a.asset_type, a.status, b.data as buffer
+           FROM cached_assets a
+           LEFT JOIN asset_blob_storage b ON a.key = b.key
+           WHERE a.key = ANY($1) AND a.status IN ('active','auto','draft','generating')
+           LIMIT 100`,
+          [cappedKeys]
+        );
+        rows = res.rows || [];
+        if (rows.length > 0) {
+          try {
+            const metaRes = await client.query<{ key: string; text_context?: string; text_context_simple?: string }>(
+              `SELECT key, text_context, text_context_simple FROM cached_asset_meta WHERE key = ANY($1)`,
+              [rows.map(r => r.key)]
+            );
+            const metaByKey = new Map((metaRes.rows || []).map(m => [m.key, m]));
+            rows = rows.map(r => {
+              const meta = metaByKey.get(r.key);
+              return { ...r, text_context: meta?.text_context ?? null, text_context_simple: meta?.text_context_simple ?? null };
+            });
+          } catch { /* optional */ }
+        }
+      } catch (e: unknown) {
+        req.log?.warn({ err: e }, '[assets/batch] Query failed');
+        rows = [];
+      } finally {
+        client.release();
+      }
+
+      const result: Record<string, { value: string; assetType: string; status: string | undefined; textContext: string; textContextSimple: string }> = {};
+      for (const r of rows) {
+        try {
+          if (!r || r.key == null) continue;
+          let value: string = typeof r.value === 'string' ? r.value : '';
+          if (r.buffer && Buffer.isBuffer(r.buffer)) {
+            if (r.asset_type === 'image') value = r.buffer.toString('base64');
+            else if (r.asset_type === 'json') value = r.buffer.toString('utf-8');
+            else value = r.buffer.toString('base64');
+          }
+          if (r.asset_type === 'image' && value && !value.startsWith('data:image')) {
+            value = `data:image/png;base64,${value}`;
+          }
+          result[r.key] = {
+            value,
+            assetType: r.asset_type || 'image',
+            status: r.status,
+            textContext: r.text_context || '',
+            textContextSimple: r.text_context_simple || ''
+          };
+        } catch (e: unknown) {
+          req.log?.warn({ key: r?.key, err: e }, '[assets/batch] Skip row');
+        }
+      }
+      if (!reply.sent) reply.send(result);
+    } catch (e: unknown) {
+      req.log?.warn({ err: e }, '[assets/batch] Error, returning empty');
+      safeSendEmpty();
+    }
   });
 
   app.post('/assets/scan', { preHandler: authGuard }, async (req) => {
-    const { prefix } = req.body as any;
-    const { rows } = await pool.query(
+    const body = req.body as { prefix?: string };
+    const prefix = body?.prefix || '';
+    const { rows } = await pool.query<{ key: string }>(
       `SELECT key FROM cached_assets WHERE key ILIKE $1 LIMIT 100`,
       [`${prefix}%`]
     );
@@ -318,9 +389,11 @@ export async function assetsRoutes(app: FastifyInstance) {
   });
 
   app.post('/assets/with-fallback', { preHandler: authGuard }, async (req, reply) => {
-    const { baseKey, specificThemeId } = req.body as any;
+    const body = req.body as { baseKey?: string; specificThemeId?: string };
+    const baseKey = body?.baseKey || '';
+    const specificThemeId = body?.specificThemeId;
     const keysToTry = specificThemeId ? [`${baseKey}_theme_${specificThemeId}`, baseKey] : [baseKey];
-    const { rows } = await pool.query(
+    const { rows } = await pool.query<{ key: string; value: string; asset_type: string }>(
       `SELECT key, value, asset_type FROM cached_assets WHERE key = ANY($1) AND status IN ('active','auto') ORDER BY status DESC LIMIT 1`,
       [keysToTry]
     );
@@ -335,8 +408,8 @@ export async function assetsRoutes(app: FastifyInstance) {
     return reply.send(value);
   });
 
-  app.get('/assets/meta/:key', { preHandler: authGuard }, async (req, reply) => {
-    const { key } = req.params as any;
+  app.get<{ Params: { key: string } }>('/assets/meta/:key', { preHandler: authGuard }, async (req, reply) => {
+    const { key } = req.params;
     const { rows } = await pool.query(
       `SELECT prompt, mode, source, created_by, created_at, movement_id FROM cached_asset_meta WHERE key = $1`,
       [key]
@@ -345,53 +418,190 @@ export async function assetsRoutes(app: FastifyInstance) {
     return rows[0];
   });
 
+  // CORS is handled by @fastify/cors plugin - no manual headers needed
+
   app.post('/assets/by-movement', { preHandler: authGuard }, async (req, reply) => {
-    const body = z.object({ movementId: z.string(), limit: z.number().min(1).max(50).optional() }).parse(req.body || {});
-    const limit = body.limit || 20;
+    req.log.info('[by-movement] handler entered');
 
-    let movementId = body.movementId;
-
-    // Resolve alias to canonical ID if possible
+    let body: { movementId: string; limit?: number };
     try {
-      const isMeal = movementId.startsWith('meal_');
-      const isExercise = movementId.startsWith('movement_');
-      const type = isMeal ? 'meal' : (isExercise ? 'exercise' : 'meal'); // Default to meal if uncertain
-
-      const cleanName = movementId.replace(/^(meal_|movement_)/, '').replace(/_/g, ' ');
-      const canonical = await canonicalService.getCanonicalId(cleanName, type);
-      if (canonical && canonical.canonicalId) {
-        movementId = canonical.canonicalId;
+      body = z.object({ movementId: z.string().min(1), limit: z.number().min(1).max(50).optional() }).parse(req.body || {});
+    } catch (e: unknown) {
+      const parseErr = e as Error;
+      req.log?.warn({ err: parseErr }, '[by-movement] Validation failed');
+      if (!reply.sent) {
+        // CORS handled by plugin
+        reply.header('Content-Type', 'application/json');
+        return reply.status(400).send({ error: parseErr?.message || 'Invalid request: movementId required' });
       }
-    } catch (e) {
-      req.log.warn(`[Assets] Alias resolution failed for ${movementId}, falling back to literal key`);
+      return;
     }
 
-    const { rows } = await pool.query(
-      `SELECT a.key, a.value, a.asset_type, a.status, a.created_at,
-               m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id,
-               m.translation_status, m.translation_error,
-               m.video_status, m.video_error
-        FROM cached_assets a
-        LEFT JOIN cached_asset_meta m ON m.key = a.key
-        WHERE m.movement_id = $1 OR a.key LIKE $2
-        ORDER BY a.created_at DESC
-        LIMIT $3`,
-      [movementId, `${movementId}%`, limit]
-    );
-    // Ensure image values have proper data:image prefix for frontend display
-    const processedRows = rows.map((row: any) => {
-      if (row.asset_type === 'image' && row.value && typeof row.value === 'string') {
-        // If value doesn't have data:image prefix, add it
-        if (!row.value.startsWith('data:image')) {
-          // Check if it's base64 (starts with valid base64 chars)
-          if (/^[A-Za-z0-9+/=]+$/.test(row.value)) {
-            row.value = `data:image/png;base64,${row.value}`;
+    try {
+      // Cap limit aggressively to avoid Cloud Run response-size issues
+      const requestedLimit = body?.limit ?? 40;
+      const limit = Math.min(requestedLimit, 40);
+      const originalMovementId = body.movementId;
+      req.log.info(`[by-movement] Query for movementId: ${originalMovementId}, limit: ${limit}`);
+
+      // Use a dedicated client with longer timeout to avoid "Query read timeout" when syncing many images
+      const client = await pool.connect();
+      let rows: AssetRow[];
+      const queryParams = [originalMovementId, `ex:${originalMovementId}:%`, `meal:${originalMovementId}:%`, `ex_${originalMovementId}%`, `meal_${originalMovementId}%`, `${originalMovementId}%`, limit];
+      const fullQuery = `SELECT a.key,
+                   CASE
+                     WHEN a.asset_type = 'image' THEN COALESCE(ENCODE(b.data, 'base64'), a.value)
+                     ELSE a.value
+                   END as value,
+                   a.asset_type, a.status, a.created_at,
+                   m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id,
+                   m.translation_status, m.translation_error,
+                   m.video_status, m.video_error,
+                   m.step_index, m.persona,
+                   m.text_context, m.text_context_simple
+            FROM cached_assets a
+            LEFT JOIN cached_asset_meta m ON m.key = a.key
+            LEFT JOIN asset_blob_storage b ON b.key = a.key
+            WHERE m.movement_id = $1 
+               OR a.key LIKE $2 
+               OR a.key LIKE $3
+               OR a.key LIKE $4 
+               OR a.key LIKE $5
+               OR a.key LIKE $6
+            ORDER BY a.created_at DESC
+            LIMIT $7`;
+      const fallbackQuery = `SELECT a.key, 
+                   CASE 
+                     WHEN a.asset_type = 'image' THEN COALESCE(ENCODE(b.data, 'base64'), a.value)
+                     ELSE a.value
+                   END as value,
+                   a.asset_type, a.status, a.created_at,
+                   m.prompt, m.mode, m.source, m.created_by, m.created_at AS meta_created_at, m.movement_id
+            FROM cached_assets a
+            LEFT JOIN cached_asset_meta m ON m.key = a.key
+            LEFT JOIN asset_blob_storage b ON b.key = a.key
+            WHERE m.movement_id = $1 
+               OR a.key LIKE $2 
+               OR a.key LIKE $3
+               OR a.key LIKE $4 
+               OR a.key LIKE $5
+               OR a.key LIKE $6
+            ORDER BY a.created_at DESC
+            LIMIT $7`;
+      // No meta table: match by key pattern only (works when cached_asset_meta missing or broken)
+      const minimalQuery = `SELECT a.key,
+            CASE WHEN a.asset_type = 'image' THEN COALESCE(ENCODE(b.data, 'base64'), a.value) ELSE a.value END as value,
+            a.asset_type, a.status, a.created_at
+            FROM cached_assets a
+            LEFT JOIN asset_blob_storage b ON b.key = a.key
+            WHERE a.key LIKE $1 OR a.key LIKE $2 OR a.key LIKE $3 OR a.key LIKE $4 OR a.key LIKE $5
+            ORDER BY a.created_at DESC
+            LIMIT $6`;
+      const minimalParams = [`ex:${originalMovementId}:%`, `meal:${originalMovementId}:%`, `ex_${originalMovementId}%`, `meal_${originalMovementId}%`, `${originalMovementId}%`, limit];
+      const normalizeRow = (r: Partial<AssetRow>): AssetRow => ({
+        key: r.key || '',
+        value: r.value ?? null,
+        asset_type: r.asset_type,
+        status: r.status,
+        created_at: r.created_at,
+        prompt: r.prompt ?? null,
+        mode: r.mode ?? null,
+        source: r.source ?? null,
+        created_by: r.created_by ?? null,
+        meta_created_at: r.meta_created_at ?? null,
+        movement_id: r.movement_id ?? originalMovementId,
+        translation_status: r.translation_status ?? null,
+        translation_error: r.translation_error ?? null,
+        video_status: r.video_status ?? null,
+        video_error: r.video_error ?? null,
+        step_index: r.step_index ?? null,
+        persona: r.persona ?? null,
+        text_context: r.text_context ?? null,
+        text_context_simple: r.text_context_simple ?? null
+      });
+      try {
+        await client.query(`SET statement_timeout = '120000'`);
+        // Try fullQuery first (has all meta columns including text_context)
+        try {
+          const fullRes = await client.query<AssetRow>(fullQuery, queryParams);
+          rows = (fullRes.rows || []).map(r => normalizeRow(r));
+          req.log.info(`[by-movement] fullQuery succeeded: ${rows.length} rows`);
+        } catch (e: unknown) {
+          const fullErr = e as Error;
+          req.log.warn({ err: fullErr.message }, '[by-movement] fullQuery failed, trying fallback');
+          // Try fallbackQuery (fewer meta columns, no text_context/step_index/persona)
+          try {
+            const fbRes = await client.query<AssetRow>(fallbackQuery, queryParams);
+            rows = (fbRes.rows || []).map(r => normalizeRow(r));
+            req.log.info(`[by-movement] fallbackQuery succeeded: ${rows.length} rows`);
+          } catch (e2: unknown) {
+            const fbErr = e2 as Error;
+            req.log.warn({ err: fbErr.message }, '[by-movement] fallbackQuery failed, using minimal');
+            // Final fallback: minimalQuery (no meta join at all)
+            const minRes = await client.query<AssetRow>(minimalQuery, minimalParams);
+            rows = (minRes.rows || []).map(r => normalizeRow(r));
+            req.log.info(`[by-movement] minimalQuery: ${rows.length} rows`);
           }
         }
+      } catch (e: unknown) {
+        const outerErr = e as DbError;
+        req.log.error({ err: outerErr, message: outerErr?.message, code: outerErr?.code }, '[by-movement] All queries failed');
+        // Return error info instead of empty array so we can debug
+        client.release();
+        return reply.status(500).send({
+          error: 'Query execution failed',
+          details: outerErr?.message,
+          code: outerErr?.code
+        });
+      } finally {
+        client.release();
       }
-      return row;
-    });
-    return processedRows;
+
+      req.log.info(`[by-movement] Found ${rows.length} rows for ${originalMovementId}`);
+      const processedRows: AssetRow[] = [];
+      for (const row of rows) {
+        try {
+          const out: AssetRow = { ...row };
+          // IMPORTANT: Don't include full image data in by-movement response to avoid huge payloads
+          // Images are fetched separately via /assets/batch with specific keys
+          if (out.asset_type === 'image') {
+            // Just indicate if the image exists, don't send the actual data
+            const hasValue = out.value != null && (
+              (typeof out.value === 'string' && out.value.length > 100) ||
+              Buffer.isBuffer(out.value)
+            );
+            out.value = hasValue ? 'HAS_IMAGE' : null;
+          }
+          if (out.text_context === undefined) out.text_context = null;
+          if (out.text_context_simple === undefined) out.text_context_simple = null;
+          processedRows.push(out);
+        } catch (e: unknown) {
+          req.log?.warn({ key: row?.key, err: e }, '[by-movement] Skip row');
+        }
+      }
+      if (!reply.sent) {
+        try {
+          return reply.send(processedRows);
+        } catch (e: unknown) {
+          req.log?.warn({ err: e }, '[by-movement] Send failed, returning empty');
+          if (!reply.sent) return reply.send([]);
+        }
+      }
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ err: e, stack: error?.stack }, '[by-movement] Error');
+      if (!reply.sent) {
+        try {
+          // CORS handled by plugin
+          reply.header('Content-Type', 'application/json');
+          // Return error details for debugging
+          return reply.status(500).send({
+            error: error?.message || 'Unknown error',
+            stack: process.env.NODE_ENV !== 'production' ? error?.stack : undefined
+          });
+        } catch { /* ignore */ }
+      }
+    }
   });
 }
 

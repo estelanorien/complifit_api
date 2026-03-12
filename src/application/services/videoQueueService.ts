@@ -2,6 +2,7 @@
 import { pool } from '../../infra/db/pool.js';
 import { logger } from '../../infra/logger.js';
 import { AiService } from './aiService.js';
+import { videoOrchestrator, Phase2VideoResult } from './VideoOrchestrator.js';
 
 const aiService = new AiService();
 
@@ -31,16 +32,23 @@ export class VideoQueueService {
      * Enqueue a video generation job.
      * @param assetKey - The key of the asset (usually exercise or meal JSON)
      * @param persona - 'atlas', 'nova', or null for meals
+     * @param mode - 'phase1' (single clip) or 'phase2' (45-60s multi-angle)
+     * @param languages - Languages for Phase 2 TTS (default: ['en'])
      */
-    async enqueue(assetKey: string, persona: string | null = null): Promise<string> {
+    async enqueue(
+        assetKey: string,
+        persona: string | null = null,
+        mode: 'phase1' | 'phase2' = 'phase1',
+        languages: string[] = ['en']
+    ): Promise<string> {
         try {
             const { rows } = await pool.query(
-                `INSERT INTO video_jobs(asset_key, persona, status)
-                 VALUES($1, $2, 'pending')
+                `INSERT INTO video_jobs(asset_key, persona, status, mode)
+                 VALUES($1, $2, 'pending', $3)
                  RETURNING id`,
-                [assetKey, persona]
+                [assetKey, persona, mode]
             );
-            logger.info(`[VideoQueue] Job created for ${assetKey} (${persona || 'meal'})`);
+            logger.info(`[VideoQueue] Job created for ${assetKey} (${persona || 'meal'}, mode=${mode})`);
 
             // Set meta status
             await pool.query(
@@ -66,10 +74,10 @@ export class VideoQueueService {
             try {
                 await client.query('BEGIN');
 
-                // 1. Lock Job
+                // 1. Lock Job (include mode column)
                 const { rows } = await client.query(`
-                    SELECT id, asset_key, persona 
-                    FROM video_jobs 
+                    SELECT id, asset_key, persona, COALESCE(mode, 'phase1') as mode
+                    FROM video_jobs
                     WHERE status = 'pending'
                     ORDER BY created_at ASC
                     LIMIT 1
@@ -82,7 +90,7 @@ export class VideoQueueService {
                 }
 
                 const job = rows[0];
-                logger.info(`[VideoQueue] Processing job ${job.id} (${job.asset_key})`);
+                logger.info(`[VideoQueue] Processing job ${job.id} (${job.asset_key}, mode=${job.mode})`);
 
                 // Mark Processing
                 await client.query(
@@ -97,34 +105,13 @@ export class VideoQueueService {
 
                 await client.query('COMMIT');
 
-                // 2. Execute Video Generation
+                // 2. Execute Video Generation (route by mode)
                 try {
-                    const videoUrl = await this.executeVideoGeneration(job.asset_key, job.persona);
-
-                    // Success
-                    await pool.query(
-                        `UPDATE video_jobs SET status = 'completed', result_url = $1, updated_at = NOW() WHERE id = $2`,
-                        [videoUrl, job.id]
-                    );
-
-                    // We might want to STORE the video URL in `cached_assets` as a NEW asset (e.g. `..._video_atlas`)?
-                    // Or just keep it in `video_jobs`?
-                    // Better: Store as a proper asset.
-                    const videoKey = `${job.asset_key}_video` + (job.persona ? `_${job.persona}` : '');
-
-                    await pool.query(
-                        `INSERT INTO cached_assets(key, value, asset_type, status)
-                          VALUES($1, $2, 'video', 'active')
-                          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-                        [videoKey, videoUrl]
-                    );
-
-                    await pool.query(
-                        `UPDATE cached_asset_meta SET video_status = 'completed' WHERE key = $1`,
-                        [job.asset_key]
-                    );
-                    logger.info(`[VideoQueue] Job ${job.id} COMPLETED. Video saved to ${videoKey}`);
-
+                    if (job.mode === 'phase2') {
+                        await this.executePhase2Generation(job.id, job.asset_key, job.persona);
+                    } else {
+                        await this.executePhase1Generation(job.id, job.asset_key, job.persona);
+                    }
                 } catch (err: any) {
                     logger.error(`[VideoQueue] Job ${job.id} FAILED`, err);
 
@@ -148,6 +135,81 @@ export class VideoQueueService {
         } finally {
             this.processing = false;
         }
+    }
+
+    /**
+     * Phase 1: Single clip via AI service (legacy flow)
+     */
+    private async executePhase1Generation(jobId: string, assetKey: string, persona: string | null): Promise<void> {
+        const videoUrl = await this.executeVideoGeneration(assetKey, persona);
+
+        // Success
+        await pool.query(
+            `UPDATE video_jobs SET status = 'completed', result_url = $1, updated_at = NOW() WHERE id = $2`,
+            [videoUrl, jobId]
+        );
+
+        const videoKey = `${assetKey}_video` + (persona ? `_${persona}` : '');
+
+        await pool.query(
+            `INSERT INTO cached_assets(key, value, asset_type, status)
+              VALUES($1, $2, 'video', 'active')
+              ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+            [videoKey, videoUrl]
+        );
+
+        await pool.query(
+            `UPDATE cached_asset_meta SET video_status = 'completed' WHERE key = $1`,
+            [assetKey]
+        );
+        logger.info(`[VideoQueue] Phase 1 job ${jobId} COMPLETED. Video saved to ${videoKey}`);
+    }
+
+    /**
+     * Phase 2: Multi-angle 45-60s video via VideoOrchestrator
+     */
+    private async executePhase2Generation(jobId: string, assetKey: string, persona: string | null): Promise<void> {
+        const coachId = (persona === 'atlas' || persona === 'nova') ? persona : 'atlas';
+
+        // Fetch languages from job metadata or default to English
+        const { rows: jobRows } = await pool.query(
+            `SELECT transition_type, music_uri FROM video_jobs WHERE id = $1`,
+            [jobId]
+        );
+        const jobMeta = jobRows[0] || {};
+
+        const result: Phase2VideoResult = await videoOrchestrator.executePhase2({
+            assetKey,
+            coachId,
+            languages: ['en'], // Default to English; extend when multi-language queue is implemented
+            options: {
+                transitionType: jobMeta.transition_type || 'cut',
+                musicUri: jobMeta.music_uri || undefined
+            }
+        });
+
+        if (!result.success) {
+            throw new Error(`Phase 2 pipeline failed: ${result.errors?.join(', ') || 'Unknown error'}`);
+        }
+
+        // Store the first localized video URL as the result
+        const primaryVideo = result.localizedVideos[0];
+        const resultUrl = primaryVideo?.gcsPath || null;
+
+        await pool.query(
+            `UPDATE video_jobs SET status = 'completed', result_url = $1, updated_at = NOW() WHERE id = $2`,
+            [resultUrl, jobId]
+        );
+
+        await pool.query(
+            `UPDATE cached_asset_meta SET video_status = 'completed' WHERE key = $1`,
+            [assetKey]
+        );
+
+        logger.info(`[VideoQueue] Phase 2 job ${jobId} COMPLETED`, {
+            videoCount: result.localizedVideos.length,
+            gcsPath: resultUrl
+        });
     }
 
     private async executeVideoGeneration(assetKey: string, persona: string | null): Promise<string> {
@@ -178,14 +240,6 @@ export class VideoQueueService {
         }
 
         // 3. Call AI Service (Veo)
-        // Note: AI Service needs a `generateVideo` method. 
-        // If it doesn't exist, we'll mock it or add it.
-        // Assuming we added it or will add it.
-
-        // For now, let's use the method we saw in `admin.ts`? 
-        // `admin.ts` called `fetch(genEndpoint)` directly for Veo.
-        // We really should put that in `AiService`.
-
         return await aiService.generateVideo({ prompt });
     }
 }

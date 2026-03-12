@@ -1,17 +1,17 @@
-import { GenerativeModel, GoogleGenerativeAI } from '@google/generative-ai';
-import { env } from '../../config/env.js';
+import { AiService } from './aiService.js';
+import { claudeService } from './ClaudeService.js';
+import { aiRouter } from './AIRouter.js';
 import { logger } from '../../infra/logger.js';
 
-const genAI = new GoogleGenerativeAI(env.geminiApiKey);
+const ai = new AiService();
 
 export class CustomProgramService {
   /**
-   * Extract text from an uploaded image using Gemini Vision
+   * Extract text from an uploaded image using vision AI.
+   * Routes to Claude Sonnet (identity_verification tier) or Gemini.
    */
   static async extractTextFromImage(imageBase64: string, mimeType: string): Promise<string> {
     try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
-
       const prompt = `You are an OCR assistant. Extract ALL text from this image. The image may contain:
 - A training/workout program (exercises, sets, reps, notes)
 - A meal/nutrition plan (meals, ingredients, calories, macros)
@@ -20,18 +20,27 @@ export class CustomProgramService {
 Please extract the text EXACTLY as it appears, preserving structure, line breaks, and formatting.
 Do not add any commentary or interpretation. Just return the raw text.`;
 
-      const result = await model.generateContent([
-        prompt,
-        {
-          inlineData: {
-            data: imageBase64,
-            mimeType
-          }
-        }
-      ]);
+      const route = aiRouter.route('custom_program_parse');
 
-      const response = await result.response;
-      return response.text();
+      // Try Claude first for better OCR accuracy
+      if (route.provider === 'anthropic') {
+        try {
+          const { text } = await claudeService.analyzeImage({
+            prompt,
+            imageBase64,
+            imageMimeType: mimeType as any,
+            model: route.model,
+            maxTokens: route.maxOutputTokens || 4096,
+          });
+          return text;
+        } catch (e: any) {
+          logger.warn(`[CustomProgram] Claude OCR failed, falling back to Gemini: ${e.message}`);
+        }
+      }
+
+      // Gemini fallback
+      const { text } = await ai.generateText({ prompt: prompt + '\n\n[Image attached - extract all visible text]' });
+      return text;
     } catch (error) {
       logger.error('OCR extraction failed', error as Error);
       throw new Error('Failed to extract text from image');
@@ -39,12 +48,11 @@ Do not add any commentary or interpretation. Just return the raw text.`;
   }
 
   /**
-   * Convert approved text into a structured TrainingProgram
+   * Convert approved text into a structured TrainingProgram.
+   * Routes to Claude Sonnet for structured extraction.
    */
   static async parseTrainingProgram(text: string, userProfile: any): Promise<any> {
     try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
-
       const prompt = `You are a fitness AI. Convert this training plan text into a structured JSON format.
 
 USER PROFILE:
@@ -81,14 +89,13 @@ IMPORTANT:
 - If days are not explicitly named, use "Day 1", "Day 2", etc.
 - If it's a rotation (Push/Pull/Legs), use those as day names
 - Infer focus areas from exercises if not stated
-- Keep all original exercise names and notes
-- Return ONLY valid JSON, no markdown or explanation`;
+- Keep all original exercise names and notes`;
 
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const jsonText = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
-      return JSON.parse(jsonText);
+      const { data } = await ai.generateStructuredOutput({
+        prompt,
+        taskType: 'custom_program_parse',
+      });
+      return data;
     } catch (error) {
       logger.error('Training program parsing failed', error as Error);
       throw new Error('Failed to parse training program');
@@ -96,12 +103,11 @@ IMPORTANT:
   }
 
   /**
-   * Convert approved text into a structured WeeklyMealPlan
+   * Convert approved text into a structured WeeklyMealPlan.
+   * Routes to Claude Sonnet for structured extraction.
    */
   static async parseNutritionPlan(text: string, userProfile: any): Promise<any> {
     try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
-
       const prompt = `You are a nutrition AI. Convert this meal plan text into a structured JSON format.
 
 USER PROFILE:
@@ -119,7 +125,7 @@ Convert this into a WeeklyMealPlan object with the following structure:
   "overview": "Brief summary of the plan",
   "days": [
     {
-      "day": "Day name (e.g., 'Monday', 'Day 1')",
+      "day": "Day name",
       "targetCalories": estimated_total_calories_for_day,
       "meals": [
         {
@@ -129,11 +135,7 @@ Convert this into a WeeklyMealPlan object with the following structure:
             "calories": estimated_calories,
             "ingredients": ["Ingredient 1", "Ingredient 2"],
             "instructions": ["Step 1", "Step 2"],
-            "macros": {
-              "protein": estimated_grams,
-              "carbs": estimated_grams,
-              "fat": estimated_grams
-            }
+            "macros": { "protein": grams, "carbs": grams, "fat": grams }
           }
         }
       ]
@@ -146,14 +148,13 @@ IMPORTANT:
 - Estimate calories and macros if not provided
 - Infer meal types from timing or context
 - If days are not named, use "Day 1", "Day 2", etc.
-- Keep all original ingredient lists and instructions
-- Return ONLY valid JSON, no markdown or explanation`;
+- Keep all original ingredient lists and instructions`;
 
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const jsonText = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
-      return JSON.parse(jsonText);
+      const { data } = await ai.generateStructuredOutput({
+        prompt,
+        taskType: 'custom_program_parse',
+      });
+      return data;
     } catch (error) {
       logger.error('Nutrition plan parsing failed', error as Error);
       throw new Error('Failed to parse nutrition plan');
@@ -161,12 +162,11 @@ IMPORTANT:
   }
 
   /**
-   * Validate a custom program (Free tier)
+   * Validate a custom program.
+   * Routes to Claude Opus for safety validation.
    */
   static async validateProgram(program: any, type: 'training' | 'nutrition', userProfile: any): Promise<any> {
     try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
-
       const prompt = type === 'training'
         ? `You are a fitness safety validator. Review this training program for basic safety issues.
 
@@ -187,13 +187,7 @@ Provide validation feedback in this JSON structure:
   "isApproved": true/false
 }
 
-Focus on:
-- Safety for user's conditions/injuries
-- Missing muscle groups
-- Volume appropriateness
-- Rest/recovery
-
-Return ONLY valid JSON.`
+Focus on: Safety for user's conditions/injuries, missing muscle groups, volume appropriateness, rest/recovery.`
         : `You are a nutrition safety validator. Review this meal plan for basic safety issues.
 
 USER PROFILE:
@@ -212,19 +206,13 @@ Provide validation feedback in this JSON structure:
   "isApproved": true/false
 }
 
-Focus on:
-- Calorie appropriateness for goal
-- Macro balance
-- Dietary restriction compliance
-- Missing nutrients
+Focus on: Calorie appropriateness for goal, macro balance, dietary restriction compliance, missing nutrients.`;
 
-Return ONLY valid JSON.`;
-
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const jsonText = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
-      return JSON.parse(jsonText);
+      const { data } = await ai.generateStructuredOutput({
+        prompt,
+        taskType: 'safety_validation',
+      });
+      return data;
     } catch (error) {
       logger.error('Program validation failed', error as Error);
       throw new Error('Failed to validate program');
@@ -232,12 +220,11 @@ Return ONLY valid JSON.`;
   }
 
   /**
-   * Comprehensive coaching feedback (Pro tier)
+   * Comprehensive coaching feedback.
+   * Routes to Claude Opus for expert-level coaching.
    */
   static async provideCoachingFeedback(program: any, type: 'training' | 'nutrition', userProfile: any): Promise<any> {
     try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
-
       const prompt = type === 'training'
         ? `You are an expert fitness coach. Provide comprehensive feedback on this training program.
 
@@ -257,18 +244,12 @@ Provide detailed coaching feedback in this JSON structure:
   "strengths": ["Detailed positive aspects"],
   "concerns": ["Detailed concerns with reasoning"],
   "suggestions": [
-    {
-      "day": day_index_or_null,
-      "suggestion": "Specific actionable suggestion",
-      "reason": "Why this matters"
-    }
+    { "day": day_index_or_null, "suggestion": "Specific actionable suggestion", "reason": "Why this matters" }
   ],
   "personalFit": "How well this matches user's profile and goals",
   "volumeAnalysis": "Assessment of training volume",
   "progressionPath": "Recommendations for progression over time"
-}
-
-Return ONLY valid JSON.`
+}`
         : `You are an expert nutrition coach. Provide comprehensive feedback on this meal plan.
 
 USER PROFILE:
@@ -286,24 +267,18 @@ Provide detailed coaching feedback in this JSON structure:
   "strengths": ["Detailed positive aspects"],
   "concerns": ["Detailed concerns with reasoning"],
   "suggestions": [
-    {
-      "day": day_index_or_null,
-      "suggestion": "Specific actionable suggestion",
-      "reason": "Why this matters"
-    }
+    { "day": day_index_or_null, "suggestion": "Specific actionable suggestion", "reason": "Why this matters" }
   ],
   "personalFit": "How well this matches user's profile and goals",
   "macroAnalysis": "Assessment of macro distribution",
   "timingOptimization": "Recommendations for nutrient timing"
-}
+}`;
 
-Return ONLY valid JSON.`;
-
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const jsonText = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
-      return JSON.parse(jsonText);
+      const { data } = await ai.generateStructuredOutput({
+        prompt,
+        taskType: 'coaching_feedback',
+      });
+      return data;
     } catch (error) {
       logger.error('Coaching feedback failed', error as Error);
       throw new Error('Failed to provide coaching feedback');

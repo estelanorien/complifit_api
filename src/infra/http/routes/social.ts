@@ -2,12 +2,13 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
+import { AuthenticatedRequest } from '../types.js';
 
 const postSchema = z.object({
   caption: z.string(),
   type: z.enum(['text', 'image', 'video', 'flex_workout']).default('text'),
   mediaUrl: z.string().optional(),
-  flexData: z.record(z.any()).optional(),
+  flexData: z.record(z.string(), z.unknown()).optional(),
   visibility: z.enum(['public', 'friends']).optional()
 });
 
@@ -48,7 +49,7 @@ export async function socialRoutes(app: FastifyInstance) {
   });
 
   app.get('/social/feed', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT * FROM social_posts 
        WHERE visibility = 'public' 
@@ -61,7 +62,7 @@ export async function socialRoutes(app: FastifyInstance) {
   });
 
   app.post('/social/posts', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = postSchema.parse(req.body);
     const id = `post_${Date.now()}`;
     await pool.query(
@@ -85,7 +86,7 @@ export async function socialRoutes(app: FastifyInstance) {
 
   // ========== SPOTTER RADAR - Nearby Users ==========
   app.get('/social/users/nearby', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const query = nearbySchema.parse(req.query);
     const { lat, lng, radiusKm } = query;
 
@@ -126,15 +127,16 @@ export async function socialRoutes(app: FastifyInstance) {
         .sort((a: any, b: any) => b.similarityScore - a.similarityScore); // Most similar first
 
       return reply.send(nearbyUsers);
-    } catch (e: any) {
-      req.log.error({ error: 'nearby users failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'Failed to find nearby users' });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'nearby users failed', message: error.message, requestId: req.id });
+      return reply.status(500).send({ error: error.message || 'Failed to find nearby users' });
     }
   });
 
   // Update user location
   app.post('/social/location', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = z.object({
       lat: z.number().min(-90).max(90),
       lng: z.number().min(-180).max(180)
@@ -156,7 +158,7 @@ export async function socialRoutes(app: FastifyInstance) {
   });
 
   app.post('/social/follow', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { targetId } = followSchema.parse(req.body);
 
     if (user.userId === targetId) {
@@ -173,7 +175,7 @@ export async function socialRoutes(app: FastifyInstance) {
   });
 
   app.get('/social/squad', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT u.id, u.username, u.email, up.profile_data->>'avatar' as avatar, f.created_at
        FROM friendships f
@@ -192,7 +194,7 @@ export async function socialRoutes(app: FastifyInstance) {
   });
 
   app.post('/social/match-contacts', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { hashes } = matchContactsSchema.parse(req.body);
 
     if (hashes.length === 0) return [];
@@ -228,7 +230,7 @@ export async function socialRoutes(app: FastifyInstance) {
 
   // Search Users
   app.get('/social/users/search', { preHandler: authGuard }, async (req) => {
-    const { q } = req.query as any;
+    const { q } = req.query as { q?: string };
     if (!q || q.length < 3) return [];
 
     const { rows } = await pool.query(

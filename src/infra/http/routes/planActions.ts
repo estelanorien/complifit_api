@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
+import { proGuard } from '../hooks/proGuard.js';
 import { pool } from '../../db/pool.js';
 import { AiService } from '../../../application/services/aiService.js';
 import { PlanService } from '../../../application/services/planService.js';
@@ -20,7 +21,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
     const aiService = new AiService();
 
     // Generate a complete Smart Plan (Training + Nutrition)
-    app.post('/plans/generate', { preHandler: authGuard }, withErrorHandler(async (req: any, reply) => {
+    app.post('/plans/generate', { preHandler: proGuard }, withErrorHandler(async (req: any, reply) => {
         const user = req.user;
         const body = z.object({
             profile: UserProfileSchema,
@@ -209,24 +210,25 @@ export async function planActionsRoutes(app: FastifyInstance) {
                 nutritionTextLength: nutText?.text?.length || 0,
                 requestId: req.requestId
             });
-        } catch (e: any) {
+        } catch (e: unknown) {
+            const error = e as Error;
             req.log.error({
                 error: 'AI generation failed',
-                message: e.message,
-                stack: e.stack,
-                name: e.name,
+                message: error.message,
+                stack: error.stack,
+                name: error.name,
                 requestId: req.requestId
             });
-            throw new Error(`AI generation failed: ${e.message}. Please check GEMINI_API_KEY configuration.`);
+            throw new Error(`AI generation failed: ${error.message}. Please check GEMINI_API_KEY configuration.`);
         }
 
         // Validate AI responses
         if (!trainText?.text) {
-            req.log.error({ error: 'Training plan response empty', requestId: (req as any).requestId });
+            req.log.error({ error: 'Training plan response empty', requestId: req.id });
             throw new Error('Training plan generation returned empty response. Please try again.');
         }
         if (!nutText?.text) {
-            req.log.error({ error: 'Nutrition plan response empty', requestId: (req as any).requestId });
+            req.log.error({ error: 'Nutrition plan response empty', requestId: req.id });
             throw new Error('Nutrition plan generation returned empty response. Please try again.');
         }
 
@@ -235,31 +237,33 @@ export async function planActionsRoutes(app: FastifyInstance) {
         try {
             const cleanedTrainText = PlanService.cleanGeminiJson(trainText.text);
             trainingPlan = JSON.parse(cleanedTrainText || '{}');
-        } catch (e: any) {
+        } catch (e: unknown) {
+            const error = e as Error;
             const rawPreview = trainText.text?.substring(0, 500) || 'No text received';
             req.log.error({
                 error: 'Training plan JSON parse failed',
-                parseError: e.message,
+                parseError: error.message,
                 rawTextPreview: rawPreview,
                 rawTextLength: trainText.text?.length || 0,
                 requestId: req.requestId
             });
-            throw new Error(`Failed to parse training plan: ${e.message}. Raw response preview: ${rawPreview.substring(0, 200)}`);
+            throw new Error(`Failed to parse training plan: ${error.message}. Raw response preview: ${rawPreview.substring(0, 200)}`);
         }
 
         try {
             const cleanedNutText = PlanService.cleanGeminiJson(nutText.text);
             nutritionPlan = JSON.parse(cleanedNutText || '{}');
-        } catch (e: any) {
+        } catch (e: unknown) {
+            const error = e as Error;
             const rawPreview = nutText.text?.substring(0, 500) || 'No text received';
             req.log.error({
                 error: 'Nutrition plan JSON parse failed',
-                parseError: e.message,
+                parseError: error.message,
                 rawTextPreview: rawPreview,
                 rawTextLength: nutText.text?.length || 0,
                 requestId: req.requestId
             });
-            throw new Error(`Failed to parse nutrition plan: ${e.message}. Raw response preview: ${rawPreview.substring(0, 200)}`);
+            throw new Error(`Failed to parse nutrition plan: ${error.message}. Raw response preview: ${rawPreview.substring(0, 200)}`);
         }
 
         // --- Validation & Normalization ---
@@ -321,8 +325,9 @@ export async function planActionsRoutes(app: FastifyInstance) {
                                     if (existing) {
                                         Object.assign(meal.recipe, existing);
                                     }
-                                } catch (e: any) {
-                                    req.log.warn({ error: 'Failed to check existing recipe', mealName, requestId: (req as any).requestId });
+                                } catch (e: unknown) {
+                                    const error = e as Error;
+                                    req.log.warn({ error: 'Failed to check existing recipe', mealName, requestId: req.id });
                                 }
                             }
 
@@ -414,7 +419,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
                     throw new Error(`Failed to save plan: ${dbError.message || 'Database error'}`);
                 }
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
             // Re-throw if it's already a user-friendly error
             throw e;
         } finally {
@@ -437,7 +442,7 @@ export async function planActionsRoutes(app: FastifyInstance) {
             const result = await PlanService.savePlanToDb(client, user.userId, body.training, body.nutrition, body.startDate);
             await client.query('COMMIT');
             return reply.send({ success: true, ...result });
-        } catch (e: any) {
+        } catch (e: unknown) {
             await client.query('ROLLBACK');
             throw e;
         } finally {
@@ -507,9 +512,10 @@ export async function planActionsRoutes(app: FastifyInstance) {
 
                 return reply.send({ meal });
 
-            } catch (e: any) {
-                lastError = e.message;
-                req.log.warn({ msg: `Reroll attempt ${attempts} failed`, error: e.message });
+            } catch (e: unknown) {
+                const error = e as Error;
+                lastError = error.message;
+                req.log.warn({ msg: `Reroll attempt ${attempts} failed`, error: error.message });
                 if (attempts === MAX_RETRIES) {
                     req.log.error({ msg: "Reroll failed after retries", error: lastError });
                     throw new Error(`Failed to generate valid meal after ${MAX_RETRIES} attempts: ${lastError}`);

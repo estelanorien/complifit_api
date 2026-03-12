@@ -1,8 +1,8 @@
-
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { pool } from '../../db/pool.js';
 import { authGuard } from '../hooks/auth.js';
+import { AuthenticatedRequest } from '../types.js';
 
 // Hardcoded Shop Inventory
 const SHOP_ITEMS = [
@@ -28,7 +28,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
 
   // 2. Get User's Owned Inventory
   app.get('/shop/my-inventory', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
 
     const result = await pool.query(
       `SELECT inventory FROM profiles WHERE user_id = $1`,
@@ -41,7 +41,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
 
   // 3. Purchase Item
   app.post('/shop/purchase', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { itemId } = purchaseSchema.parse(req.body);
 
     const item = SHOP_ITEMS.find(i => i.id === itemId);
@@ -112,7 +112,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
 
   // 4. Get User's Inventory Transaction History
   app.get('/inventory/transactions', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { limit = '20' } = req.query as { limit?: string };
     const limitNum = parseInt(limit, 10) || 20;
 
@@ -141,9 +141,61 @@ export async function inventoryRoutes(app: FastifyInstance) {
     return { items: SHOP_ITEMS };
   });
 
+  // Consume an inventory item
+  app.post('/inventory/consume', { preHandler: authGuard }, async (req, reply) => {
+    const user = (req as AuthenticatedRequest).user;
+    const body = z.object({
+      itemId: z.string(),
+      quantity: z.number().int().positive().default(1)
+    }).parse(req.body);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const { rows } = await client.query(
+        `SELECT profile_data FROM user_profiles WHERE user_id = $1 FOR UPDATE`,
+        [user.userId]
+      );
+
+      const profileData = rows[0]?.profile_data || {};
+      const inventory = profileData.inventory || {};
+      const current = inventory[body.itemId] || 0;
+
+      if (current < body.quantity) {
+        await client.query('ROLLBACK');
+        return reply.status(400).send({ error: 'Insufficient quantity' });
+      }
+
+      inventory[body.itemId] = current - body.quantity;
+      if (inventory[body.itemId] <= 0) delete inventory[body.itemId];
+      profileData.inventory = inventory;
+
+      await client.query(
+        `UPDATE user_profiles SET profile_data = $1::jsonb, updated_at = now() WHERE user_id = $2`,
+        [JSON.stringify(profileData), user.userId]
+      );
+
+      await client.query('COMMIT');
+
+      return reply.send({
+        itemId: body.itemId,
+        quantity: body.quantity,
+        remaining: inventory[body.itemId] || 0,
+        inventory
+      });
+    } catch (e: any) {
+      await client.query('ROLLBACK');
+      req.log.error(e);
+      return reply.status(500).send({ error: e.message || 'Consume failed' });
+    } finally {
+      client.release();
+    }
+  });
+
   // Get user's current inventory
   app.get('/inventory', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
 
     try {
       const { rows } = await pool.query(
@@ -160,8 +212,9 @@ export async function inventoryRoutes(app: FastifyInstance) {
         inventory: profile.inventory || [],
         economy: profile.economy || { coins: 0, gems: 0 }
       });
-    } catch (e: any) {
-      req.log.error({ error: 'Inventory fetch failed', e, requestId: (req as any).requestId });
+    } catch (e: unknown) {
+      const error = e as Error;
+      req.log.error({ error: 'Inventory fetch failed', message: error.message, requestId: req.id });
       return reply.status(500).send({ error: 'Failed to fetch inventory' });
     }
   });

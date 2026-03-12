@@ -19,6 +19,7 @@ import { adminRoutes } from './routes/admin.js';
 import { calorieBankRoutes } from './routes/calorieBank.js';
 import { trainingRoutes } from './routes/training.js';
 import { nutritionRoutes } from './routes/nutrition.js';
+import { groceryRoutes } from './routes/grocery.js';
 import { rehabRoutes } from './routes/rehab.js';
 import { coachRoutes } from './routes/coach.js';
 import { behaviorRoutes } from './routes/behavior.js';
@@ -33,6 +34,9 @@ import { notificationRoutes } from './routes/notifications.js';
 import { socialAuthRoutes } from './routes/socialAuth.js';
 import { customProgramRoutes } from './routes/customPrograms.js';
 import { jobRoutes } from './routes/jobs.js';
+import { generationRoutes } from './routes/generation.js';
+import videoAdminRoutes from './routes/videoAdmin.js';
+import { smartPlanRoutes } from './routes/smartPlan.js';
 import { requestLogger, responseLogger, errorLogger } from './hooks/requestLogger.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errors.js';
@@ -63,7 +67,7 @@ export function buildServer() {
         }),
       },
     },
-    bodyLimit: 10 * 1024 * 1024,
+    bodyLimit: 2 * 1024 * 1024, // 2MB - reduced from 10MB to prevent DoS
     requestTimeout: 300000, // 5 minutes timeout
     requestIdHeader: 'x-request-id', // Use custom header for request ID
     requestIdLogLabel: 'requestId',
@@ -132,12 +136,14 @@ export function buildServer() {
   app.register(async function (app) {
     registerAiRateLimit(app);
     app.register(aiRoutes);
+    app.register(smartPlanRoutes);
   }, { prefix: '/api' });
 
   // Admin routes with admin rate limiting
   app.register(async function (app) {
     registerAdminRateLimit(app);
     app.register(adminRoutes);
+    app.register(videoAdminRoutes);
   }, { prefix: '/api' });
 
   // Other routes (use global rate limiting)
@@ -153,6 +159,7 @@ export function buildServer() {
   app.register(plansRoutes, { prefix: '/api' });
   app.register(trainingRoutes, { prefix: '/api' });
   app.register(nutritionRoutes, { prefix: '/api' });
+  app.register(groceryRoutes, { prefix: '/api' });
   app.register(rehabRoutes, { prefix: '/api' });
   app.register(guardianRoutes, { prefix: '/api' });
   app.register(calorieBankRoutes, { prefix: '/api' });
@@ -168,6 +175,7 @@ export function buildServer() {
   app.register(subscriptionRoutes, { prefix: '/api' });
   app.register(customProgramRoutes, { prefix: '/api' });
   app.register(jobRoutes, { prefix: '/api' });
+  app.register(generationRoutes, { prefix: '/api' });
 
   return app;
 }

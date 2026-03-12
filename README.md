@@ -1,4 +1,6 @@
-# Vitality API
+# Complifit API (Vitality API)
+
+> **English:** AI-powered backend API for the Complifit fitness and nutrition platform. Built with Fastify + TypeScript + PostgreSQL. Provides plan generation (training & nutrition), asset management, AI content generation (Gemini), background job processing, JWT authentication, and YouTube video upload. See `.env.example` for required configuration.
 
 Vitality API, fitness ve beslenme planları oluşturmak için AI destekli bir backend servisidir. Fastify framework'ü üzerine kurulmuş, TypeScript ile yazılmıştır.
 

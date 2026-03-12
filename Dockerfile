@@ -1,6 +1,9 @@
 # Production image
 FROM node:20-alpine
 
+# Install ffmpeg for Phase 2 video assembly (VideoAssemblyService)
+RUN apk add --no-cache ffmpeg
+
 WORKDIR /app
 
 # Copy package files
@@ -19,7 +22,7 @@ RUN npm run build
 EXPOSE 8080
 
 # Clean dev dependencies for a smaller image
-# RUN npm prune --production
+RUN npm prune --production
 
 # Set Node.js memory options
 ENV NODE_OPTIONS="--max-old-space-size=1536"

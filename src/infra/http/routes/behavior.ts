@@ -2,10 +2,11 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
+import { AuthenticatedRequest } from '../types.js';
 
 export async function behaviorRoutes(app: FastifyInstance) {
   const configSchema = z.object({
-    config: z.record(z.any()),
+    config: z.record(z.string(), z.unknown()),
     label: z.string().optional(),
     activate: z.boolean().optional()
   });
@@ -14,8 +15,8 @@ export async function behaviorRoutes(app: FastifyInstance) {
     configId: z.string().uuid().optional(),
     source: z.string(),
     eventType: z.string(),
-    payload: z.any().optional(),
-    outcome: z.any().optional()
+    payload: z.unknown().optional(),
+    outcome: z.unknown().optional()
   });
 
   const listEventsSchema = z.object({
@@ -23,7 +24,7 @@ export async function behaviorRoutes(app: FastifyInstance) {
   });
 
   app.get('/behavior/config', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT id, config, active, label, created_at, updated_at
        FROM behavior_configs
@@ -45,7 +46,7 @@ export async function behaviorRoutes(app: FastifyInstance) {
   });
 
   app.put('/behavior/config', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = configSchema.parse(req.body);
     const activate = body.activate ?? true;
     const client = await pool.connect();
@@ -73,17 +74,18 @@ export async function behaviorRoutes(app: FastifyInstance) {
       );
       await client.query('COMMIT');
       return reply.send(rows[0]);
-    } catch (e: any) {
+    } catch (e: unknown) {
       await client.query('ROLLBACK');
-      req.log.error({ error: 'behavior config save failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: e.message || 'Behavior config save failed' });
+      const error = e as Error;
+      req.log.error({ error: 'behavior config save failed', message: error.message, requestId: req.id });
+      return reply.status(500).send({ error: error.message || 'Behavior config save failed' });
     } finally {
       client.release();
     }
   });
 
   app.get('/behavior/events', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const query = listEventsSchema.parse(req.query ?? {});
     const { rows } = await pool.query(
       `SELECT id, config_id, source, event_type, payload, outcome, created_at
@@ -105,7 +107,7 @@ export async function behaviorRoutes(app: FastifyInstance) {
   });
 
   app.post('/behavior/events', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = eventSchema.parse(req.body);
     let configId = body.configId || null;
 
@@ -147,7 +149,7 @@ export async function behaviorRoutes(app: FastifyInstance) {
     stakeAmount: z.number().min(0),
     targetValue: z.number().min(1),
     startDate: z.string().datetime().optional(), // ISO string
-    metadata: z.any().optional()
+    metadata: z.record(z.string(), z.unknown()).optional()
   });
 
   const resolvePledgeSchema = z.object({
@@ -155,7 +157,7 @@ export async function behaviorRoutes(app: FastifyInstance) {
   });
 
   app.post('/behavior/pledges', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const body = createPledgeSchema.parse(req.body);
 
     const { rows } = await pool.query(
@@ -178,7 +180,7 @@ export async function behaviorRoutes(app: FastifyInstance) {
   });
 
   app.get('/behavior/pledges/active', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT * FROM user_pledges 
        WHERE user_id = $1 AND status = 'active'
@@ -201,8 +203,8 @@ export async function behaviorRoutes(app: FastifyInstance) {
   });
 
   app.post('/behavior/pledges/:id/resolve', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
-    const { id } = req.params as any;
+    const user = (req as AuthenticatedRequest).user;
+    const { id } = req.params as { id: string };
     const body = resolvePledgeSchema.parse(req.body);
 
     const { rows } = await pool.query(

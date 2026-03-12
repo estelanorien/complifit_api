@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authGuard } from '../hooks/auth.js';
 import { pool } from '../../db/pool.js';
+import { AuthenticatedRequest } from '../types.js';
 
 const foodSchema = z.object({
   id: z.string().optional(),
@@ -16,7 +17,7 @@ const foodSchema = z.object({
   timestamp: z.coerce.date().optional(),
   linkedPlanItemId: z.string().optional().nullable(),
   imageUrl: z.string().optional().nullable(),
-  metadata: z.record(z.any()).optional()
+  metadata: z.record(z.string(), z.unknown()).optional()
 });
 
 const exerciseSchema = z.object({
@@ -24,10 +25,10 @@ const exerciseSchema = z.object({
   name: z.string(),
   date: z.string(),
   time: z.string().optional(),
-  sets: z.array(z.record(z.any())).optional(),
+  sets: z.array(z.record(z.string(), z.unknown())).optional(),
   location: z.string().optional(),
   estimatedCalories: z.coerce.number().optional(),
-  verification: z.record(z.any()).optional(),
+  verification: z.record(z.string(), z.unknown()).optional(),
   isNegotiated: z.boolean().optional()
 });
 
@@ -44,9 +45,9 @@ const extraExerciseSchema = z.object({
   name: z.string(),
   date: z.string(),
   time: z.string().optional(),
-  sets: z.array(z.record(z.any())).optional(),
+  sets: z.array(z.record(z.string(), z.unknown())).optional(),
   location: z.string().optional(),
-  verification: z.record(z.any()).optional(),
+  verification: z.record(z.string(), z.unknown()).optional(),
   estimatedCalories: z.coerce.number().optional()
 });
 
@@ -60,7 +61,7 @@ const weightSchema = z.object({
 export async function logsRoutes(app: FastifyInstance) {
   // FOOD LOG
   app.get('/logs/food', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT id, name, calories, protein, carbs, fat, status, match_accuracy, timestamp, linked_plan_item_id, image_url, metadata
        FROM food_logs_simple WHERE user_id = $1 ORDER BY timestamp DESC`,
@@ -87,7 +88,7 @@ export async function logsRoutes(app: FastifyInstance) {
   };
 
   app.post('/logs/food', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const items = z.array(foodSchema).parse(req.body);
     const client = await pool.connect();
     try {
@@ -136,7 +137,7 @@ export async function logsRoutes(app: FastifyInstance) {
 
       await client.query('COMMIT');
       return reply.send({ success: true, items: updatedItems });
-    } catch (e: any) {
+    } catch (e: unknown) {
       await client.query('ROLLBACK');
       req.log.error({ error: 'Food log sync failed', e });
       return reply.status(500).send({ error: 'Failed to sync food log' });
@@ -154,7 +155,7 @@ export async function logsRoutes(app: FastifyInstance) {
 
   // EXERCISE LOG
   app.get('/logs/exercise', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     try {
       // Try to select with time column (if migration 015 has run)
       const { rows } = await pool.query(
@@ -198,7 +199,7 @@ export async function logsRoutes(app: FastifyInstance) {
   });
 
   app.post('/logs/exercise', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const items = z.array(exerciseSchema).parse(req.body);
     const client = await pool.connect();
     try {
@@ -243,7 +244,7 @@ export async function logsRoutes(app: FastifyInstance) {
 
       await client.query('COMMIT');
       return reply.send({ success: true, items: updatedItems });
-    } catch (e: any) {
+    } catch (e: unknown) {
       await client.query('ROLLBACK');
       req.log.error({ error: 'Exercise log sync failed', e });
       return reply.status(500).send({ error: 'Failed to sync exercise log' });
@@ -254,7 +255,7 @@ export async function logsRoutes(app: FastifyInstance) {
 
   // PLAN COMPLETION LOG
   app.get('/logs/plan-completion', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT id, plan_id, day_index, meal_index, date FROM plan_completion_logs WHERE user_id = $1 ORDER BY date DESC`,
       [user.userId]
@@ -269,7 +270,7 @@ export async function logsRoutes(app: FastifyInstance) {
   });
 
   app.post('/logs/plan-completion', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const items = z.array(planCompletionSchema).parse(req.body);
     const client = await pool.connect();
     try {
@@ -310,7 +311,7 @@ export async function logsRoutes(app: FastifyInstance) {
 
       await client.query('COMMIT');
       return reply.send({ success: true, items: updatedItems });
-    } catch (e: any) {
+    } catch (e: unknown) {
       await client.query('ROLLBACK');
       req.log.error({ error: 'Plan completion log sync failed', e });
       return reply.status(500).send({ error: 'Failed to sync plan completion log' });
@@ -321,7 +322,7 @@ export async function logsRoutes(app: FastifyInstance) {
 
   // EXTRA EXERCISE LOG
   app.get('/logs/extra-exercise', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT id, name, date, time, sets, location, verification, estimated_calories FROM extra_exercise_logs WHERE user_id = $1 ORDER BY date DESC, time DESC NULLS LAST`,
       [user.userId]
@@ -339,7 +340,7 @@ export async function logsRoutes(app: FastifyInstance) {
   });
 
   app.post('/logs/extra-exercise', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const items = z.array(extraExerciseSchema).parse(req.body);
     const client = await pool.connect();
     try {
@@ -383,7 +384,7 @@ export async function logsRoutes(app: FastifyInstance) {
 
       await client.query('COMMIT');
       return reply.send({ success: true, items: updatedItems });
-    } catch (e: any) {
+    } catch (e: unknown) {
       await client.query('ROLLBACK');
       req.log.error({ error: 'Extra exercise log sync failed', e });
       return reply.status(500).send({ error: 'Failed to sync extra exercise log' });
@@ -394,7 +395,7 @@ export async function logsRoutes(app: FastifyInstance) {
 
   // DAY CONCLUSION
   app.post('/logs/conclude-day', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const schema = z.object({
       date: z.string(),
       totalCaloriesConsumed: z.number().default(0),
@@ -405,7 +406,7 @@ export async function logsRoutes(app: FastifyInstance) {
       streakCount: z.number().default(0),
       xpEarned: z.number().default(0),
       coinsEarned: z.number().default(0),
-      summaryData: z.any().optional()
+      summaryData: z.unknown().optional()
     });
 
     try {
@@ -430,15 +431,16 @@ export async function logsRoutes(app: FastifyInstance) {
       );
 
       return reply.send({ success: true });
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'Day conclusion save failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: isProduction ? 'Failed to save day conclusion' : (e.message || 'Day conclusion save failed') });
+      req.log.error({ error: 'Day conclusion save failed', e, requestId: req.id });
+      return reply.status(500).send({ error: isProduction ? 'Failed to save day conclusion' : (error.message || 'Day conclusion save failed') });
     }
   });
 
   app.get('/logs/day-conclusion/:date', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { date } = req.params as { date: string };
 
     try {
@@ -464,15 +466,16 @@ export async function logsRoutes(app: FastifyInstance) {
         summaryData: rows[0].summary_data,
         createdAt: rows[0].created_at
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'Day conclusion fetch failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: isProduction ? 'Failed to fetch day conclusion' : (e.message || 'Day conclusion fetch failed') });
+      req.log.error({ error: 'Day conclusion fetch failed', e, requestId: req.id });
+      return reply.status(500).send({ error: isProduction ? 'Failed to fetch day conclusion' : (error.message || 'Day conclusion fetch failed') });
     }
   });
 
   app.delete('/logs/day-conclusion/:date', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { date } = req.params as { date: string };
 
     try {
@@ -481,7 +484,7 @@ export async function logsRoutes(app: FastifyInstance) {
         [user.userId, date]
       );
       return reply.send({ success: true });
-    } catch (e: any) {
+    } catch (e: unknown) {
       req.log.error({ error: 'Day conclusion delete failed', e });
       return reply.status(500).send({ error: 'Failed to delete day conclusion' });
     }
@@ -489,7 +492,7 @@ export async function logsRoutes(app: FastifyInstance) {
 
   // Get current streak count from database
   app.get('/logs/streak-count', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
 
     try {
       const { rows } = await pool.query(
@@ -500,16 +503,17 @@ export async function logsRoutes(app: FastifyInstance) {
       );
 
       return reply.send({ streakCount: parseInt(rows[0]?.count || '0') });
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e as Error;
       const isProduction = process.env.NODE_ENV === 'production';
-      req.log.error({ error: 'Streak count fetch failed', e, requestId: (req as any).requestId });
-      return reply.status(500).send({ error: isProduction ? 'Failed to fetch streak count' : (e.message || 'Streak count fetch failed') });
+      req.log.error({ error: 'Streak count fetch failed', e, requestId: req.id });
+      return reply.status(500).send({ error: isProduction ? 'Failed to fetch streak count' : (error.message || 'Streak count fetch failed') });
     }
   });
 
   // WEIGHT LOG
   app.get('/logs/weight', { preHandler: authGuard }, async (req) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const { rows } = await pool.query(
       `SELECT id, weight, unit, date FROM weight_logs WHERE user_id = $1 ORDER BY date DESC, created_at DESC LIMIT 100`,
       [user.userId]
@@ -523,7 +527,7 @@ export async function logsRoutes(app: FastifyInstance) {
   });
 
   app.post('/logs/weight', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const items = z.array(weightSchema).parse(req.body);
     const client = await pool.connect();
     try {
@@ -563,7 +567,7 @@ export async function logsRoutes(app: FastifyInstance) {
 
       await client.query('COMMIT');
       return reply.send({ success: true, items: updatedItems });
-    } catch (e: any) {
+    } catch (e: unknown) {
       await client.query('ROLLBACK');
       req.log.error({ error: 'Weight log sync failed', e });
       return reply.status(500).send({ error: 'Failed to sync weight log' });
@@ -584,7 +588,7 @@ export async function logsRoutes(app: FastifyInstance) {
   });
 
   app.post('/logs/health-metrics', { preHandler: authGuard }, async (req, reply) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     try {
       const data = healthMetricsSchema.parse(req.body);
 
@@ -603,7 +607,7 @@ export async function logsRoutes(app: FastifyInstance) {
       );
 
       return reply.send({ success: true });
-    } catch (e: any) {
+    } catch (e: unknown) {
       req.log.error({ error: 'Health metrics save failed', e });
       return reply.status(500).send({ error: 'Failed to save health metrics' });
     }
