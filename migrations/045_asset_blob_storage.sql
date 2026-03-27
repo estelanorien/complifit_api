@@ -14,7 +14,6 @@ ADD COLUMN IF NOT EXISTS hash TEXT, -- MD5 of the content for uniqueness checks
 ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb, -- Equipment, prompt used, etc.
 ADD COLUMN IF NOT EXISTS generation_time_ms INTEGER;
 
--- 3. HARD RESET: Truncate existing data to start the "Clean Slate"
--- As agreed in the implementation plan v3/v4 to fix all consistency issues.
-TRUNCATE TABLE cached_asset_meta, cached_assets CASCADE;
--- Note: cascading truncate will also clear asset_blob_storage if keys existed, ensuring a fresh start.
+-- 3. NOTE: TRUNCATE removed for production safety.
+-- If a clean slate is needed, run manually:
+-- TRUNCATE TABLE cached_asset_meta, cached_assets CASCADE;

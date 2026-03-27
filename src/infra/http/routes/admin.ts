@@ -325,11 +325,10 @@ export async function adminRoutes(app: FastifyInstance) {
 
 
 
-  // Simple seed stubs (extend as needed)
+  // Seed endpoint - returns 501 until seed logic is implemented
   app.post('/admin/seed', { preHandler: adminGuard }, async (req, reply) => {
     seedSchema.parse(req.body || {});
-    // TODO: Implement actual seed logic
-    return reply.send({ success: true });
+    return reply.status(501).send({ success: false, error: 'Seed logic not yet implemented' });
   });
 
   // Get system blueprints

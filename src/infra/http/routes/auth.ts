@@ -34,8 +34,8 @@ const refreshSchema = z.object({
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(6),
   newPassword: z.string().min(8).regex(
-    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/,
-    'Password must contain at least one uppercase letter, one lowercase letter, and one number'
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/,
+    'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
   )
 });
 
@@ -47,12 +47,7 @@ type ChangePasswordBody = z.infer<typeof changePasswordSchema>;
 export async function authRoutes(app: FastifyInstance) {
   app.post('/auth/signup', async (req, reply) => {
     try {
-      const body = z.object({
-        email: z.string().email().toLowerCase().trim(),
-        password: z.string().min(8).regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, 'Password must contain at least one uppercase letter, one lowercase letter, and one number'),
-        fullName: z.string().optional(),
-        username: z.string().optional()
-      }).parse(req.body);
+      const body = signupSchema.parse(req.body);
 
       const { user, token } = await auth.signUp(body.email, body.password, body.fullName, body.username);
 

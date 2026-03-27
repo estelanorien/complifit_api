@@ -21,9 +21,8 @@ export async function locationRoutes(app: FastifyInstance) {
       // For now, we'll use a simple geocoding approach or return mock data
       // In production, integrate with Google Places API or similar service
       
-      // Placeholder: Return empty array for now
-      // TODO: Integrate with Google Places API or OpenStreetMap Nominatim
-      return reply.send([]);
+      // Location service not yet integrated - return 501 to indicate feature is planned
+      return reply.status(501).send({ error: 'Nearby places feature coming soon', places: [] });
     } catch (e: unknown) {
       const error = e as Error;
       req.log.error({ error: 'nearby-places failed', message: error.message, requestId: req.id });
@@ -40,12 +39,8 @@ export async function locationRoutes(app: FastifyInstance) {
     try {
       const { query } = body;
       
-      // Use Google Geocoding API if available
-      // For now, return empty array
-      // TODO: Integrate with Google Geocoding API or OpenStreetMap Nominatim
-      
-      // Placeholder implementation
-      return reply.send([]);
+      // Geocoding service not yet integrated - return 501 to indicate feature is planned
+      return reply.status(501).send({ error: 'Geocoding feature coming soon', results: [] });
     } catch (e: unknown) {
       const error = e as Error;
       req.log.error({ error: 'geocode failed', message: error.message, requestId: req.id });
