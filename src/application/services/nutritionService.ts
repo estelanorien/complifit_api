@@ -312,12 +312,9 @@ export async function generateNutritionPlan(params: GenerateNutritionPlanParams)
       } catch (e: any) {
         logger.error(`[NutritionService] Batch (Day ${i}) Attempt ${attempts} failed`, e, { day: i, attempts, maxRetries: MAX_RETRIES });
         if (attempts === MAX_RETRIES) {
-          // If we ran out of retries, we might have to accept a partial/broken result OR fail hard.
-          // Failing hard is safer than showing broken data.
+          // If we ran out of retries, throw an error to prevent partial/broken data
           logger.error('[NutritionService] CRITICAL: Max retries reached for batch generation.', undefined, { day: i, attempts, maxRetries: MAX_RETRIES });
-          // Optional: fallback to manual "simple" recipe or just throw
-          // For now, let's throw to allow the outer handler to deal with it (or user gets an error)
-          // But wait, user wants "automatic" fix.
+          throw new Error(`Failed to generate nutrition plan batch after maximum retries (Day ${i})`);
         }
       }
     }

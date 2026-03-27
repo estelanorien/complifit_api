@@ -224,8 +224,15 @@ export class VideoOrchestrator {
         const exerciseName = meta.name || assetKey.split(':').pop() || 'Exercise';
         const coachName = coachId === 'atlas' ? 'Atlas' : 'Nova';
 
+        // Generate signed URL from GCS
+        const bucket = storage.bucket(GCS_BUCKET);
+        const [signedUrl] = await bucket.file(gcsPath.replace(`gs://${GCS_BUCKET}/`, '')).getSignedUrl({
+          action: 'read',
+          expires: Date.now() + 30 * 60 * 1000 // 30 min
+        });
+
         const ytResult = await uploadToYouTube({
-          videoUrl: outputPath, // Upload from local file before cleanup
+          videoUrl: signedUrl,
           title: `${exerciseName} - ${coachName} (${lang.toUpperCase()})`,
           description: `Professional exercise tutorial by Coach ${coachName}.\n\n` +
             `Exercise: ${exerciseName}\n` +

@@ -26,8 +26,8 @@ const pool = new pg.Pool({
     ssl: process.env.DATABASE_URL?.includes('localhost') ? false : { rejectUnauthorized: false }
 });
 
-const ATLAS_PATH = 'C:/Users/rmkoc/.gemini/antigravity/brain/a50c7246-896e-48e3-92b6-f034bf520830/coach_atlas_variation_2_1768082210632.png';
-const NOVA_PATH = 'C:/Users/rmkoc/.gemini/antigravity/brain/a50c7246-896e-48e3-92b6-f034bf520830/coach_nova_variation_2_1768082224743.png';
+const ATLAS_PATH = path.resolve(__dirname, '..', 'src', 'assets', 'coach_atlas_ref.png');
+const NOVA_PATH = path.resolve(__dirname, '..', 'src', 'assets', 'coach_nova_ref.png');
 
 async function seed() {
     const client = await pool.connect();
@@ -37,7 +37,7 @@ async function seed() {
         // 1. Atlas
         if (fs.existsSync(ATLAS_PATH)) {
             const buffer = fs.readFileSync(ATLAS_PATH);
-            const base64 = `data:image/png;base64,${buffer.toString('base64')}`;
+            const base64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
             await client.query(`
                 INSERT INTO cached_assets (key, value, asset_type, status)
                 VALUES ($1, $2, 'image', 'active')
@@ -51,7 +51,7 @@ async function seed() {
         // 2. Nova
         if (fs.existsSync(NOVA_PATH)) {
             const buffer = fs.readFileSync(NOVA_PATH);
-            const base64 = `data:image/png;base64,${buffer.toString('base64')}`;
+            const base64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
             await client.query(`
                 INSERT INTO cached_assets (key, value, asset_type, status)
                 VALUES ($1, $2, 'image', 'active')

@@ -12,8 +12,11 @@ $DestUser = "postgres"
 $DestDB = "vitality_db"
 $DestPort = "5432"
 
-# Password prompt or set env var
-$env:PGPASSWORD = "6fk23az4_F"
+# Set PGPASSWORD from environment variable or prompt user
+if (-not $env:PGPASSWORD) {
+    $securePassword = Read-Host -AsSecureString "Enter PostgreSQL password for destination server"
+    $env:PGPASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToCoTaskMemUnicode($securePassword))
+}
 
 # Check for tools
 if (!(Get-Command pg_dump -ErrorAction SilentlyContinue)) {

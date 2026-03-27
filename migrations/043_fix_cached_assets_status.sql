@@ -8,6 +8,7 @@ ALTER TABLE cached_assets ADD CONSTRAINT cached_assets_status_check CHECK (
         'draft',
         'auto',
         'generating',
-        'rejected'
+        'rejected',
+        'failed'
     )
 );

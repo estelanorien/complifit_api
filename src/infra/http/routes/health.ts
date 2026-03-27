@@ -121,6 +121,68 @@ export async function healthRoutes(app: FastifyInstance) {
     });
   });
 
+  // TEMPORARY: Pre-batch diagnostic endpoint (remove after verification)
+  app.get('/health/preflight', async (req, reply) => {
+    const results: Record<string, any> = {};
+
+    try {
+      // 1. Coach reference images
+      const coachRes = await pool.query(
+        "SELECT key, length(value) as value_len, status FROM cached_assets WHERE key IN ('system_coach_atlas_ref', 'system_coach_nova_ref')"
+      );
+      results.coachImages = coachRes.rows.length > 0
+        ? coachRes.rows.map((r: any) => ({ key: r.key, sizeKB: Math.round(r.value_len / 1024), status: r.status }))
+        : 'NOT_FOUND';
+
+      // 2. Status constraint check
+      const constraintRes = await pool.query(
+        "SELECT pg_get_constraintdef(oid) as def FROM pg_constraint WHERE conname = 'cached_assets_status_check'"
+      );
+      results.statusConstraint = constraintRes.rows.length > 0
+        ? { exists: true, includesFailed: constraintRes.rows[0].def.includes("'failed'"), def: constraintRes.rows[0].def }
+        : { exists: false };
+
+      // 3. Migrations applied
+      try {
+        const migRes = await pool.query("SELECT count(*) as cnt FROM _migrations");
+        results.migrationsApplied = parseInt(migRes.rows[0].cnt);
+      } catch { results.migrationsApplied = 'NO_TRACKING_TABLE'; }
+
+      // 4. Key tables check
+      const tablesRes = await pool.query(`
+        SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+        AND tablename IN ('cached_assets','asset_blob_storage','cached_asset_meta',
+          'video_jobs','video_source_clips','localized_videos','content_translations',
+          'translation_jobs','generation_jobs','pipeline_status','dead_letter_queue')
+      `);
+      const found = tablesRes.rows.map((r: any) => r.tablename);
+      const required = ['cached_assets','asset_blob_storage','cached_asset_meta','video_jobs',
+        'video_source_clips','localized_videos','content_translations','translation_jobs',
+        'generation_jobs','pipeline_status','dead_letter_queue'];
+      results.tables = { found: found.length, missing: required.filter(t => !found.includes(t)) };
+
+      // 5. YouTube env check
+      results.youtube = {
+        clientId: !!process.env.YOUTUBE_CLIENT_ID,
+        clientSecret: !!process.env.YOUTUBE_CLIENT_SECRET,
+        refreshToken: !!process.env.YOUTUBE_REFRESH_TOKEN
+      };
+
+      // 6. GCS check
+      results.gcs = {
+        credentialsFile: !!process.env.GOOGLE_APPLICATION_CREDENTIALS,
+        bucket: process.env.GCS_VIDEO_BUCKET || 'vitality-videos (default)'
+      };
+
+      // 7. Anthropic key
+      results.anthropicKey = !!process.env.ANTHROPIC_API_KEY;
+
+      return reply.send({ preflight: 'ok', results });
+    } catch (e: any) {
+      return reply.status(500).send({ preflight: 'error', message: e.message });
+    }
+  });
+
   // ✅ YENİ: Liveness probe endpoint (sadece "çalışıyor mu" kontrolü)
   app.get('/healthz', async (req, reply) => {
     return reply.status(200).send({ status: 'ok' });

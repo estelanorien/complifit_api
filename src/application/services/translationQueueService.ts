@@ -2,6 +2,7 @@
 import { pool } from '../../infra/db/pool.js';
 import { logger } from '../../infra/logger.js';
 import { AiService } from './aiService.js';
+import { retryManager } from './RetryManager.js';
 
 const aiService = new AiService();
 
@@ -113,7 +114,7 @@ export class TranslationQueueService {
                 } catch (err: any) {
                     logger.error(`[TranslationQueue] Job ${job.id} FAILED`, err);
 
-                    // Retry logic? For now just fail. V2.1 can add retries.
+                    // Mark job as failed in translation_jobs table
                     await pool.query(
                         `UPDATE translation_jobs SET status = 'failed', error_log = $1, updated_at = NOW() WHERE id = $2`,
                         [err.message, job.id]
@@ -122,6 +123,26 @@ export class TranslationQueueService {
                         `UPDATE cached_asset_meta SET translation_status = 'failed', translation_error = $1 WHERE key = $2`,
                         [err.message, job.asset_key]
                     );
+
+                    // Move to dead-letter queue for monitoring and manual retry
+                    try {
+                        await retryManager.moveToDeadLetter(
+                            job.id,                        // originalId
+                            'translation',                 // taskType
+                            job.asset_key,                 // entityKey
+                            {
+                                jobId: job.id,
+                                assetKey: job.asset_key,
+                                targetLanguages: job.target_languages
+                            },                             // payload
+                            err.message,                   // errorMessage
+                            err.stack || null,             // errorStack
+                            1                              // attemptCount (first attempt)
+                        );
+                        logger.info(`[TranslationQueue] Job ${job.id} moved to dead-letter queue for retry`);
+                    } catch (dlqErr: any) {
+                        logger.error(`[TranslationQueue] Failed to move job ${job.id} to dead-letter queue: ${dlqErr.message}`);
+                    }
                 }
 
             } catch (err) {

@@ -4,7 +4,10 @@ import path from 'path';
 
 const { Pool } = pg;
 
-const DATABASE_URL = "postgresql://postgres:6fk23az4_F@104.199.2.9:5432/vitality_db";
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+    throw new Error('DATABASE_URL environment variable is required');
+}
 
 const pool = new Pool({
     connectionString: DATABASE_URL,
